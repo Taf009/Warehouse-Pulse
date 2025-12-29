@@ -1,2 +1,6 @@
 streamlit
 pandas
+gspread
+gspread-dataframe
+google-auth
+fpdf2
