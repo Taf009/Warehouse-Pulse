@@ -26,21 +26,28 @@ COIL_MATERIALS = [
 
 LOCATIONS = ["Rack A1", "Rack A2", "Rack B1", "Rack B2", "Floor Zone C", "Receiving Dock"]
 
-# --- GOOGLE SHEETS ---
-gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-sh = gc.open_by_url(st.secrets["SHEET_URL"])
-inv_ws = sh.worksheet("Inventory")
-log_ws = sh.worksheet("Log")
+# --- INITIALIZE SESSION STATE ---
+if 'df' not in st.session_state:
+    # Connect to Google Sheets
+    gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+    sh = gc.open_by_url(st.secrets["SHEET_URL"])
+    inv_ws = sh.worksheet("Inventory")
 
-# Load Inventory
-try:
-    df = pd.DataFrame(inv_ws.get_all_records())
-    if df.empty or 'Coil_ID' not in df.columns:
-        df = pd.DataFrame(columns=["Coil_ID", "Material", "Footage", "Location", "Status"])
-except:
-    df = pd.DataFrame(columns=["Coil_ID", "Material", "Footage", "Location", "Status"])
+    try:
+        records = inv_ws.get_all_records()
+        st.session_state.df = pd.DataFrame(records)
+        if st.session_state.df.empty or 'Coil_ID' not in st.session_state.df.columns:
+            st.session_state.df = pd.DataFrame(columns=["Coil_ID", "Material", "Footage", "Location", "Status"])
+    except:
+        st.session_state.df = pd.DataFrame(columns=["Coil_ID", "Material", "Footage", "Location", "Status"])
+
+# Shortcut
+df = st.session_state.df
 
 def save_inventory():
+    gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+    sh = gc.open_by_url(st.secrets["SHEET_URL"])
+    inv_ws = sh.worksheet("Inventory")
     inv_ws.clear()
     inv_ws.update([df.columns.tolist()] + df.values.tolist())
 
@@ -54,7 +61,7 @@ with tab1:
     else:
         st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location', 'Status']])
 
-with tab3:  # Warehouse Management
+with tab3:
     st.subheader("Receive New Coils")
     with st.form("receive_coils_form", clear_on_submit=True):
         st.write("#### Add New Coil Shipment")
@@ -66,9 +73,8 @@ with tab3:  # Warehouse Management
         submitted = st.form_submit_button("🚀 Add Coils to Inventory")
         
         if submitted:
-            global df  # <--- THIS IS NOW THE VERY FIRST LINE — FIXED!
             new_coils = []
-            base = material.split()[0][1:]  # e.g., "010" or "016"
+            base = material.split()[0][1:]  # "010", "016", etc.
             for i in range(count):
                 coil_id = f"{base}-{datetime.now().strftime('%m%d')}-{str(i+1).zfill(3)}"
                 new_coils.append({
@@ -78,14 +84,16 @@ with tab3:  # Warehouse Management
                     "Location": location,
                     "Status": "Active"
                 })
-            df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
+            # Update session state
+            new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
+            st.session_state.df = new_df
             save_inventory()
-            st.success(f"✅ Successfully added {count} new coil(s) of {material}!")
+            st.success(f"✅ Added {count} new coil(s) of {material}!")
             st.balloons()
             st.rerun()
 
     st.divider()
-    st.subheader("Current Inventory Preview")
+    st.subheader("Current Inventory")
     if df.empty:
         st.write("No coils yet")
     else:
@@ -93,8 +101,8 @@ with tab3:  # Warehouse Management
 
 with tab2:
     st.subheader("Production Log")
-    st.info("Production logging and PDF email will be added next — get some coils in first!")
+    st.info("Full production + PDF email coming next — add coils first!")
 
 with tab4:
     st.subheader("Daily Summary")
-    st.info("Summary stats coming soon.")
+    st.info("Coming soon")
