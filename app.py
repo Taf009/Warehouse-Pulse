@@ -7,7 +7,7 @@ from datetime import datetime
 st.set_page_config(page_title="Warehouse Pulse Check", layout="wide")
 st.title("🏭 Warehouse Pulse Check - Production & Inventory")
 
-# --- PREDEFINED MATERIALS & LOCATIONS ---
+# --- PREDEFINED MATERIALS ---
 COIL_MATERIALS = [
     ".010 Smooth Stainless Steel No Polythene",
     ".010 Stainless Steel Polythene",
@@ -24,8 +24,6 @@ COIL_MATERIALS = [
     ".032 Smooth Aluminum",
     ".032 Stucco Aluminum"
 ]
-
-LOCATIONS = ["Rack A1", "Rack A2", "Rack B1", "Rack B2", "Floor Zone C", "Receiving Dock"]
 
 # --- LOAD INVENTORY FROM GOOGLE SHEETS INTO SESSION STATE ---
 if 'df' not in st.session_state:
@@ -53,7 +51,7 @@ def save_inventory():
         inv_ws.clear()
         inv_ws.update([df.columns.tolist()] + df.values.tolist())
     except Exception as e:
-        st.error(f"Failed to save: {e}")
+        st.error(f"Failed to save inventory: {e}")
 
 # --- TABS ---
 tab1, tab2, tab3, tab4 = st.tabs(["Dashboard", "Production Log", "Warehouse Management", "Daily Summary"])
@@ -64,7 +62,7 @@ with tab1:
     if df.empty:
         st.info("No coils in inventory yet. Go to Warehouse Management to add some.")
     else:
-        # --- MATERIAL SUMMARY TABLE ---
+        # Material Summary Table
         st.markdown("### 📊 Stock Summary by Material")
         summary = df.groupby('Material').agg(
             Coil_Count=('Coil_ID', 'count'),
@@ -78,19 +76,13 @@ with tab1:
             column_config={
                 "Material": "Material",
                 "Coil_Count": st.column_config.NumberColumn("Number of Coils", format="%d"),
-                "Total_Footage": st.column_config.NumberColumn("Total Footage (ft)", format="%.1f")
+                "Total_Footage": st.column_config.NumberColumn("Total Footage (ft)", format="%.1f ft")
             },
             use_container_width=True,
             hide_index=True
         )
 
-        # --- INDIVIDUAL COILS LIST ---
-        st.markdown("### Individual Coils")
-        display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
-        display_df['Footage'] = display_df['Footage'].round(1)
-        st.dataframe(display_df.sort_values(['Material', 'Location']), use_container_width=True)
-
-        # --- INDIVIDUAL COILS LIST ---
+        # Individual Coils
         st.markdown("### Individual Coils")
         display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
         display_df['Footage'] = display_df['Footage'].round(1)
@@ -103,7 +95,7 @@ with tab3:
 
         material = st.selectbox("Material Type", COIL_MATERIALS)
 
-        # --- SMART LOCATION GENERATOR ---
+        # Smart Location Generator
         st.markdown("#### Rack Location Generator (Unlimited)")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -118,31 +110,59 @@ with tab3:
 
         footage = st.number_input("Footage per Coil (ft)", min_value=0.1, value=3000.0)
 
+        # Manual Coil ID Input with Sequencing
         st.markdown("#### Manual Coil ID Input")
-        base_id = st.text_input("Base Coil ID (without number)", 
-                                value="COIL-016-AL-SM-3000", 
-                                help="Example: COIL-016-AL-SM-3000 → will become -01, -02, etc.")
-        count = st.number_input("Number of Coils", min_value=1, value=1, step=1)
+        st.write("Enter the **full starting Coil ID** (including the number), e.g., `COIL-016-AL-SM-3000-01`")
 
-        # Preview of generated IDs
-        if base_id.strip():
-            preview_ids = [f"{base_id.strip()}-{str(i).zfill(2)}" for i in range(1, count + 1)]
-            st.write("**Generated Coil IDs:**")
-            st.code("\n".join(preview_ids))
+        starting_id = st.text_input(
+            "Starting Coil ID",
+            value="COIL-016-AL-SM-3000-01",
+            help="The app will increment only the last number (01 → 02 → 03 etc.)"
+        )
+
+        count = st.number_input("Number of Coils to Add", min_value=1, value=1, step=1)
+
+        # Live preview of generated IDs
+        if starting_id.strip() and count > 0:
+            try:
+                parts = starting_id.strip().upper().split("-")
+                if len(parts) < 2 or not parts[-1].isdigit():
+                    st.warning("Last part must be a number (e.g., -01)")
+                else:
+                    base_part = "-".join(parts[:-1])
+                    start_num = int(parts[-1])
+
+                    preview_ids = []
+                    for i in range(count):
+                        current_num = start_num + i
+                        preview_ids.append(f"{base_part}-{str(current_num).zfill(2)}")
+
+                    st.markdown("**Generated Coil IDs:**")
+                    st.code("\n".join(preview_ids), language="text")
+            except:
+                st.warning("Invalid format — make sure the last part is a number")
 
         submitted = st.form_submit_button("🚀 Add Coils to Inventory")
 
         if submitted:
-            if not base_id.strip():
-                st.error("Please enter a base Coil ID")
-            else:
+            if not starting_id.strip():
+                st.error("Please enter a starting Coil ID")
+                st.stop()
+
+            try:
+                parts = starting_id.strip().upper().split("-")
+                base_part = "-".join(parts[:-1])
+                start_num = int(parts[-1])
+
                 new_coils = []
-                cleaned_base = base_id.strip().upper()  # Optional: standardize to uppercase
-                for i in range(1, count + 1):
-                    coil_id = f"{cleaned_base}-{str(i).zfill(2)}"
+                for i in range(count):
+                    current_num = start_num + i
+                    coil_id = f"{base_part}-{str(current_num).zfill(2)}"
+
                     if coil_id in df['Coil_ID'].values:
                         st.error(f"Coil ID {coil_id} already exists!")
                         st.stop()
+
                     new_coils.append({
                         "Coil_ID": coil_id,
                         "Material": material,
@@ -150,13 +170,18 @@ with tab3:
                         "Location": generated_location,
                         "Status": "Active"
                     })
-                # Add to inventory
+
                 new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
                 st.session_state.df = new_df
                 save_inventory()
-                st.success(f"✅ Successfully added {count} new coil(s)!")
+                st.success(f"✅ Successfully added {count} coil(s) starting from {starting_id}!")
                 st.balloons()
                 st.rerun()
+
+            except ValueError:
+                st.error("The last part of the Coil ID must be a number (e.g., -01)")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
     st.divider()
     st.subheader("Current Inventory Preview")
@@ -164,12 +189,11 @@ with tab3:
         st.info("No coils added yet")
     else:
         st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
+
 with tab2:
     st.subheader("Production Log")
-    st.info("Full production logging with automatic PDF email is coming in the next update — add some coils first!")
+    st.info("Full production logging with automatic PDF email coming soon — add coils first!")
 
 with tab4:
     st.subheader("Daily Summary")
     st.info("Daily usage, waste, and efficiency stats will appear once production starts.")
-
-# --- END OF CODE ---
