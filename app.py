@@ -59,11 +59,42 @@ def save_inventory():
 tab1, tab2, tab3, tab4 = st.tabs(["Dashboard", "Production Log", "Warehouse Management", "Daily Summary"])
 
 with tab1:
-    st.subheader("Current Inventory")
+    st.subheader("Current Inventory Summary")
+
     if df.empty:
         st.info("No coils in inventory yet. Go to Warehouse Management to add some.")
     else:
-        st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location', 'Status']], use_container_width=True)
+        # --- MATERIAL SUMMARY TABLE ---
+        st.markdown("### 📊 Stock Summary by Material")
+        summary = df.groupby('Material').agg(
+            Coil_Count=('Coil_ID', 'count'),
+            Total_Footage=('Footage', 'sum')
+        ).reset_index()
+        summary = summary.sort_values('Total_Footage', ascending=False)
+        summary['Total_Footage'] = summary['Total_Footage'].round(1)
+
+        st.dataframe(
+            summary,
+            column_config={
+                "Material": "Material",
+                "Coil_Count": st.column_config.NumberColumn("Number of Coils", format="%d"),
+                "Total_Footage": st.column_config.NumberColumn("Total Footage (ft)", format="%.1f")
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # --- INDIVIDUAL COILS LIST ---
+        st.markdown("### Individual Coils")
+        display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
+        display_df['Footage'] = display_df['Footage'].round(1)
+        st.dataframe(display_df.sort_values(['Material', 'Location']), use_container_width=True)
+
+        # --- INDIVIDUAL COILS LIST ---
+        st.markdown("### Individual Coils")
+        display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
+        display_df['Footage'] = display_df['Footage'].round(1)
+        st.dataframe(display_df.sort_values(['Material', 'Location']), use_container_width=True)
 
 with tab3:
     st.subheader("Receive New Coils")
