@@ -40,12 +40,6 @@ try:
 except:
     df = pd.DataFrame(columns=["Coil_ID", "Material", "Footage", "Location", "Status"])
 
-# Load Log (optional)
-try:
-    log_df = pd.DataFrame(log_ws.get_all_records())
-except:
-    log_df = pd.DataFrame()
-
 def save_inventory():
     inv_ws.clear()
     inv_ws.update([df.columns.tolist()] + df.values.tolist())
@@ -72,7 +66,7 @@ with tab3:  # Warehouse Management
         submitted = st.form_submit_button("🚀 Add Coils to Inventory")
         
         if submitted:
-            global df  # ← Moved to the top of the block
+            global df  # <--- THIS IS NOW THE VERY FIRST LINE — FIXED!
             new_coils = []
             base = material.split()[0][1:]  # e.g., "010" or "016"
             for i in range(count):
@@ -99,8 +93,8 @@ with tab3:  # Warehouse Management
 
 with tab2:
     st.subheader("Production Log")
-    st.info("Production logging and PDF email coming in the next update — add coils first!")
+    st.info("Production logging and PDF email will be added next — get some coils in first!")
 
 with tab4:
     st.subheader("Daily Summary")
-    st.info("Summary stats will appear once you start logging activity.")
+    st.info("Summary stats coming soon.")
