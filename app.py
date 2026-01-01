@@ -70,9 +70,26 @@ with tab3:
     with st.form("receive_coils_form", clear_on_submit=True):
         st.markdown("#### Add New Coil Shipment")
         material = st.selectbox("Material Type", COIL_MATERIALS)
+
+        # --- SMART LOCATION GENERATOR ---
+        st.markdown("#### Rack Location Generator (Unlimited)")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            bay = st.number_input("Bay Number", min_value=1, value=1, step=1)
+        with col2:
+            section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+        with col3:
+            level = st.number_input("Level", min_value=1, value=1, step=1, max_value=999)
+
+        # Generate and display the location code
+        generated_location = f"{bay}{section}{level}"
+        st.info(f"**Generated Location Code:** {generated_location}")
+
         count = st.number_input("Number of Coils", min_value=1, value=1, step=1)
         footage = st.number_input("Footage per Coil (ft)", min_value=0.1, value=3000.0)
-        location = st.selectbox("Initial Location", LOCATIONS)
+
+        # Use the generated location
+        location = generated_location
 
         submitted = st.form_submit_button("🚀 Add Coils to Inventory")
 
@@ -92,7 +109,7 @@ with tab3:
             new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
             st.session_state.df = new_df
             save_inventory()
-            st.success(f"✅ Successfully added {count} new coil(s) of {material}!")
+            st.success(f"✅ Successfully added {count} new coil(s) to **{location}**!")
             st.balloons()
             st.rerun()
 
