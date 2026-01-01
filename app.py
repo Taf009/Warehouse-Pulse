@@ -100,6 +100,7 @@ with tab3:
     st.subheader("Receive New Coils")
     with st.form("receive_coils_form", clear_on_submit=True):
         st.markdown("#### Add New Coil Shipment")
+
         material = st.selectbox("Material Type", COIL_MATERIALS)
 
         # --- SMART LOCATION GENERATOR ---
@@ -110,39 +111,52 @@ with tab3:
         with col2:
             section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
         with col3:
-            level = st.number_input("Level", min_value=1, value=1, step=1, max_value=999)
+            level = st.number_input("Level", min_value=1, value=1, step=1)
 
-        # Generate and display the location code
         generated_location = f"{bay}{section}{level}"
         st.info(f"**Generated Location Code:** {generated_location}")
 
-        count = st.number_input("Number of Coils", min_value=1, value=1, step=1)
         footage = st.number_input("Footage per Coil (ft)", min_value=0.1, value=3000.0)
 
-        # Use the generated location
-        location = generated_location
+        st.markdown("#### Manual Coil ID Input")
+        base_id = st.text_input("Base Coil ID (without number)", 
+                                value="COIL-016-AL-SM-3000", 
+                                help="Example: COIL-016-AL-SM-3000 → will become -01, -02, etc.")
+        count = st.number_input("Number of Coils", min_value=1, value=1, step=1)
+
+        # Preview of generated IDs
+        if base_id.strip():
+            preview_ids = [f"{base_id.strip()}-{str(i).zfill(2)}" for i in range(1, count + 1)]
+            st.write("**Generated Coil IDs:**")
+            st.code("\n".join(preview_ids))
 
         submitted = st.form_submit_button("🚀 Add Coils to Inventory")
 
         if submitted:
-            new_coils = []
-            base_code = material.split()[0][1:]  # e.g., "010" or "016"
-            for i in range(count):
-                coil_id = f"{base_code}-{datetime.now().strftime('%m%d')}-{str(i+1).zfill(3)}"
-                new_coils.append({
-                    "Coil_ID": coil_id,
-                    "Material": material,
-                    "Footage": footage,
-                    "Location": location,
-                    "Status": "Active"
-                })
-            # Update session state
-            new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
-            st.session_state.df = new_df
-            save_inventory()
-            st.success(f"✅ Successfully added {count} new coil(s) to **{location}**!")
-            st.balloons()
-            st.rerun()
+            if not base_id.strip():
+                st.error("Please enter a base Coil ID")
+            else:
+                new_coils = []
+                cleaned_base = base_id.strip().upper()  # Optional: standardize to uppercase
+                for i in range(1, count + 1):
+                    coil_id = f"{cleaned_base}-{str(i).zfill(2)}"
+                    if coil_id in df['Coil_ID'].values:
+                        st.error(f"Coil ID {coil_id} already exists!")
+                        st.stop()
+                    new_coils.append({
+                        "Coil_ID": coil_id,
+                        "Material": material,
+                        "Footage": footage,
+                        "Location": generated_location,
+                        "Status": "Active"
+                    })
+                # Add to inventory
+                new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
+                st.session_state.df = new_df
+                save_inventory()
+                st.success(f"✅ Successfully added {count} new coil(s)!")
+                st.balloons()
+                st.rerun()
 
     st.divider()
     st.subheader("Current Inventory Preview")
@@ -150,7 +164,6 @@ with tab3:
         st.info("No coils added yet")
     else:
         st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
-
 with tab2:
     st.subheader("Production Log")
     st.info("Full production logging with automatic PDF email is coming in the next update — add some coils first!")
