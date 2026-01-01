@@ -40,7 +40,7 @@ try:
 except:
     df = pd.DataFrame(columns=["Coil_ID", "Material", "Footage", "Location", "Status"])
 
-# Load Log (optional for now)
+# Load Log (optional)
 try:
     log_df = pd.DataFrame(log_ws.get_all_records())
 except:
@@ -60,7 +60,7 @@ with tab1:
     else:
         st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location', 'Status']])
 
-with tab3:  # Warehouse Management - PRIORITY
+with tab3:  # Warehouse Management
     st.subheader("Receive New Coils")
     with st.form("receive_coils_form", clear_on_submit=True):
         st.write("#### Add New Coil Shipment")
@@ -72,9 +72,11 @@ with tab3:  # Warehouse Management - PRIORITY
         submitted = st.form_submit_button("🚀 Add Coils to Inventory")
         
         if submitted:
+            global df  # ← Moved to the top of the block
             new_coils = []
+            base = material.split()[0][1:]  # e.g., "010" or "016"
             for i in range(count):
-                coil_id = f"{material.split()[0][1:4].upper()}-{datetime.now().strftime('%m%d')}-{str(i+1).zfill(3)}"
+                coil_id = f"{base}-{datetime.now().strftime('%m%d')}-{str(i+1).zfill(3)}"
                 new_coils.append({
                     "Coil_ID": coil_id,
                     "Material": material,
@@ -82,7 +84,6 @@ with tab3:  # Warehouse Management - PRIORITY
                     "Location": location,
                     "Status": "Active"
                 })
-            global df
             df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
             save_inventory()
             st.success(f"✅ Successfully added {count} new coil(s) of {material}!")
@@ -91,7 +92,10 @@ with tab3:  # Warehouse Management - PRIORITY
 
     st.divider()
     st.subheader("Current Inventory Preview")
-    st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']] if not df.empty else "No coils yet")
+    if df.empty:
+        st.write("No coils yet")
+    else:
+        st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']])
 
 with tab2:
     st.subheader("Production Log")
