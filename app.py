@@ -16,17 +16,17 @@ st.title("🏭 Warehouse Pulse Check - Production & Inventory")
 
 # --- SIZE MAP (ascending order) ---
 SIZE_MAP = {
-    "Size 2": 13.0,
-    "Size 3": 14.5,
-    "Size 4": 16.0,
-    "Size 5": 18.0,
-    "Size 6": 20.0,
-    "Size 7": 23.0,
-    "Size 8": 26.0,
-    "Size 9": 29.5,
-    "Size 10": 32.5,
-    "Size 11": 36.0,
-    "Size 12": 39.5,
+    "#2": 13.0,
+    "#3": 14.5,
+    "#4": 16.0,
+    "#5": 18.0,
+    "#6": 20.0,
+    "#7": 23.0,
+    "#8": 26.0,
+    "#9": 29.5,
+    "#10": 32.5,
+    "#11": 36.0,
+    "#12": 39.5,
 }
 
 # --- PREDEFINED MATERIALS ---
