@@ -49,7 +49,6 @@ SIZE_MAP = {
     "Size 15": 49.5,
 }
     # Add more sizes as needed
-}
 
 # --- LOAD INVENTORY FROM GOOGLE SHEETS INTO SESSION STATE ---
 if 'df' not in st.session_state:
