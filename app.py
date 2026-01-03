@@ -303,5 +303,131 @@ with tab2:
                     st.session_state.production_lines = [{"size": "#2", "pieces": 1, "waste": 0.0, "override_coils": []}]
                     st.rerun()
 
-# --- REST OF THE CODE (Warehouse Management, Admin, etc.) remains the same as previous full version ---
-# (Include your full tab3 and tab4 from the last working version)
+with tab3:
+    st.subheader("Receive New Coils")
+    with st.form("receive_coils_form", clear_on_submit=True):
+        st.markdown("#### Add New Coil Shipment")
+
+        material = st.selectbox("Material Type", COIL_MATERIALS, key="recv_material")
+
+        # --- Unlimited Rack Location Generator ---
+        st.markdown("#### Rack Location Generator (Unlimited)")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            bay = st.number_input("Bay Number", min_value=1, value=1, step=1, key="bay")
+        with col2:
+            section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), key="section")
+        with col3:
+            level = st.number_input("Level", min_value=1, value=1, step=1, key="level")
+
+        generated_location = f"{bay}{section}{level}"
+        st.info(f"**Generated Location Code:** {generated_location}")
+
+        footage = st.number_input("Footage per Coil (ft)", min_value=0.1, value=3000.0, key="recv_footage")
+
+        # --- Manual Coil ID Input with Sequencing ---
+        st.markdown("#### Manual Coil ID Input")
+        st.write("Enter the **full starting Coil ID** (including number), e.g., `COIL-016-AL-SM-3000-01`")
+
+        starting_id = st.text_input("Starting Coil ID", value="COIL-016-AL-SM-3000-01", key="starting_id")
+        count = st.number_input("Number of Coils to Add", min_value=1, value=1, step=1, key="count")
+
+        # Live preview
+        if starting_id.strip() and count > 0:
+            try:
+                parts = starting_id.strip().upper().split("-")
+                base_part = "-".join(parts[:-1])
+                start_num = int(parts[-1])
+                preview = [f"{base_part}-{str(start_num + i).zfill(2)}" for i in range(count)]
+                st.markdown("**Generated Coil IDs:**")
+                st.code("\n".join(preview), language="text")
+            except:
+                st.warning("Invalid format — last part must be a number")
+
+        # Operator name
+        operator_name = st.text_input("Your Name (who is receiving these coils)", key="recv_operator")
+
+        submitted = st.form_submit_button("🚀 Add Coils to Inventory")
+
+        if submitted:
+            if not operator_name:
+                st.error("Your name is required")
+            else:
+                try:
+                    parts = starting_id.strip().upper().split("-")
+                    base_part = "-".join(parts[:-1])
+                    start_num = int(parts[-1])
+
+                    new_coils = []
+                    for i in range(count):
+                        current_num = start_num + i
+                        coil_id = f"{base_part}-{str(current_num).zfill(2)}"
+                        if coil_id in df['Coil_ID'].values:
+                            st.error(f"Duplicate: {coil_id}")
+                            st.stop()
+                        new_coils.append({
+                            "Coil_ID": coil_id,
+                            "Material": material,
+                            "Footage": footage,
+                            "Location": generated_location,
+                            "Status": "Active"
+                        })
+
+                    new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
+                    st.session_state.df = new_df
+                    save_inventory()
+                    st.success(f"Added {count} coil(s) to {generated_location} by {operator_name}!")
+                    st.balloons()
+                    st.rerun()
+                except:
+                    st.error("Invalid Coil ID format — last part must be a number")
+
+    st.divider()
+    st.subheader("🔧 Admin: Adjust or Remove Coil")
+
+    admin_password = st.text_input("Admin Password", type="password", key="admin_pass")
+    correct_password = "mjp@2026!"
+
+    if admin_password == correct_password:
+        st.success("Admin access granted")
+
+        if not df.empty:
+            coil_to_adjust = st.selectbox("Select Coil to Adjust/Delete", df['Coil_ID'], key="admin_coil")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                current_footage = df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'].values[0]
+                new_footage = st.number_input("New Footage (ft)", min_value=0.0, value=float(current_footage), key="admin_footage")
+            with col2:
+                action = st.radio("Action", ["Update Footage", "Delete Coil"], key="admin_action")
+
+            if st.button("Apply Change", key="admin_apply"):
+                if action == "Update Footage":
+                    df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'] = new_footage
+                    save_inventory()
+                    st.success(f"Updated footage for {coil_to_adjust} to {new_footage:.1f} ft")
+                elif action == "Delete Coil":
+                    if st.checkbox("Confirm permanent deletion", key="admin_confirm"):
+                        df = df[df['Coil_ID'] != coil_to_adjust]
+                        st.session_state.df = df
+                        save_inventory()
+                        st.success(f"Deleted {coil_to_adjust} from inventory")
+                        st.rerun()
+                st.rerun()
+        else:
+            st.info("No coils to adjust")
+    elif admin_password:
+        st.error("Incorrect admin password")
+    else:
+        st.info("Enter admin password to adjust or remove coils")
+
+    st.divider()
+    st.subheader("Current Inventory Preview")
+    if df.empty:
+        st.info("No coils added yet")
+    else:
+        st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
+
+with tab4:
+    st.subheader("Daily Summary")
+    st.info("Daily usage, waste, and efficiency stats will appear once production starts.")
