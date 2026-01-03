@@ -74,25 +74,41 @@ class PDF(FPDF):
         self.cell(0, 10, 'Production Order Complete', 0, 1, 'C')
         self.ln(10)
 
-def generate_production_pdf(order_number, client_name, material, coil_id, size, pieces, used_ft, waste_ft, remaining_ft):
+def generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage):
     pdf = PDF()
     pdf.add_page()
     pdf.set_font('Arial', '', 12)
     
     pdf.cell(0, 10, f"Internal Order Number: {order_number}", 0, 1)
     pdf.cell(0, 10, f"Client: {client_name}", 0, 1)
+    pdf.cell(0, 10, f"Completed by: {operator_name}", 0, 1)
     pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1)
     pdf.ln(10)
     
     pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, "Production Details", 0, 1)
+    pdf.cell(0, 10, "Production Lines", 0, 1)
     pdf.set_font('Arial', '', 12)
-    pdf.cell(0, 10, f"Material: {material}", 0, 1)
-    pdf.cell(0, 10, f"Coil ID: {coil_id}", 0, 1)
-    pdf.cell(0, 10, f"Size Produced: {size}", 0, 1)
-    pdf.cell(0, 10, f"Pieces Produced: {pieces}", 0, 1)
-    pdf.cell(0, 10, f"Total Footage Used: {used_ft:.2f} ft (including {waste_ft:.2f} ft waste)", 0, 1)
-    pdf.cell(0, 10, f"Remaining Footage on Coil: {remaining_ft:.2f} ft", 0, 1)
+    total_used = 0
+    for line in deduction_details:
+        pdf.cell(0, 10, f"Size: {line['size']} | Pieces: {line['pieces']} | Waste: {line['waste']:.1f} ft", 0, 1)
+        pdf.cell(0, 10, f"Coils Used: {line['coils']}", 0, 1)
+        pdf.cell(0, 10, f"Footage Used: {line['total_used']:.2f} ft", 0, 1)
+        total_used += line['total_used']
+        pdf.ln(5)
+    
+    pdf.ln(10)
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, "Box Usage", 0, 1)
+    pdf.set_font('Arial', '', 12)
+    used_boxes = [f"{k}: {v}" for k, v in box_usage.items() if v > 0]
+    if used_boxes:
+        pdf.multi_cell(0, 10, "\n".join(used_boxes))
+    else:
+        pdf.cell(0, 10, "No boxes used", 0, 1)
+    
+    pdf.ln(10)
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, f"Total Footage Used: {total_used:.2f} ft", 0, 1)
     
     buffer = io.BytesIO()
     pdf.output(buffer)
@@ -135,7 +151,6 @@ with tab1:
     if df.empty:
         st.info("No coils in inventory yet. Go to Warehouse Management to add some.")
     else:
-        # Material Summary
         st.markdown("### 📊 Stock Summary by Material")
         summary = df.groupby('Material').agg(
             Coil_Count=('Coil_ID', 'count'),
@@ -155,7 +170,6 @@ with tab1:
             hide_index=True
         )
 
-        # Individual Coils
         st.markdown("### Individual Coils")
         display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
         display_df['Footage'] = display_df['Footage'].round(1)
@@ -167,41 +181,40 @@ with tab2:
     if df.empty or (df['Footage'] == 0).all():
         st.info("No coils available for production. Add some first.")
     else:
-        with st.form("production_order_form"):
-            st.markdown("#### Order Details")
-            client_name = st.text_input("Client Name")
-            order_number = st.text_input("Internal Order Number")
+        if 'production_lines' not in st.session_state:
+            st.session_state.production_lines = [
+                {"size": list(SIZE_MAP.keys())[0], "pieces": 1, "waste": 0.0, "coils": []}
+            ]
 
-            st.markdown("#### Number of Different Sizes in This Order")
-            num_sizes = st.number_input("How many different sizes?", min_value=1, value=1, step=1)
-
-            deduction_details = []
-            for i in range(num_sizes):
-                st.markdown(f"#### Size Line {i+1}")
-                col1, col2, col3 = st.columns(3)
+        st.markdown("#### Production Lines")
+        for i, line in enumerate(st.session_state.production_lines):
+            with st.container():
+                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
                 with col1:
-                    size = st.selectbox(f"Size {i+1}", list(SIZE_MAP.keys()), key=f"size_{i}")
+                    line["size"] = st.selectbox(f"Size {i+1}", list(SIZE_MAP.keys()), key=f"size_{i}")
                 with col2:
-                    pieces = st.number_input(f"Pieces {i+1}", min_value=1, step=1, key=f"pieces_{i}")
+                    line["pieces"] = st.number_input(f"Pieces {i+1}", min_value=1, value=line["pieces"], key=f"pieces_{i}")
                 with col3:
-                    waste = st.number_input(f"Waste ft {i+1}", min_value=0.0, step=0.1, value=0.0, key=f"waste_{i}")
+                    line["waste"] = st.number_input(f"Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"waste_{i}")
+                with col4:
+                    if st.button("Remove", key=f"remove_{i}"):
+                        st.session_state.production_lines.pop(i)
+                        st.rerun()
 
                 available_coils = df[df['Footage'] > 0]
                 coil_options = [f"{row['Coil_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
                                 for _, row in available_coils.iterrows()]
-                selected_coils = st.multiselect(f"Coils used for size {i+1}", coil_options, key=f"coils_{i}")
+                line["coils"] = st.multiselect(f"Coils for size {i+1}", coil_options, default=line["coils"], key=f"coils_{i}")
 
-                inches_per_piece = SIZE_MAP[size]
-                used_without_waste = pieces * inches_per_piece / 12
-                total_line_used = used_without_waste + waste
+        if st.button("➕ Add Another Size Line"):
+            st.session_state.production_lines.append({"size": list(SIZE_MAP.keys())[0], "pieces": 1, "waste": 0.0, "coils": []})
+            st.rerun()
 
-                deduction_details.append({
-                    "size": size,
-                    "pieces": pieces,
-                    "waste": waste,
-                    "total_used": total_line_used,
-                    "coils": [c.split(" - ")[0] for c in selected_coils]
-                })
+        with st.form("order_details_form"):
+            st.markdown("#### Order Details")
+            client_name = st.text_input("Client Name")
+            order_number = st.text_input("Internal Order Number")
+            operator_name = st.text_input("Your Name (who is completing this order)")
 
             st.markdown("#### Box Usage")
             box_types = ["Small Metal Box", "Big Metal Box", "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"]
@@ -212,45 +225,52 @@ with tab2:
             submitted = st.form_submit_button("Complete Order & Send PDF")
 
             if submitted:
-                if not client_name or not order_number:
-                    st.error("Client Name and Order Number are required")
+                if not client_name or not order_number or not operator_name:
+                    st.error("Client Name, Order Number, and Your Name are required")
                 else:
                     total_used = 0
-                    all_coils_used = {}
+                    deduction_details = []
 
-                    for line in deduction_details:
-                        if not line["coils"]:
+                    for line in st.session_state.production_lines:
+                        if line["pieces"] > 0 and not line["coils"]:
                             st.error(f"Select at least one coil for size {line['size']}")
                             st.stop()
-                        total_used += line["total_used"]
 
-                        # Even split across selected coils
-                        per_coil = line["total_used"] / len(line["coils"])
-                        for coil_id in line["coils"]:
-                            if coil_id not in all_coils_used:
-                                all_coils_used[coil_id] = 0
-                            all_coils_used[coil_id] += per_coil
+                        inches_per_piece = SIZE_MAP[line["size"]]
+                        used_without_waste = line["pieces"] * inches_per_piece / 12
+                        line_total = used_without_waste + line["waste"]
+                        total_used += line_total
 
-                    # Deduct from coils
-                    for coil_id, deduct in all_coils_used.items():
-                        current = df.loc[df['Coil_ID'] == coil_id, 'Footage'].values[0]
-                        if deduct > current:
-                            st.error(f"Not enough footage on {coil_id}")
-                            st.stop()
-                        df.loc[df['Coil_ID'] == coil_id, 'Footage'] -= deduct
+                        selected_coil_ids = [c.split(" - ")[0] for c in line["coils"]]
+                        deduction_details.append({
+                            "size": line["size"],
+                            "pieces": line["pieces"],
+                            "waste": line["waste"],
+                            "total_used": line_total,
+                            "coils": ", ".join(selected_coil_ids)
+                        })
+
+                        per_coil = line_total / len(selected_coil_ids)
+                        for coil_id in selected_coil_ids:
+                            current = df.loc[df['Coil_ID'] == coil_id, 'Footage'].values[0]
+                            if per_coil > current:
+                                st.error(f"Not enough footage on {coil_id}")
+                                st.stop()
+                            df.loc[df['Coil_ID'] == coil_id, 'Footage'] -= per_coil
 
                     save_inventory()
 
-                    # Generate PDF (you can use the enhanced version from earlier)
-                    pdf_buffer = generate_production_pdf(order_number, client_name, "Multi-size order", "Multiple", "Multiple", "Multiple", total_used, 0, "N/A")  # Simplified for now
+                    pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage)
 
                     if send_production_pdf(pdf_buffer, order_number, client_name):
-                        st.success(f"Order {order_number} completed! PDF sent.")
+                        st.success(f"Order {order_number} completed by {operator_name}! PDF sent.")
                     else:
                         st.warning("Logged but email failed.")
 
+                    st.session_state.production_lines = [{"size": list(SIZE_MAP.keys())[0], "pieces": 1, "waste": 0.0, "coils": []}]
                     st.balloons()
                     st.rerun()
+
 with tab3:
     st.subheader("Receive New Coils")
     with st.form("receive_coils_form", clear_on_submit=True):
@@ -258,7 +278,6 @@ with tab3:
 
         material = st.selectbox("Material Type", COIL_MATERIALS, key="recv_material")
 
-        # Location Generator
         st.markdown("#### Rack Location Generator (Unlimited)")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -273,14 +292,12 @@ with tab3:
 
         footage = st.number_input("Footage per Coil (ft)", min_value=0.1, value=3000.0, key="recv_footage")
 
-        # Manual Coil ID
         st.markdown("#### Manual Coil ID Input")
         st.write("Enter the **full starting Coil ID** (including number), e.g., `COIL-016-AL-SM-3000-01`")
 
         starting_id = st.text_input("Starting Coil ID", value="COIL-016-AL-SM-3000-01", key="starting_id")
         count = st.number_input("Number of Coils to Add", min_value=1, value=1, step=1, key="count")
 
-        # Preview
         if starting_id.strip() and count > 0:
             try:
                 parts = starting_id.strip().upper().split("-")
@@ -292,37 +309,89 @@ with tab3:
             except:
                 st.warning("Invalid format")
 
+        operator_name = st.text_input("Your Name (who is receiving these coils)", key="recv_operator")
+
         submitted = st.form_submit_button("🚀 Add Coils to Inventory")
 
         if submitted:
-            try:
-                parts = starting_id.strip().upper().split("-")
-                base_part = "-".join(parts[:-1])
-                start_num = int(parts[-1])
+            if not operator_name:
+                st.error("Your name is required")
+            else:
+                try:
+                    parts = starting_id.strip().upper().split("-")
+                    base_part = "-".join(parts[:-1])
+                    start_num = int(parts[-1])
 
-                new_coils = []
-                for i in range(count):
-                    current_num = start_num + i
-                    coil_id = f"{base_part}-{str(current_num).zfill(2)}"
-                    if coil_id in df['Coil_ID'].values:
-                        st.error(f"Duplicate: {coil_id}")
-                        st.stop()
-                    new_coils.append({
-                        "Coil_ID": coil_id,
-                        "Material": material,
-                        "Footage": footage,
-                        "Location": generated_location,
-                        "Status": "Active"
-                    })
+                    new_coils = []
+                    for i in range(count):
+                        current_num = start_num + i
+                        coil_id = f"{base_part}-{str(current_num).zfill(2)}"
+                        if coil_id in df['Coil_ID'].values:
+                            st.error(f"Duplicate: {coil_id}")
+                            st.stop()
+                        new_coils.append({
+                            "Coil_ID": coil_id,
+                            "Material": material,
+                            "Footage": footage,
+                            "Location": generated_location,
+                            "Status": "Active"
+                        })
 
-                new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
-                st.session_state.df = new_df
-                save_inventory()
-                st.success(f"Added {count} coil(s) to {generated_location}!")
-                st.balloons()
-                st.rerun()
-            except:
-                st.error("Invalid Coil ID format")
+                    new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
+                    st.session_state.df = new_df
+                    save_inventory()
+                    st.success(f"Added {count} coil(s) to {generated_location} by {operator_name}!")
+                    st.balloons()
+                    st.rerun()
+                except:
+                    st.error("Invalid Coil ID format")
 
     st.divider()
-    st
+    st.subheader("🔧 Admin: Adjust or Remove Coil")
+
+    admin_password = st.text_input("Admin Password", type="password", key="admin_pass")
+    correct_password = "mjp@2026!"
+
+    if admin_password == correct_password:
+        st.success("Admin access granted")
+
+        if not df.empty:
+            coil_to_adjust = st.selectbox("Select Coil to Adjust/Delete", df['Coil_ID'], key="admin_coil")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                current_footage = df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'].values[0]
+                new_footage = st.number_input("New Footage (ft)", min_value=0.0, value=float(current_footage), key="admin_footage")
+            with col2:
+                action = st.radio("Action", ["Update Footage", "Delete Coil"], key="admin_action")
+
+            if st.button("Apply Change", key="admin_apply"):
+                if action == "Update Footage":
+                    df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'] = new_footage
+                    save_inventory()
+                    st.success(f"Updated footage for {coil_to_adjust} to {new_footage:.1f} ft")
+                elif action == "Delete Coil":
+                    if st.checkbox("Confirm permanent deletion", key="admin_confirm"):
+                        df = df[df['Coil_ID'] != coil_to_adjust]
+                        st.session_state.df = df
+                        save_inventory()
+                        st.success(f"Deleted {coil_to_adjust} from inventory")
+                        st.rerun()
+                st.rerun()
+        else:
+            st.info("No coils to adjust")
+    elif admin_password:
+        st.error("Incorrect admin password")
+    else:
+        st.info("Enter admin password to adjust or remove coils")
+
+    st.divider()
+    st.subheader("Current Inventory Preview")
+    if df.empty:
+        st.info("No coils added yet")
+    else:
+        st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
+
+with tab4:
+    st.subheader("Daily Summary")
+    st.info("Daily usage, waste, and efficiency stats will appear once production starts.")
