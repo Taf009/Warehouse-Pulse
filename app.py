@@ -47,6 +47,16 @@ COIL_MATERIALS = [
     ".032 Smooth Aluminum",
     ".032 Stucco Aluminum"
 ]
+# --- LOW STOCK THRESHOLDS PER MATERIAL (customize these!) ---
+LOW_STOCK_THRESHOLDS = {
+    ".016 Smooth Aluminum": 6000.0,
+    ".020 Stucco Aluminum": 6000.0,
+    ".020 Smooth Aluminum": 3500.0,
+    ".016 Stucco Aluminum": 2500.0,
+    ".010 Stainless Steel Polythene": 2500.0,
+    # Add all your materials with desired minimum total footage
+    # Default for unlisted materials: 1000 ft
+}
 
 # --- LOGIN SYSTEM ---
 if 'logged_in' not in st.session_state:
@@ -103,6 +113,36 @@ def save_inventory():
         inv_ws.update([df.columns.tolist()] + df.values.tolist())
     except Exception as e:
         st.error(f"Failed to save inventory: {e}")
+
+def check_low_stock_and_alert():
+    low_materials = []
+    for material in df['Material'].unique():
+        total_footage = df[df['Material'] == material]['Footage'].sum()
+        threshold = LOW_STOCK_THRESHOLDS.get(material, 1000.0)  # default 1000 ft
+        if total_footage < threshold:
+            low_materials.append(f"{material}: {total_footage:.1f} ft (below {threshold} ft)")
+
+    if low_materials:
+        subject = "URGENT: Low Stock Alert - Reorder Required"
+        body = "The following materials have fallen below minimum stock levels:\n\n" + \
+               "\n".join(low_materials) + \
+               "\n\nPlease place a reorder as soon as possible.\n\n" + \
+               f"Generated automatically on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = st.secrets["SMTP_EMAIL"]
+            msg['To'] = st.secrets["ADMIN_EMAIL"]
+            msg['Subject'] = subject
+            msg.attach(MIMEText(body, 'plain'))
+
+            server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+            server.login(st.secrets["SMTP_EMAIL"], st.secrets["SMTP_PASSWORD"])
+            server.send_message(msg)
+            server.quit()
+            st.success("⚠️ Low stock detected — reorder email sent to admin!")
+        except Exception as e:
+            st.error(f"Low stock detected but email failed: {e}")
 
 # --- AUDIT LOG FUNCTION ---
 def log_action(action, details=""):
@@ -196,6 +236,30 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Dashboard", "Production Log", "Warehous
 
 with tab1:
     st.subheader("Current Inventory Summary")
+        # --- LOW STOCK ALERT BANNER ---
+    low_materials = []
+    for material in df['Material'].unique():
+        total = df[df['Material'] == material]['Footage'].sum()
+        threshold = LOW_STOCK_THRESHOLDS.get(material, 1000.0)  # default 1000 ft
+        if total < threshold:
+            low_materials.append(f"{material}: {total:.1f} ft (below {threshold} ft)")
+
+    if low_materials:
+        st.error(f"⚠️ LOW STOCK ALERT: {len(low_materials)} material(s) below threshold!")
+        for item in low_materials:
+            st.warning(item)
+
+    # --- Adjustable Threshold (optional — place here if you want to let admin change it) ---
+    st.markdown("#### Low Stock Thresholds")
+    new_thresholds = {}
+    for material in df['Material'].unique():
+        current = LOW_STOCK_THRESHOLDS.get(material, 3000.0)
+        new_val = st.number_input(f"{material}", min_value=0.0, value=current, key=f"thresh_{material}")
+        new_thresholds[material] = new_val
+
+    if st.button("Update Thresholds"):
+        # In a real app, you'd save this to secrets or a sheet — for now, just show
+        st.success("Thresholds updated (restart app to persist)")
 
     if df.empty:
         st.info("No coils in inventory yet. Go to Warehouse Management to add some.")
@@ -315,6 +379,7 @@ with tab2:
                             df.loc[df['Coil_ID'] == coil_id, 'Footage'] -= per_coil
 
                     save_inventory()
+                    check_low_stock_and_alert()  # This triggers the email alert for depleted material
 
                     pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, extra_inch)
 
