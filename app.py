@@ -250,7 +250,8 @@ with tab2:
                         st.warning("Logged but email failed.")
 
                     st.balloons()
-                    st.rerun()with tab3:
+                    st.rerun()
+with tab3:
     st.subheader("Receive New Coils")
     with st.form("receive_coils_form", clear_on_submit=True):
         st.markdown("#### Add New Coil Shipment")
