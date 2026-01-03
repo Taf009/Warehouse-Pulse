@@ -458,36 +458,68 @@ with tab3:
         st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
 
 with tab4:
-    st.subheader("Daily Summary")
+    st.subheader("📊 Daily Production Summary")
 
     try:
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_url(st.secrets["SHEET_URL"])
         log_ws = sh.worksheet("Production_Log")
         log_records = log_ws.get_all_records()
-        if log_records:
+        
+        if not log_records:
+            st.info("No production recorded yet — complete your first order to see stats!")
+        else:
             log_df = pd.DataFrame(log_records)
             log_df['Timestamp'] = pd.to_datetime(log_df['Timestamp'])
+            log_df['Date'] = log_df['Timestamp'].dt.date
+            log_df['Total_Used_FT'] = pd.to_numeric(log_df['Total_Used_FT'], errors='coerce')
+            log_df['Waste_FT'] = pd.to_numeric(log_df['Waste_FT'], errors='coerce')
+            log_df['Pieces'] = pd.to_numeric(log_df['Pieces'], errors='coerce')
+
             today = datetime.now().date()
-            today_log = log_df[log_df['Timestamp'].dt.date == today]
+            today_log = log_df[log_df['Date'] == today]
 
             if today_log.empty:
-                st.info("No production recorded today yet.")
+                st.info("No production today yet — stats will appear after your first order!")
             else:
-                st.markdown("### Today's Production Overview")
+                # --- Key Metrics ---
+                st.markdown("### Today's Key Metrics")
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Total Footage Used", f"{today_log['Total_Used_FT'].sum():.1f} ft")
-                col2.metric("Total Waste", f"{today_log['Waste_FT'].sum():.1f} ft")
-                col3.metric("Total Pieces Produced", today_log['Pieces'].sum())
-                efficiency = ((today_log['Total_Used_FT'].sum() - today_log['Waste_FT'].sum()) / today_log['Total_Used_FT'].sum()) * 100
-                col4.metric("Efficiency", f"{efficiency:.1f}%")
+                total_footage = today_log['Total_Used_FT'].sum()
+                total_waste = today_log['Waste_FT'].sum()
+                total_pieces = today_log['Pieces'].sum()
+                efficiency = ((total_footage - total_waste) / total_footage * 100) if total_footage > 0 else 0
 
-                st.markdown("### Today's Orders")
-                display_log = today_log[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
-                display_log['Timestamp'] = display_log['Timestamp'].dt.strftime('%H:%M')
-                st.dataframe(display_log.sort_values('Timestamp', ascending=False), use_container_width=True)
-        else:
-            st.info("No production history yet.")
+                col1.metric("Total Footage Used", f"{total_footage:.1f} ft")
+                col2.metric("Total Waste", f"{total_waste:.1f} ft", delta=f"{total_waste:.1f} ft")
+                col3.metric("Total Pieces Produced", int(total_pieces))
+                col4.metric("Material Efficiency", f"{efficiency:.1f}%", delta=f"{100-efficiency:.1f}% waste")
+
+                # --- Chart 1: Footage Used vs Waste ---
+                st.markdown("### Footage Breakdown")
+                chart_data = pd.DataFrame({
+                    "Type": ["Used (Product)", "Waste"],
+                    "Footage (ft)": [total_footage - total_waste, total_waste]
+                })
+                st.bar_chart(chart_data.set_index("Type"))
+
+                # --- Chart 2: Production by Size ---
+                st.markdown("### Production by Size Today")
+                size_summary = today_log.groupby('Size').agg({
+                    'Pieces': 'sum',
+                    'Total_Used_FT': 'sum'
+                }).reset_index()
+                size_summary = size_summary.sort_values('Total_Used_FT', ascending=False)
+
+                st.bar_chart(size_summary.set_index('Size')['Pieces'], use_container_width=True)
+
+                # --- Today's Orders Table ---
+                st.markdown("### Today's Completed Orders")
+                display_today = today_log[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
+                display_today['Timestamp'] = display_today['Timestamp'].dt.strftime('%H:%M')
+                display_today = display_today.sort_values('Timestamp', ascending=False)
+                st.dataframe(display_today, use_container_width=True)
+
     except Exception as e:
         st.error(f"Could not load production log: {e}")
-        st.info("Make sure you have a 'Production_Log' tab in your Google Sheet.")
+        st.info("Make sure you have a 'Production_Log' tab with the correct headers.")
