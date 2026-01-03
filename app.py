@@ -79,6 +79,34 @@ def save_inventory():
     except Exception as e:
         st.error(f"Failed to save inventory: {e}")
 
+def save_production_log(operator_name, client_name, order_number, deduction_details, box_usage, total_used):
+    try:
+        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        sh = gc.open_by_url(st.secrets["SHEET_URL"])
+        log_ws = sh.worksheet("Production_Log")  # This uses the new tab
+
+        rows = []
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        boxes_str = "; ".join([f"{k}: {v}" for k, v in box_usage.items() if v > 0]) or "None"
+
+        for line in deduction_details:
+            rows.append([
+                timestamp,
+                operator_name,
+                client_name,
+                order_number,
+                line["display_size"],  # e.g., #7
+                line["pieces"],
+                line["waste"],
+                line["coils"],
+                boxes_str,
+                line["total_used"]
+            ])
+
+        log_ws.append_rows(rows)
+    except Exception as e:
+        st.warning(f"Could not save production log: {e}")  # Won't break the app if it fails
+
 # --- PDF GENERATION (updated to use # format) ---
 class PDF(FPDF):
     def header(self):
@@ -289,6 +317,7 @@ with tab2:
                             df.loc[df['Coil_ID'] == coil_id, 'Footage'] -= per_coil
 
                     save_inventory()
+                    save_production_log(operator_name, client_name, order_number, deduction_details, box_usage, total_used)
 
                     pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, extra_inch)
 
@@ -430,4 +459,35 @@ with tab3:
 
 with tab4:
     st.subheader("Daily Summary")
-    st.info("Daily usage, waste, and efficiency stats will appear once production starts.")
+
+    try:
+        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        sh = gc.open_by_url(st.secrets["SHEET_URL"])
+        log_ws = sh.worksheet("Production_Log")
+        log_records = log_ws.get_all_records()
+        if log_records:
+            log_df = pd.DataFrame(log_records)
+            log_df['Timestamp'] = pd.to_datetime(log_df['Timestamp'])
+            today = datetime.now().date()
+            today_log = log_df[log_df['Timestamp'].dt.date == today]
+
+            if today_log.empty:
+                st.info("No production recorded today yet.")
+            else:
+                st.markdown("### Today's Production Overview")
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Total Footage Used", f"{today_log['Total_Used_FT'].sum():.1f} ft")
+                col2.metric("Total Waste", f"{today_log['Waste_FT'].sum():.1f} ft")
+                col3.metric("Total Pieces Produced", today_log['Pieces'].sum())
+                efficiency = ((today_log['Total_Used_FT'].sum() - today_log['Waste_FT'].sum()) / today_log['Total_Used_FT'].sum()) * 100
+                col4.metric("Efficiency", f"{efficiency:.1f}%")
+
+                st.markdown("### Today's Orders")
+                display_log = today_log[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
+                display_log['Timestamp'] = display_log['Timestamp'].dt.strftime('%H:%M')
+                st.dataframe(display_log.sort_values('Timestamp', ascending=False), use_container_width=True)
+        else:
+            st.info("No production history yet.")
+    except Exception as e:
+        st.error(f"Could not load production log: {e}")
+        st.info("Make sure you have a 'Production_Log' tab in your Google Sheet.")
