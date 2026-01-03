@@ -27,8 +27,6 @@ SIZE_MAP = {
     "Size 10": 32.5,
     "Size 11": 36.0,
     "Size 12": 39.5,
-    "Size 13": 42.75,
-    "Size 14": 46,
 }
 
 # --- PREDEFINED MATERIALS ---
@@ -402,4 +400,26 @@ with tab3:
                     st.success(f"Updated footage for {coil_to_adjust} to {new_footage:.1f} ft")
                 elif action == "Delete Coil":
                     if st.checkbox("Confirm permanent deletion", key="admin_confirm"):
-                        df = df[df['Coil_ID
+                        df = df[df['Coil_ID'] != coil_to_adjust]
+                        st.session_state.df = df
+                        save_inventory()
+                        st.success(f"Deleted {coil_to_adjust} from inventory")
+                        st.rerun()
+                st.rerun()
+        else:
+            st.info("No coils to adjust")
+    elif admin_password:
+        st.error("Incorrect admin password")
+    else:
+        st.info("Enter admin password to adjust or remove coils")
+
+    st.divider()
+    st.subheader("Current Inventory Preview")
+    if df.empty:
+        st.info("No coils added yet")
+    else:
+        st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
+
+with tab4:
+    st.subheader("Daily Summary")
+    st.info("Daily usage, waste, and efficiency stats will appear once production starts.")
