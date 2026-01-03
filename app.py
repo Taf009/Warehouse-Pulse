@@ -411,45 +411,46 @@ with tab3:
                 except:
                     st.error("Invalid Coil ID format — last part must be a number")
 
-    st.divider()
+        st.divider()
     st.subheader("🔧 Admin: Adjust or Remove Coil")
 
-    admin_password = st.text_input("Admin Password", type="password", key="admin_pass")
+    admin_password = st.text_input("Admin Password", type="password")
     correct_password = "mjp@2026!"
 
     if admin_password == correct_password:
         st.success("Admin access granted")
 
         if not df.empty:
-            coil_to_adjust = st.selectbox("Select Coil to Adjust/Delete", df['Coil_ID'], key="admin_coil")
+            with st.form("admin_adjust_form"):
+                coil_to_adjust = st.selectbox("Select Coil to Adjust/Delete", df['Coil_ID'])
 
-            col1, col2 = st.columns(2)
-            with col1:
                 current_footage = df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'].values[0]
-                new_footage = st.number_input("New Footage (ft)", min_value=0.0, value=float(current_footage), key="admin_footage")
-            with col2:
-                action = st.radio("Action", ["Update Footage", "Delete Coil"], key="admin_action")
+                new_footage = st.number_input("New Footage (ft)", min_value=0.0, value=float(current_footage))
 
-            if st.button("Apply Change", key="admin_apply"):
-                if action == "Update Footage":
-                    df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'] = new_footage
-                    save_inventory()
-                    st.success(f"Updated footage for {coil_to_adjust} to {new_footage:.1f} ft")
-                elif action == "Delete Coil":
-                    if st.checkbox("Confirm permanent deletion", key="admin_confirm"):
-                        df = df[df['Coil_ID'] != coil_to_adjust]
-                        st.session_state.df = df
+                action = st.radio("Action", ["Update Footage", "Delete Coil"])
+
+                submitted = st.form_submit_button("Apply Change")
+
+                if submitted:
+                    if action == "Update Footage":
+                        df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'] = new_footage
                         save_inventory()
-                        st.success(f"Deleted {coil_to_adjust} from inventory")
+                        st.success(f"Updated footage for {coil_to_adjust} to {new_footage:.1f} ft")
                         st.rerun()
-                st.rerun()
+                    elif action == "Delete Coil":
+                        st.warning(f"You are about to permanently delete {coil_to_adjust}")
+                        if st.button("Confirm Deletion"):
+                            df = df[df['Coil_ID'] != coil_to_adjust]
+                            st.session_state.df = df
+                            save_inventory()
+                            st.success(f"Deleted {coil_to_adjust} from inventory")
+                            st.rerun()
         else:
             st.info("No coils to adjust")
     elif admin_password:
         st.error("Incorrect admin password")
     else:
-        st.info("Enter admin password to adjust or remove coils")
-
+        st.info("Enter admin password to access adjustment tools")
     st.divider()
     st.subheader("Current Inventory Preview")
     if df.empty:
