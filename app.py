@@ -162,59 +162,99 @@ with tab1:
         st.dataframe(display_df.sort_values(['Material', 'Location']), use_container_width=True)
 
 with tab2:
-    st.subheader("Production Log - Cut from Coil")
+    st.subheader("Production Log - Multi-Size & Multi-Coil Orders")
 
-    available_coils = df[df['Footage'] > 0]
-    if available_coils.empty:
-        st.info("No coils with footage available for production. Add coils first.")
+    if df.empty or (df['Footage'] == 0).all():
+        st.info("No coils available for production. Add some first.")
     else:
-        with st.form("production_form"):
-            st.markdown("#### Select Coil and Production Details")
-            coil_options = [f"{row['Coil_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                            for _, row in available_coils.iterrows()]
-            selected_coil_str = st.selectbox("Select Coil to Cut From", coil_options)
-            coil_id = selected_coil_str.split(" - ")[0]
-
-            size = st.selectbox("Size Being Produced", list(SIZE_MAP.keys()))
-            pieces = st.number_input("Number of Pieces Produced", min_value=1, step=1)
-            waste = st.number_input("Waste Footage (ft)", min_value=0.0, step=0.1, value=0.0)
-
+        with st.form("production_order_form"):
+            st.markdown("#### Order Details")
             client_name = st.text_input("Client Name")
             order_number = st.text_input("Internal Order Number")
 
-            submitted = st.form_submit_button("Complete Production Order & Send PDF")
+            st.markdown("#### Production Lines (Add multiple sizes)")
+            # Session state for lines
+            if 'production_lines' not in st.session_state:
+                st.session_state.production_lines = [{"size": list(SIZE_MAP.keys())[0], "pieces": 1, "waste": 0.0, "coils": []}]
+
+            for i, line in enumerate(st.session_state.production_lines):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    line["size"] = st.selectbox(f"Size {i+1}", list(SIZE_MAP.keys()), key=f"size_{i}")
+                with col2:
+                    line["pieces"] = st.number_input(f"Pieces {i+1}", min_value=1, value=line["pieces"], key=f"pieces_{i}")
+                with col3:
+                    line["waste"] = st.number_input(f"Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"waste_{i}")
+
+                # Coil selection for this line
+                available_coils = df[df['Footage'] > 0]
+                coil_options = [f"{row['Coil_ID']} ({row['Footage']:.1f} ft)" for _, row in available_coils.iterrows()]
+                line["coils"] = st.multiselect(f"Coils for size {i+1}", coil_options, default=line["coils"], key=f"coils_{i}")
+
+            if st.button("Add another size line"):
+                st.session_state.production_lines.append({"size": list(SIZE_MAP.keys())[0], "pieces": 1, "waste": 0.0, "coils": []})
+                st.rerun()
+
+            st.markdown("#### Box Usage")
+            box_types = ["Small Metal Box", "Big Metal Box", "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"]
+            box_usage = {}
+            for box in box_types:
+                box_usage[box] = st.number_input(box, min_value=0, value=0, step=1, key=f"box_{box}")
+
+            submitted = st.form_submit_button("Complete Order & Send PDF")
 
             if submitted:
                 if not client_name or not order_number:
                     st.error("Client Name and Order Number are required")
                 else:
-                    inches_per_piece = SIZE_MAP[size]
-                    used_without_waste = pieces * inches_per_piece / 12
-                    total_used = used_without_waste + waste
+                    total_used = 0
+                    deduction_details = []
 
-                    current_footage = df.loc[df['Coil_ID'] == coil_id, 'Footage'].values[0]
-                    if total_used > current_footage:
-                        st.error(f"Not enough footage! Only {current_footage:.1f} ft available.")
+                    for line in st.session_state.production_lines:
+                        if line["pieces"] > 0 and not line["coils"]:
+                            st.error(f"Select at least one coil for size {line['size']}")
+                            st.stop()
+
+                        inches_per_piece = SIZE_MAP[line["size"]]
+                        used_without_waste = line["pieces"] * inches_per_piece / 12
+                        line_total = used_without_waste + line["waste"]
+                        total_used += line_total
+
+                        # Deduct from selected coils (simple even split for now)
+                        selected_coil_ids = [c.split(" (")[0] for c in line["coils"]]
+                        per_coil = line_total / len(selected_coil_ids) if selected_coil_ids else 0
+
+                        for coil_id in selected_coil_ids:
+                            current = df.loc[df['Coil_ID'] == coil_id, 'Footage'].values[0]
+                            if per_coil > current:
+                                st.error(f"Not enough footage on {coil_id}")
+                                st.stop()
+                            df.loc[df['Coil_ID'] == coil_id, 'Footage'] -= per_coil
+
+                        deduction_details.append({
+                            "size": line["size"],
+                            "pieces": line["pieces"],
+                            "waste": line["waste"],
+                            "used_ft": line_total,
+                            "coils": ", ".join(selected_coil_ids)
+                        })
+
+                    save_inventory()
+
+                    # Generate enhanced PDF
+                    pdf_buffer = generate_production_pdf_enhanced(
+                        order_number, client_name, deduction_details, box_usage, total_used
+                    )
+
+                    if send_production_pdf(pdf_buffer, order_number, client_name):
+                        st.success(f"Order {order_number} completed! PDF sent.")
                     else:
-                        remaining = current_footage - total_used
-                        df.loc[df['Coil_ID'] == coil_id, 'Footage'] = remaining
-                        material = df.loc[df['Coil_ID'] == coil_id, 'Material'].values[0]
+                        st.warning("Logged but email failed.")
 
-                        save_inventory()
-
-                        pdf_buffer = generate_production_pdf(
-                            order_number, client_name, material, coil_id, size, pieces,
-                            total_used, waste, remaining
-                        )
-
-                        if send_production_pdf(pdf_buffer, order_number, client_name):
-                            st.success(f"Production order {order_number} completed! PDF sent to admin.")
-                        else:
-                            st.warning("Production logged but email failed.")
-
-                        st.balloons()
-                        st.rerun()
-
+                    # Reset form
+                    st.session_state.production_lines = [{"size": list(SIZE_MAP.keys())[0], "pieces": 1, "waste": 0.0, "coils": []}]
+                    st.balloons()
+                    st.rerun()
 with tab3:
     st.subheader("Receive New Coils")
     with st.form("receive_coils_form", clear_on_submit=True):
