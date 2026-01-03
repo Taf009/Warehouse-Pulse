@@ -11,8 +11,8 @@ from email import encoders
 import io
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Warehouse Pulse Check", layout="wide")
-st.title("🏭 Warehouse Pulse Check - Production & Inventory")
+st.set_page_config(page_title="MJP Floors Pulse", layout="wide")
+st.title("🏭 MJP Floors Pulse Check - Production & Inventory")
 
 # --- SIZE MAP (ascending order with # prefix in display) ---
 SIZE_DISPLAY = {
