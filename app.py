@@ -166,7 +166,7 @@ with tab2:
 
     available_coils = df[df['Footage'] > 0]
     if available_coils.empty:
-        st.info("No coils with footage available for production.")
+        st.info("No coils with footage available for production. Add coils first.")
     else:
         with st.form("production_form"):
             st.markdown("#### Select Coil and Production Details")
@@ -289,51 +289,4 @@ with tab3:
                 st.error("Invalid Coil ID format")
 
     st.divider()
-    st.subheader("🔧 Admin: Adjust or Remove Coil")
-
-    admin_password = st.text_input("Admin Password", type="password", key="admin_pass")
-    correct_password = "mjp@2026!"
-
-    if admin_password == correct_password:
-        st.success("Admin access granted")
-
-        if not df.empty:
-            coil_to_adjust = st.selectbox("Select Coil to Adjust/Delete", df['Coil_ID'], key="admin_coil")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                current_footage = df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'].values[0]
-                new_footage = st.number_input("New Footage (ft)", min_value=0.0, value=float(current_footage), key="admin_footage")
-            with col2:
-                action = st.radio("Action", ["Update Footage", "Delete Coil"], key="admin_action")
-
-            if st.button("Apply Change", key="admin_apply"):
-                if action == "Update Footage":
-                    df.loc[df['Coil_ID'] == coil_to_adjust, 'Footage'] = new_footage
-                    save_inventory()
-                    st.success(f"Updated footage for {coil_to_adjust} to {new_footage:.1f} ft")
-                elif action == "Delete Coil":
-                    if st.checkbox("Confirm permanent deletion", key="admin_confirm"):
-                        df = df[df['Coil_ID'] != coil_to_adjust]
-                        st.session_state.df = df
-                        save_inventory()
-                        st.success(f"Deleted {coil_to_adjust} from inventory")
-                        st.rerun()
-                st.rerun()
-        else:
-            st.info("No coils to adjust")
-    elif admin_password:
-        st.error("Incorrect admin password")
-    else:
-        st.info("Enter admin password to adjust or remove coils")
-
-    st.divider()
-    st.subheader("Current Inventory Preview")
-    if df.empty:
-        st.info("No coils added yet")
-    else:
-        st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
-
-with tab4:
-    st.subheader("Daily Summary")
-    st.info("Daily usage, waste, and efficiency stats will appear once production starts.")
+    st
