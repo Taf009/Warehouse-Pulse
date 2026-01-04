@@ -623,7 +623,7 @@ with tab4:
             log_df['Waste_FT'] = pd.to_numeric(log_df['Waste_FT'], errors='coerce')
             log_df['Pieces'] = pd.to_numeric(log_df['Pieces'], errors='coerce')
 
-            # Time period selector
+            # --- Time Period Selector ---
             st.markdown("#### Select Time Period")
             period = st.selectbox("View", ["Today", "Last 7 Days", "This Month", "This Year", "Year to Date", "All Time"], key="summary_period")
 
@@ -652,7 +652,7 @@ with tab4:
             else:
                 st.markdown(f"### {title}")
 
-                # Key Metrics
+                # --- Key Metrics ---
                 col1, col2, col3, col4 = st.columns(4)
                 total_footage = filtered['Total_Used_FT'].sum()
                 total_waste = filtered['Waste_FT'].sum()
@@ -661,19 +661,48 @@ with tab4:
 
                 col1.metric("Total Footage Used", f"{total_footage:.1f} ft")
                 col2.metric("Total Waste", f"{total_waste:.1f} ft")
-                col3.metric("Total Pieces", int(total_pieces))
+                col3.metric("Total Pieces Produced", int(total_pieces))
                 col4.metric("Efficiency", f"{efficiency:.1f}%")
 
-                # Charts
-                st.markdown("### Top Sizes Produced")
-                top_sizes = filtered.groupby('Size')['Pieces'].sum().sort_values(ascending=False)
-                st.bar_chart(top_sizes)
+                # --- Group By Selector ---
+                st.markdown("#### Group Insights By")
+                group_by = st.selectbox("Group by", ["Material", "Size", "Client"], key="group_by")
 
-                st.markdown("### Top Operators")
-                top_ops = filtered.groupby('Operator')['Total_Used_FT'].sum().sort_values(ascending=False)
-                st.bar_chart(top_ops)
+                # Dynamic Summary
+                if group_by == "Material":
+                    group_summary = filtered.groupby('Material').agg(
+                        Total_Footage=('Total_Used_FT', 'sum'),
+                        Total_Waste=('Waste_FT', 'sum'),
+                        Total_Pieces=('Pieces', 'sum')
+                    ).round(1)
+                    group_summary['Efficiency_%'] = ((group_summary['Total_Footage'] - group_summary['Total_Waste']) / group_summary['Total_Footage'] * 100).round(1)
+                    group_summary = group_summary.sort_values('Total_Footage', ascending=False)
+                elif group_by == "Size":
+                    group_summary = filtered.groupby('Size').agg(
+                        Total_Pieces=('Pieces', 'sum'),
+                        Total_Footage=('Total_Used_FT', 'sum'),
+                        Total_Waste=('Waste_FT', 'sum')
+                    ).round(1)
+                    group_summary = group_summary.sort_values('Total_Pieces', ascending=False)
+                else:  # Client
+                    group_summary = filtered.groupby('Client').agg(
+                        Total_Footage=('Total_Used_FT', 'sum'),
+                        Total_Pieces=('Pieces', 'sum')
+                    ).round(1)
+                    group_summary = group_summary.sort_values('Total_Footage', ascending=False)
 
-                # All Orders
+                st.markdown(f"### Breakdown by {group_by}")
+                st.dataframe(group_summary, use_container_width=True)
+
+                # Dynamic Chart
+                st.markdown(f"### Top {group_by} by Footage Used")
+                if group_by == "Size":
+                    chart_data = group_summary['Total_Footage']
+                else:
+                    chart_data = group_summary['Total_Footage']
+                st.bar_chart(chart_data.head(10))
+
+                # All Orders Table
                 st.markdown("### All Orders")
                 display = filtered[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
                 display['Timestamp'] = display['Timestamp'].dt.strftime('%Y-%m-%d %H:%M')
