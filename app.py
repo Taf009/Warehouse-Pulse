@@ -10,6 +10,28 @@ from email.mime.base import MIMEBase
 from email import encoders
 import io
 
+# --- CUSTOM STYLING FOR ALERTS ---
+st.markdown("""
+<style>
+.low-stock-banner {
+    background-color: #FF8C00;  /* Amber orange */
+    padding: 10px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+.low-stock-text {
+    color: #8B0000;  /* Dark red */
+    font-weight: bold;
+    font-size: 18px;
+}
+.low-stock-row {
+    background-color: #FFFF99 !important;  /* Light yellow */
+    font-weight: bold;
+    color: #000000 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="MJP Floors Pulse", layout="wide")
 st.title("🏭 MJP Floors Pulse Check - Production & Inventory")
@@ -236,31 +258,25 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Dashboard", "Production Log", "Warehous
 
 with tab1:
     st.subheader("Current Inventory Summary")
-        # --- LOW STOCK ALERT BANNER ---
+
+    # --- LOW STOCK ALERT BANNER ---
     low_materials = []
     for material in df['Material'].unique():
         total = df[df['Material'] == material]['Footage'].sum()
-        threshold = LOW_STOCK_THRESHOLDS.get(material, 1000.0)  # default 1000 ft
+        threshold = LOW_STOCK_THRESHOLDS.get(material, 1000.0)
         if total < threshold:
-            low_materials.append(f"{material}: {total:.1f} ft (below {threshold} ft)")
+            low_materials.append(f"{material}: {total:.1f} ft (threshold: {threshold} ft)")
 
     if low_materials:
-        st.error(f"⚠️ LOW STOCK ALERT: {len(low_materials)} material(s) below threshold!")
+        st.markdown("<div class='low-stock-banner'>"
+                    "<p class='low-stock-text'>⚠️ LOW STOCK ALERT</p>"
+                    "<p>The following materials are running low:</p>", 
+                    unsafe_allow_html=True)
         for item in low_materials:
-            st.warning(item)
+            st.markdown(f"<p style='color:#8B0000; font-weight:bold;'>{item}</p>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- Adjustable Threshold (optional — place here if you want to let admin change it) ---
-    st.markdown("#### Low Stock Thresholds")
-    new_thresholds = {}
-    for material in df['Material'].unique():
-        current = LOW_STOCK_THRESHOLDS.get(material, 3000.0)
-        new_val = st.number_input(f"{material}", min_value=0.0, value=current, key=f"thresh_{material}")
-        new_thresholds[material] = new_val
-
-    if st.button("Update Thresholds"):
-        # In a real app, you'd save this to secrets or a sheet — for now, just show
-        st.success("Thresholds updated (restart app to persist)")
-
+    # --- Material Summary Table ---
     if df.empty:
         st.info("No coils in inventory yet. Go to Warehouse Management to add some.")
     else:
@@ -283,11 +299,24 @@ with tab1:
             hide_index=True
         )
 
+        # --- Individual Coils with Highlighting ---
         st.markdown("### Individual Coils")
         display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
         display_df['Footage'] = display_df['Footage'].round(1)
-        st.dataframe(display_df.sort_values(['Material', 'Location']), use_container_width=True)
 
+        def highlight_row(row):
+            total_for_material = df[df['Material'] == row['Material']]['Footage'].sum()
+            threshold = LOW_STOCK_THRESHOLDS.get(row['Material'], 1000.0)
+            if total_for_material < threshold:
+                return ['background-color: #FFFF99; color: black; font-weight: bold'] * len(row)
+            return [''] * len(row)
+
+        st.dataframe(
+            display_df.sort_values(['Material', 'Location']),
+            use_container_width=True,
+            hide_index=True,
+            row_style=highlight_row
+        )
 with tab2:
     st.subheader("Production Log - Multi-Size & Multi-Coil Orders")
 
