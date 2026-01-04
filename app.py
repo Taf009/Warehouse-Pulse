@@ -650,49 +650,30 @@ with tab4:
             if filtered.empty:
                 st.info(f"No production in {period.lower()} yet.")
             else:
-                st.markdown(f"### {title} - Per Material Breakdown")
+                st.markdown(f"### {title} Summary")
 
-                # Group by Material
-                material_summary = filtered.groupby('Material').agg(
-                    Total_Footage=('Total_Used_FT', 'sum'),
-                    Total_Waste=('Waste_FT', 'sum'),
-                    Total_Pieces=('Pieces', 'sum')
-                ).reset_index()
-                material_summary['Efficiency_%'] = ((material_summary['Total_Footage'] - material_summary['Total_Waste']) / material_summary['Total_Footage'] * 100).round(1)
-                material_summary = material_summary.sort_values('Total_Footage', ascending=False)
+                # Key Metrics
+                col1, col2, col3, col4 = st.columns(4)
+                total_footage = filtered['Total_Used_FT'].sum()
+                total_waste = filtered['Waste_FT'].sum()
+                total_pieces = filtered['Pieces'].sum()
+                efficiency = ((total_footage - total_waste) / total_footage * 100) if total_footage > 0 else 0
 
-                st.dataframe(
-                    material_summary,
-                    column_config={
-                        "Material": "Material",
-                        "Total_Footage": st.column_config.NumberColumn("Footage Used (ft)", format="%.1f"),
-                        "Total_Waste": st.column_config.NumberColumn("Waste (ft)", format="%.1f"),
-                        "Total_Pieces": st.column_config.NumberColumn("Pieces Produced", format="%d"),
-                        "Efficiency_%": st.column_config.NumberColumn("Efficiency", format="%.1f%%")
-                    },
-                    use_container_width=True,
-                    hide_index=True
-                )
+                col1.metric("Total Footage Used", f"{total_footage:.1f} ft")
+                col2.metric("Total Waste", f"{total_waste:.1f} ft")
+                col3.metric("Total Pieces", int(total_pieces))
+                col4.metric("Efficiency", f"{efficiency:.1f}%")
 
-                # --- Charts per Material ---
-                st.markdown("### Top Materials by Footage Used")
-                top_materials = material_summary.head(10)
-                st.bar_chart(top_materials.set_index('Material')['Total_Footage'])
-
-                st.markdown("### Efficiency by Material")
-                st.bar_chart(material_summary.set_index('Material')['Efficiency_%'])
-
-                # --- Top Sizes Overall ---
+                # Charts
                 st.markdown("### Top Sizes Produced")
-                top_sizes = filtered.groupby('Size')['Pieces'].sum().sort_values(ascending=False).head(10)
+                top_sizes = filtered.groupby('Size')['Pieces'].sum().sort_values(ascending=False)
                 st.bar_chart(top_sizes)
 
-                # --- Top Operators ---
                 st.markdown("### Top Operators")
                 top_ops = filtered.groupby('Operator')['Total_Used_FT'].sum().sort_values(ascending=False)
                 st.bar_chart(top_ops)
 
-                # --- All Orders Table ---
+                # All Orders
                 st.markdown("### All Orders")
                 display = filtered[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
                 display['Timestamp'] = display['Timestamp'].dt.strftime('%Y-%m-%d %H:%M')
@@ -701,7 +682,7 @@ with tab4:
 
     except Exception as e:
         st.error(f"Could not load production log: {e}")
-        st.info("Make sure you have a 'Production_Log' tab with correct headers.")
+        st.info("Check your 'Production_Log' tab headers and data.")
         
 with tab5:
     st.subheader("Audit Trail - All Actions")
