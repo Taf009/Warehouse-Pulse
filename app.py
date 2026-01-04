@@ -182,6 +182,7 @@ def save_production_log(order_number, client_name, operator_name, deduction_deta
                 operator_name,
                 client_name,
                 order_number,
+                line["material"],
                 line["display_size"],
                 line["pieces"],
                 line["waste"],
@@ -426,7 +427,8 @@ with tab2:
                             "pieces": line["pieces"],
                             "waste": line["waste"],
                             "total_used": line_total,
-                            "coils": ", ".join(selected_coil_ids)
+                            "coils": ", ".join(selected_coil_ids),
+                            "material": material_str
                         })
 
                         per_coil = line_total / len(selected_coil_ids)
