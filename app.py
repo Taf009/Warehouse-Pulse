@@ -663,42 +663,41 @@ with tab4:
 
                 col1.metric("Total Footage Used", f"{total_footage:.1f} ft")
                 col2.metric("Total Waste", f"{total_waste:.1f} ft")
-                col3.metric("Total Pieces", int(total_pieces))
+                col3.metric("Total Pieces Produced", int(total_pieces))
                 col4.metric("Efficiency", f"{efficiency:.1f}%")
 
-                # View Mode Selector
-                st.markdown("#### View Insights By")
-                view_mode = st.selectbox("Group by", ["Material → Client", "Client → Material", "Size"], key="view_mode")
+                # Group By Selector (multi-select)
+                st.markdown("#### Group Insights By")
+                group_options = st.multiselect(
+                    "Select grouping (add multiple for combined view)",
+                    ["Material", "Client", "Size"],
+                    default=["Material"]
+                )
 
-                if view_mode == "Material → Client":
-                    st.markdown("### Material Usage by Client")
-                    material_client = filtered.groupby(['Material', 'Client'])['Total_Used_FT'].sum().round(1).reset_index()
-                    pivot = material_client.pivot(index='Material', columns='Client', values='Total_Used_FT').fillna(0)
-                    st.dataframe(pivot, use_container_width=True)
-
-                    # Chart: Top materials
-                    top_materials = filtered.groupby('Material')['Total_Used_FT'].sum().sort_values(ascending=False)
-                    st.bar_chart(top_materials)
-
-                elif view_mode == "Client → Material":
-                    st.markdown("### Client Usage by Material")
-                    client_material = filtered.groupby(['Client', 'Material'])['Total_Used_FT'].sum().round(1).reset_index()
-                    pivot = client_material.pivot(index='Client', columns='Material', values='Total_Used_FT').fillna(0)
-                    st.dataframe(pivot, use_container_width=True)
-
-                    # Chart: Top clients
-                    top_clients = filtered.groupby('Client')['Total_Used_FT'].sum().sort_values(ascending=False)
-                    st.bar_chart(top_clients)
-
-                else:  # Size
-                    st.markdown("### Production by Size")
-                    size_summary = filtered.groupby('Size').agg(
-                        Total_Pieces=('Pieces', 'sum'),
-                        Total_Footage=('Total_Used_FT', 'sum')
+                if not group_options:
+                    st.warning("Select at least one grouping option")
+                else:
+                    # Dynamic grouping
+                    group_summary = filtered.groupby(group_options).agg(
+                        Total_Footage=('Total_Used_FT', 'sum'),
+                        Total_Waste=('Waste_FT', 'sum'),
+                        Total_Pieces=('Pieces', 'sum')
                     ).round(1)
-                    size_summary = size_summary.sort_values('Total_Pieces', ascending=False)
-                    st.dataframe(size_summary, use_container_width=True)
-                    st.bar_chart(size_summary['Total_Pieces'])
+                    group_summary['Efficiency_%'] = ((group_summary['Total_Footage'] - group_summary['Total_Waste']) / group_summary['Total_Footage'] * 100).round(1)
+                    group_summary = group_summary.sort_values('Total_Footage', ascending=False)
+
+                    st.markdown(f"### Breakdown by {', '.join(group_options)}")
+                    st.dataframe(group_summary, use_container_width=True)
+
+                    # Labeled Bar Chart
+                    st.markdown(f"### Top Combinations by Footage Used")
+                    chart_data = group_summary['Total_Footage'].head(15)
+                    st.bar_chart(chart_data, x_label=', '.join(group_options), y_label="Footage Used (ft)")
+
+                    # Optional: Second chart for pieces
+                    if len(group_options) == 1 and group_options[0] == "Size":
+                        st.markdown("### Top Sizes by Pieces Produced")
+                        st.bar_chart(group_summary['Total_Pieces'], x_label="Size", y_label="Pieces")
 
                 # All Orders Table
                 st.markdown("### All Orders")
