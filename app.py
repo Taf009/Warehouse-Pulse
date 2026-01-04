@@ -650,7 +650,7 @@ with tab4:
             if filtered.empty:
                 st.info(f"No production in {period.lower()} yet.")
             else:
-                st.markdown(f"### {title} Summary")
+                st.markdown(f"### {title}")
 
                 # Key Metrics
                 col1, col2, col3, col4 = st.columns(4)
@@ -664,16 +664,51 @@ with tab4:
                 col3.metric("Total Pieces", int(total_pieces))
                 col4.metric("Efficiency", f"{efficiency:.1f}%")
 
-                # Charts
-                st.markdown("### Top Sizes Produced")
-                top_sizes = filtered.groupby('Size')['Pieces'].sum().sort_values(ascending=False)
-                st.bar_chart(top_sizes)
+                # --- Group By Selector ---
+                st.markdown("#### Group Insights By")
+                group_by = st.selectbox("Group by", ["Material", "Size", "Client", "Order_Number"])
 
-                st.markdown("### Top Operators")
-                top_ops = filtered.groupby('Operator')['Total_Used_FT'].sum().sort_values(ascending=False)
-                st.bar_chart(top_ops)
+                # Dynamic Summary Table
+                if group_by == "Material":
+                    group_summary = filtered.groupby('Material').agg(
+                        Total_Footage=('Total_Used_FT', 'sum'),
+                        Total_Waste=('Waste_FT', 'sum'),
+                        Total_Pieces=('Pieces', 'sum')
+                    ).round(1)
+                    group_summary['Efficiency_%'] = ((group_summary['Total_Footage'] - group_summary['Total_Waste']) / group_summary['Total_Footage'] * 100).round(1)
+                    group_summary = group_summary.sort_values('Total_Footage', ascending=False)
+                elif group_by == "Size":
+                    group_summary = filtered.groupby('Size').agg(
+                        Total_Pieces=('Pieces', 'sum'),
+                        Total_Footage=('Total_Used_FT', 'sum'),
+                        Total_Waste=('Waste_FT', 'sum')
+                    ).round(1)
+                    group_summary = group_summary.sort_values('Total_Pieces', ascending=False)
+                elif group_by == "Client":
+                    group_summary = filtered.groupby('Client').agg(
+                        Total_Footage=('Total_Used_FT', 'sum'),
+                        Total_Pieces=('Pieces', 'sum')
+                    ).round(1)
+                    group_summary = group_summary.sort_values('Total_Footage', ascending=False)
+                else:  # Order_Number
+                    group_summary = filtered.groupby('Order_Number').agg(
+                        Total_Footage=('Total_Used_FT', 'sum'),
+                        Total_Pieces=('Pieces', 'sum')
+                    ).round(1)
+                    group_summary = group_summary.sort_values('Total_Footage', ascending=False)
 
-                # All Orders
+                st.markdown(f"### Breakdown by {group_by}")
+                st.dataframe(group_summary, use_container_width=True)
+
+                # Dynamic Chart
+                st.markdown(f"### Top {group_by} by Footage Used")
+                if group_by == "Size":
+                    chart_data = group_summary['Total_Footage']
+                else:
+                    chart_data = group_summary['Total_Footage']
+                st.bar_chart(chart_data.head(10))
+
+                # All Orders Table
                 st.markdown("### All Orders")
                 display = filtered[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
                 display['Timestamp'] = display['Timestamp'].dt.strftime('%Y-%m-%d %H:%M')
@@ -682,8 +717,7 @@ with tab4:
 
     except Exception as e:
         st.error(f"Could not load production log: {e}")
-        st.info("Check your 'Production_Log' tab headers and data.")
-        
+        st.info("Make sure you have a 'Production_Log' tab with correct headers.")        
 with tab5:
     st.subheader("Audit Trail - All Actions")
     try:
