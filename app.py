@@ -576,7 +576,7 @@ with tab3:
         st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
 
 with tab4:
-    st.subheader("📊 Daily Production Summary")
+    st.subheader("📊 Production Summary & Insights")
 
     try:
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
@@ -594,50 +594,85 @@ with tab4:
             log_df['Waste_FT'] = pd.to_numeric(log_df['Waste_FT'], errors='coerce')
             log_df['Pieces'] = pd.to_numeric(log_df['Pieces'], errors='coerce')
 
-            today = datetime.now().date()
-            today_log = log_df[log_df['Date'] == today]
+            # --- Time Period Selector ---
+            st.markdown("#### Select Time Period")
+            period = st.selectbox("View", ["Today", "Last 7 Days", "This Month", "This Year", "Year to Date", "All Time"], key="summary_period")
 
-            if today_log.empty:
-                st.info("No production today yet.")
+            now = datetime.now()
+            if period == "Today":
+                filtered = log_df[log_df['Date'] == now.date()]
+                title = "Today's Production"
+            elif period == "Last 7 Days":
+                filtered = log_df[log_df['Timestamp'] >= now - pd.Timedelta(days=7)]
+                title = "Last 7 Days"
+            elif period == "This Month":
+                filtered = log_df[log_df['Timestamp'].dt.month == now.month]
+                title = f"{now.strftime('%B %Y')}"
+            elif period == "This Year":
+                filtered = log_df[log_df['Timestamp'].dt.year == now.year]
+                title = str(now.year)
+            elif period == "Year to Date":
+                filtered = log_df[log_df['Timestamp'] >= datetime(now.year, 1, 1)]
+                title = f"YTD {now.year}"
             else:
-                # Key Metrics
-                st.markdown("### Today's Key Metrics")
-                col1, col2, col3, col4 = st.columns(4)
-                total_footage = today_log['Total_Used_FT'].sum()
-                total_waste = today_log['Waste_FT'].sum()
-                total_pieces = today_log['Pieces'].sum()
-                efficiency = ((total_footage - total_waste) / total_footage * 100) if total_footage > 0 else 0
+                filtered = log_df
+                title = "All Time"
 
-                col1.metric("Total Footage Used", f"{total_footage:.1f} ft")
-                col2.metric("Total Waste", f"{total_waste:.1f} ft")
-                col3.metric("Total Pieces", int(total_pieces))
-                col4.metric("Efficiency", f"{efficiency:.1f}%")
+            if filtered.empty:
+                st.info(f"No production in {period.lower()} yet.")
+            else:
+                st.markdown(f"### {title} - Per Material Breakdown")
 
-                # Charts
-                st.markdown("### Footage Breakdown")
-                chart_data = pd.DataFrame({
-                    "Type": ["Used (Product)", "Waste"],
-                    "Footage (ft)": [total_footage - total_waste, total_waste]
-                })
-                st.bar_chart(chart_data.set_index("Type"))
+                # Group by Material
+                material_summary = filtered.groupby('Material').agg(
+                    Total_Footage=('Total_Used_FT', 'sum'),
+                    Total_Waste=('Waste_FT', 'sum'),
+                    Total_Pieces=('Pieces', 'sum')
+                ).reset_index()
+                material_summary['Efficiency_%'] = ((material_summary['Total_Footage'] - material_summary['Total_Waste']) / material_summary['Total_Footage'] * 100).round(1)
+                material_summary = material_summary.sort_values('Total_Footage', ascending=False)
 
-                st.markdown("### Production by Size Today")
-                size_summary = today_log.groupby('Size').agg({
-                    'Pieces': 'sum',
-                    'Total_Used_FT': 'sum'
-                }).reset_index()
-                st.bar_chart(size_summary.set_index('Size')['Pieces'])
+                st.dataframe(
+                    material_summary,
+                    column_config={
+                        "Material": "Material",
+                        "Total_Footage": st.column_config.NumberColumn("Footage Used (ft)", format="%.1f"),
+                        "Total_Waste": st.column_config.NumberColumn("Waste (ft)", format="%.1f"),
+                        "Total_Pieces": st.column_config.NumberColumn("Pieces Produced", format="%d"),
+                        "Efficiency_%": st.column_config.NumberColumn("Efficiency", format="%.1f%%")
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
 
-                # Today's Orders
-                st.markdown("### Today's Completed Orders")
-                display_today = today_log[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
-                display_today['Timestamp'] = display_today['Timestamp'].dt.strftime('%H:%M')
-                st.dataframe(display_today.sort_values('Timestamp', ascending=False), use_container_width=True)
+                # --- Charts per Material ---
+                st.markdown("### Top Materials by Footage Used")
+                top_materials = material_summary.head(10)
+                st.bar_chart(top_materials.set_index('Material')['Total_Footage'])
+
+                st.markdown("### Efficiency by Material")
+                st.bar_chart(material_summary.set_index('Material')['Efficiency_%'])
+
+                # --- Top Sizes Overall ---
+                st.markdown("### Top Sizes Produced")
+                top_sizes = filtered.groupby('Size')['Pieces'].sum().sort_values(ascending=False).head(10)
+                st.bar_chart(top_sizes)
+
+                # --- Top Operators ---
+                st.markdown("### Top Operators")
+                top_ops = filtered.groupby('Operator')['Total_Used_FT'].sum().sort_values(ascending=False)
+                st.bar_chart(top_ops)
+
+                # --- All Orders Table ---
+                st.markdown("### All Orders")
+                display = filtered[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
+                display['Timestamp'] = display['Timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+                display = display.sort_values('Timestamp', ascending=False)
+                st.dataframe(display, use_container_width=True)
 
     except Exception as e:
         st.error(f"Could not load production log: {e}")
         st.info("Make sure you have a 'Production_Log' tab with correct headers.")
-
 with tab5:
     st.subheader("Audit Trail - All Actions")
     try:
