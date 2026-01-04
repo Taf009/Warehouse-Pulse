@@ -689,24 +689,32 @@ with tab4:
                     st.markdown(f"### Breakdown by {', '.join(group_options)}")
                     st.dataframe(group_summary, use_container_width=True)
 
-                                        # Fixed Labeled Bar Chart for single and multi-group
-                    st.markdown(f"### Top by Footage Used")
-                    chart_df = group_summary['Total_Footage'].head(15).reset_index()
-                    if len(group_options) == 1:
-                        chart_df['Label'] = chart_df[group_options[0]].astype(str)
-                    else:
-                        chart_df['Label'] = chart_df[group_options].astype(str).agg(' - '.join, axis=1)
-                    st.bar_chart(chart_df.set_index('Label')['Total_Footage'])
+                    # --- Top by Footage Used (always grouped by Material for clarity) ---
+                    st.markdown("### Top Materials by Footage Used")
+                    material_footage = filtered.groupby('Material')['Total_Used_FT'].sum().sort_values(ascending=False)
+                    material_chart = pd.DataFrame({
+                        "Material": material_footage.index,
+                        "Footage (ft)": material_footage.values
+                    })
+                    st.bar_chart(material_chart.set_index("Material"))
 
-                    # Optional second chart for pieces
-                    if "Size" in group_options:
-                        st.markdown("### Top Sizes by Pieces Produced")
-                        pieces_df = group_summary['Total_Pieces'].head(15).reset_index()
-                        if len(group_options) == 1:
-                            pieces_df['Label'] = pieces_df[group_options[0]].astype(str)
-                        else:
-                            pieces_df['Label'] = pieces_df[group_options].astype(str).agg(' - '.join, axis=1)
-                        st.bar_chart(pieces_df.set_index('Label')['Total_Pieces'])
+                    # --- Optional: Top Sizes ---
+                    st.markdown("### Top Sizes Produced")
+                    size_pieces = filtered.groupby('Size')['Pieces'].sum().sort_values(ascending=False).head(10)
+                    size_chart = pd.DataFrame({
+                        "Size": size_pieces.index,
+                        "Pieces": size_pieces.values
+                    })
+                    st.bar_chart(size_chart.set_index("Size"))
+
+                    # --- Top Clients ---
+                    st.markdown("### Top Clients by Footage")
+                    client_footage = filtered.groupby('Client')['Total_Used_FT'].sum().sort_values(ascending=False).head(10)
+                    client_chart = pd.DataFrame({
+                        "Client": client_footage.index,
+                        "Footage (ft)": client_footage.values
+                    })
+                    st.bar_chart(client_chart.set_index("Client"))
 
                 # All Orders Table
                 st.markdown("### All Orders")
