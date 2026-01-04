@@ -300,7 +300,7 @@ with tab1:
         )
 
         # --- Individual Coils with Highlighting ---
-                st.markdown("### Individual Coils")
+        st.markdown("### Individual Coils")
         display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
         display_df['Footage'] = display_df['Footage'].round(1)
 
