@@ -673,6 +673,7 @@ with tab4:
     except Exception as e:
         st.error(f"Could not load production log: {e}")
         st.info("Make sure you have a 'Production_Log' tab with correct headers.")
+        
 with tab5:
     st.subheader("Audit Trail - All Actions")
     try:
