@@ -300,23 +300,25 @@ with tab1:
         )
 
         # --- Individual Coils with Highlighting ---
-        st.markdown("### Individual Coils")
+                st.markdown("### Individual Coils")
         display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
         display_df['Footage'] = display_df['Footage'].round(1)
 
-        def highlight_row(row):
+        # Highlight low stock materials in yellow with bold black text
+        def make_low_stock_row(row):
             total_for_material = df[df['Material'] == row['Material']]['Footage'].sum()
             threshold = LOW_STOCK_THRESHOLDS.get(row['Material'], 1000.0)
             if total_for_material < threshold:
-                return ['background-color: #FFFF99; color: black; font-weight: bold'] * len(row)
-            return [''] * len(row)
+                return f"<tr style='background-color:#FFFF99; font-weight:bold; color:black;'><td>{row['Coil_ID']}</td><td>{row['Material']}</td><td>{row['Footage']}</td><td>{row['Location']}</td></tr>"
+            return f"<tr><td>{row['Coil_ID']}</td><td>{row['Material']}</td><td>{row['Footage']}</td><td>{row['Location']}</td></tr>"
 
-        st.dataframe(
-            display_df.sort_values(['Material', 'Location']),
-            use_container_width=True,
-            hide_index=True,
-            row_style=highlight_row
-        )
+        html_table = "<table style='width:100%; border-collapse:collapse;'><tr><th>Coil_ID</th><th>Material</th><th>Footage</th><th>Location</th></tr>"
+        for _, row in display_df.sort_values(['Material', 'Location']).iterrows():
+            html_table += make_low_stock_row(row)
+        html_table += "</table>"
+
+        st.markdown(html_table, unsafe_allow_html=True)
+        
 with tab2:
     st.subheader("Production Log - Multi-Size & Multi-Coil Orders")
 
