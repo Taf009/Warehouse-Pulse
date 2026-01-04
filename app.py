@@ -34,7 +34,7 @@ st.markdown("""
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="MJP Floors Pulse", layout="wide")
-st.title("🏭 MJP Floors Pulse Check - Production & Inventory")
+st.title("🏭 MJP Floors Pulse")
 
 # --- SIZE MAP (ascending order with # prefix in display) ---
 SIZE_DISPLAY = {
