@@ -166,6 +166,34 @@ def check_low_stock_and_alert():
         except Exception as e:
             st.error(f"Low stock detected but email failed: {e}")
 
+def save_production_log(order_number, client_name, operator_name, deduction_details, box_usage):
+    try:
+        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        sh = gc.open_by_url(st.secrets["SHEET_URL"])
+        log_ws = sh.worksheet("Production_Log")
+
+        rows = []
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        boxes_str = "; ".join([f"{k}: {v}" for k, v in box_usage.items() if v > 0]) or "None"
+
+        for line in deduction_details:
+            rows.append([
+                timestamp,
+                operator_name,
+                client_name,
+                order_number,
+                line["display_size"],
+                line["pieces"],
+                line["waste"],
+                line["coils"],
+                boxes_str,
+                line["total_used"]
+            ])
+
+        log_ws.append_rows(rows)
+    except Exception as e:
+        st.warning(f"Could not save to production log: {e}")
+
 # --- AUDIT LOG FUNCTION ---
 def log_action(action, details=""):
     try:
@@ -411,6 +439,7 @@ with tab2:
 
                     save_inventory()
                     check_low_stock_and_alert()  # This triggers the email alert for depleted material
+                    save_production_log(order_number, client_name, operator_name, deduction_details, box_usage)
 
                     pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, extra_inch)
 
