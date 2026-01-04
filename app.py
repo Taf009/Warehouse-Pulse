@@ -689,15 +689,24 @@ with tab4:
                     st.markdown(f"### Breakdown by {', '.join(group_options)}")
                     st.dataframe(group_summary, use_container_width=True)
 
-                    # Labeled Bar Chart
-                    st.markdown(f"### Top Combinations by Footage Used")
-                    chart_data = group_summary['Total_Footage'].head(15)
-                    st.bar_chart(chart_data, x_label=', '.join(group_options), y_label="Footage Used (ft)")
+                                        # Fixed Labeled Bar Chart for single and multi-group
+                    st.markdown(f"### Top by Footage Used")
+                    chart_df = group_summary['Total_Footage'].head(15).reset_index()
+                    if len(group_options) == 1:
+                        chart_df['Label'] = chart_df[group_options[0]].astype(str)
+                    else:
+                        chart_df['Label'] = chart_df[group_options].astype(str).agg(' - '.join, axis=1)
+                    st.bar_chart(chart_df.set_index('Label')['Total_Footage'])
 
-                    # Optional: Second chart for pieces
-                    if len(group_options) == 1 and group_options[0] == "Size":
+                    # Optional second chart for pieces
+                    if "Size" in group_options:
                         st.markdown("### Top Sizes by Pieces Produced")
-                        st.bar_chart(group_summary['Total_Pieces'], x_label="Size", y_label="Pieces")
+                        pieces_df = group_summary['Total_Pieces'].head(15).reset_index()
+                        if len(group_options) == 1:
+                            pieces_df['Label'] = pieces_df[group_options[0]].astype(str)
+                        else:
+                            pieces_df['Label'] = pieces_df[group_options].astype(str).agg(' - '.join, axis=1)
+                        st.bar_chart(pieces_df.set_index('Label')['Total_Pieces'])
 
                 # All Orders Table
                 st.markdown("### All Orders")
