@@ -536,7 +536,15 @@ with tab2:
                         pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, extra_inch)
 
                         if send_production_pdf(pdf_buffer, order_number, client_name):
-                            st.success(f"Order {order_number} completed by
+                            st.success(f"Order {order_number} completed by {operator_name}! PDF sent.")
+                        else:
+                            st.warning("Logged but email failed.")
+
+                        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
+                        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
+                        st.balloons()
+                        st.rerun()
+                            
 with tab3:
     st.subheader("Warehouse Management")
 
