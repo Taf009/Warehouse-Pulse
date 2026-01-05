@@ -425,6 +425,22 @@ with tab2:
                         st.session_state.production_lines.pop(i)
                         st.rerun()
 
+                # --- CORRECT ITEM FILTERING ---
+                if line["type"] == "Coil":
+                    available_for_line = available_items[available_items['Material'].isin(COIL_MATERIALS)]
+                else:  # Roll
+                    available_for_line = available_items[available_items['Material'].isin(ROLL_MATERIALS)]
+
+                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                                for _, row in available_for_line.iterrows()]
+
+                line["items"] = st.multiselect(
+                    f"{line['type']}s for size {i+1}",
+                    item_options,
+                    default=line["items"],
+                    key=f"items_{i}"
+                
+
                 # Item selection based on type
                 materials_list = COIL_MATERIALS if line["type"] == "Coil" else ROLL_MATERIALS
                 filtered_items = available_items[available_items['Material'].isin(materials_list)]
