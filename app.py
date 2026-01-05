@@ -413,9 +413,19 @@ with tab2:
             with st.container():
                 col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 1, 1, 1])
                 with col1:
-                    line["type"] = st.selectbox(f"Type {i+1}", ["Coil", "Roll"], index=["Coil", "Roll"].index(line["type"]), key=f"type_{i}")
+                    line["type"] = st.selectbox(
+                        f"Type {i+1}",
+                        ["Coil", "Roll"],
+                        index=["Coil", "Roll"].index(line["type"]),
+                        key=f"type_{i}"
+                    )
                 with col2:
-                    line["display_size"] = st.selectbox(f"Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"size_{i}")
+                    line["display_size"] = st.selectbox(
+                        f"Size {i+1}",
+                        list(SIZE_DISPLAY.keys()),
+                        index=list(SIZE_DISPLAY.keys()).index(line["display_size"]),
+                        key=f"size_{i}"
+                    )
                 with col3:
                     line["pieces"] = st.number_input(f"Pieces {i+1}", min_value=1, value=line["pieces"], key=f"pieces_{i}")
                 with col4:
@@ -425,20 +435,21 @@ with tab2:
                         st.session_state.production_lines.pop(i)
                         st.rerun()
 
-                # --- CORRECT ITEM FILTERING ---
-                if line["type"] == "Coil":
-                    available_for_line = available_items[available_items['Material'].isin(COIL_MATERIALS)]
-                else:  # Roll
-                    available_for_line = available_items[available_items['Material'].isin(ROLL_MATERIALS)]
+                # --- CORRECT FILTERING BY CATEGORY AND MATERIAL ---
+                filtered_items = available_items[available_items['Category'] == line["type"]]
+                material_list = COIL_MATERIALS if line["type"] == "Coil" else ROLL_MATERIALS
+                filtered_items = filtered_items[filtered_items['Material'].isin(material_list)]
 
                 item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                                for _, row in available_for_line.iterrows()]
+                                for _, row in filtered_items.iterrows()]
 
-                line["items"] = st.multiselect()
-                f"{line['type']}s for size {i+1}",
-                item_options,
-                default=line["items"],
-                key=f"items_{i}"
+                line["items"] = st.multiselect(
+                    label=f"{line['type']}s for size {i+1}",
+                    options=item_options,
+                    default=line["items"] if line["items"] else None,
+                    key=f"items_{i}"
+                )
+
                 
 
                 # Item selection based on type
