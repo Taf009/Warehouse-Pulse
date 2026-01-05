@@ -10,33 +10,11 @@ from email.mime.base import MIMEBase
 from email import encoders
 import io
 
-# --- CUSTOM STYLING FOR ALERTS ---
-st.markdown("""
-<style>
-.low-stock-banner {
-    background-color: #FF8C00;  /* Amber orange */
-    padding: 10px;
-    border-radius: 5px;
-    margin-bottom: 20px;
-}
-.low-stock-text {
-    color: #8B0000;  /* Dark red */
-    font-weight: bold;
-    font-size: 18px;
-}
-.low-stock-row {
-    background-color: #FFFF99 !important;  /* Light yellow */
-    font-weight: bold;
-    color: #000000 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="MJP Floors Pulse", layout="wide")
-st.title("🏭 MJP Floors Pulse")
+st.title("🏭 MJP Floors Pulse - Production & Inventory")
 
-# --- SIZE MAP (ascending order with # prefix in display) ---
+# --- SIZE MAP ---
 SIZE_DISPLAY = {
     "#2": 13.0,
     "#3": 14.5,
@@ -52,7 +30,7 @@ SIZE_DISPLAY = {
 }
 SIZE_MAP = {k.replace("#", "Size "): v for k, v in SIZE_DISPLAY.items()}
 
-# --- PREDEFINED MATERIALS ---
+# --- MATERIALS FOR COILS ---
 COIL_MATERIALS = [
     ".010 Smooth Stainless Steel No Polythene",
     ".010 Stainless Steel Polythene",
@@ -70,13 +48,40 @@ COIL_MATERIALS = [
     ".032 Stucco Aluminum"
 ]
 
-# --- LOW STOCK THRESHOLDS PER MATERIAL (customize these!) ---
+# --- MATERIALS FOR ROLLS ---
+ROLL_MATERIALS = [
+    "RPR .016 Smooth Aluminum",
+    "RPR .016 Stucco Aluminum",
+    "RPR .020 Smooth Aluminum",
+    "RPR .020 Stucco Aluminum",
+    "RPR .024 Smooth Aluminum",
+    "RPR .024 Stucco Aluminum",
+    "RPR .032 Smooth Aluminum",
+    "RPR .032 Stucco Aluminum",
+    ".010 Smooth Stainless Steel",
+    ".010 Stucco Stainless Steel",
+    ".016 Smooth Stainless Steel",
+    ".016 Stucco Stainless Steel",
+    ".020 Smooth Stainless Steel",
+    ".020 Stucco Stainless Steel",
+    ".016 Smooth Aluminum",
+    ".016 Stucco Aluminum",
+    ".020 Smooth Aluminum",
+    ".020 Stucco Aluminum",
+    ".024 Smooth Aluminum",
+    ".024 Stucco Aluminum",
+    ".032 Smooth Aluminum",
+    ".032 Stucco Aluminum"
+]
+
+# --- LOW STOCK THRESHOLDS ---
 LOW_STOCK_THRESHOLDS = {
     ".016 Smooth Aluminum": 6000.0,
     ".020 Stucco Aluminum": 6000.0,
     ".020 Smooth Aluminum": 3500.0,
     ".016 Stucco Aluminum": 2500.0,
     ".010 Stainless Steel Polythene": 2500.0,
+    # Add roll thresholds if different
 }
 
 # --- LOGIN SYSTEM ---
@@ -117,10 +122,10 @@ if 'df' not in st.session_state:
         if records:
             st.session_state.df = pd.DataFrame(records)
         else:
-            st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status"])
+            st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status", "Category"])
     except Exception as e:
         st.error(f"Could not connect to Google Sheet: {e}")
-        st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status"])
+        st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status", "Category"])
 
 df = st.session_state.df
 
@@ -135,7 +140,7 @@ def save_inventory():
     except Exception as e:
         st.error(f"Failed to save inventory: {e}")
 
-# --- CHECK LOW STOCK AND SEND EMAIL ---
+# --- LOW STOCK CHECK & EMAIL ---
 def check_low_stock_and_alert():
     low_materials = []
     for material in df['Material'].unique():
@@ -166,7 +171,7 @@ def check_low_stock_and_alert():
         except Exception as e:
             st.error(f"Low stock detected but email failed: {e}")
 
-# --- SAVE PRODUCTION LOG TO GOOGLE SHEET ---
+# --- PRODUCTION LOG SAVE ---
 def save_production_log(order_number, client_name, operator_name, deduction_details, box_usage):
     try:
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
@@ -187,7 +192,7 @@ def save_production_log(order_number, client_name, operator_name, deduction_deta
                 line["display_size"],
                 line["pieces"],
                 line["waste"],
-                line["coils"],
+                line["items"],
                 boxes_str,
                 line["total_used"]
             ])
@@ -196,7 +201,7 @@ def save_production_log(order_number, client_name, operator_name, deduction_deta
     except Exception as e:
         st.warning(f"Could not save to production log: {e}")
 
-# --- AUDIT LOG FUNCTION ---
+# --- AUDIT LOG ---
 def log_action(action, details=""):
     try:
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
@@ -231,8 +236,9 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.set_font('Arial', '', 12)
     total_used = 0
     for line in deduction_details:
+        pdf.cell(0, 10, f"Material: {line['material']}", 0, 1)
         pdf.cell(0, 10, f"Size: {line['display_size']} | Pieces: {line['pieces']} | Waste: {line['waste']:.1f} ft", 0, 1)
-        pdf.cell(0, 10, f"Coils Used: {line['coils']}", 0, 1)
+        pdf.cell(0, 10, f"Items Used: {line['items']}", 0, 1)
         pdf.cell(0, 10, f"Footage Used: {line['total_used']:.2f} ft", 0, 1)
         total_used += line['total_used']
         pdf.ln(5)
@@ -289,76 +295,75 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Dashboard", "Production Log", "Warehous
 with tab1:
     st.subheader("Current Inventory Summary")
 
-    # --- LOW STOCK ALERT BANNER ---
-    low_materials = []
-    for material in df['Material'].unique():
-        total = df[df['Material'] == material]['Footage'].sum()
-        threshold = LOW_STOCK_THRESHOLDS.get(material, 1000.0)
-        if total < threshold:
-            low_materials.append(f"{material}: {total:.1f} ft (threshold: {threshold} ft)")
+    # --- Category Selector ---
+    st.markdown("#### View by Category")
+    all_categories = ["All Categories"] + sorted(df['Category'].unique().tolist()) if not df.empty else ["All Categories"]
+    selected_category = st.selectbox("Select Category", all_categories, key="dashboard_category")
 
-    if low_materials:
-        st.markdown("<div class='low-stock-banner'>"
-                    "<p class='low-stock-text'>⚠️ LOW STOCK ALERT</p>"
-                    "<p>The following materials are running low:</p>", 
-                    unsafe_allow_html=True)
-        for item in low_materials:
-            st.markdown(f"<p style='color:#8B0000; font-weight:bold;'>{item}</p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # --- Material Summary Table ---
-    if df.empty:
-        st.info("No items in inventory yet. Go to Warehouse Management to add some.")
+    # Filter data
+    if selected_category == "All Categories" or df.empty:
+        display_df = df
     else:
-        st.markdown("### 📊 Stock Summary by Material")
-        summary = df.groupby('Material').agg(
-            Item_Count=('Item_ID', 'count'),
-            Total_Footage=('Footage', 'sum')
-        ).reset_index()
-        summary = summary.sort_values('Total_Footage', ascending=False)
-        summary['Total_Footage'] = summary['Total_Footage'].round(1)
+        display_df = df[df['Category'] == selected_category]
 
-        st.dataframe(
-            summary,
-            column_config={
-                "Material": "Material",
-                "Item_Count": st.column_config.NumberColumn("Number of Items", format="%d"),
-                "Total_Footage": st.column_config.NumberColumn("Total Footage (ft)", format="%.1f ft")
-            },
-            use_container_width=True,
-            hide_index=True
-        )
+    if display_df.empty:
+        st.info(f"No items in {selected_category} yet.")
+    else:
+        # Summary Metrics for selected category
+        st.markdown(f"### {selected_category} Summary")
+        col1, col2 = st.columns(2)
+        col1.metric("Number of Items", len(display_df))
+        if 'Footage' in display_df.columns:
+            total_footage = display_df['Footage'].sum()
+            col2.metric("Total Footage (ft)", f"{total_footage:.1f}")
+        elif 'Quantity' in display_df.columns:
+            total_qty = display_df['Quantity'].sum()
+            col2.metric("Total Quantity", int(total_qty))
 
-        # --- Individual Items with Highlighting ---
+        # Per-Material Summary (if applicable)
+        if 'Material' in display_df.columns:
+            st.markdown("### Breakdown by Material")
+            material_summary = display_df.groupby('Material').agg(
+                Item_Count=('Item_ID', 'count'),
+                Total_Footage=('Footage', 'sum') if 'Footage' in display_df.columns else ('Quantity', 'sum')
+            ).reset_index()
+            material_summary = material_summary.sort_values(material_summary.columns[-1], ascending=False)
+            material_summary[material_summary.columns[-1]] = material_summary[material_summary.columns[-1]].round(1)
+            st.dataframe(material_summary, use_container_width=True, hide_index=True)
+
+        # Individual Items Table
         st.markdown("### Individual Items")
-        display_df = df[['Item_ID', 'Material', 'Footage', 'Location']].copy()
-        display_df['Footage'] = display_df['Footage'].round(1)
+        show_columns = ['Item_ID', 'Material' if 'Material' in display_df.columns else 'Description', 
+                        'Footage' if 'Footage' in display_df.columns else 'Quantity', 'Location']
+        item_df = display_df[show_columns].copy()
+        if 'Footage' in item_df.columns:
+            item_df['Footage'] = item_df['Footage'].round(1)
+        st.dataframe(item_df.sort_values(show_columns[1]), use_container_width=True)
 
-        # Highlight low stock materials in yellow with bold black text
-        def make_low_stock_row(row):
-            total_for_material = df[df['Material'] == row['Material']]['Footage'].sum()
-            threshold = LOW_STOCK_THRESHOLDS.get(row['Material'], 1000.0)
-            if total_for_material < threshold:
-                return f"<tr style='background-color:#FFFF99; font-weight:bold; color:black;'><td>{row['Item_ID']}</td><td>{row['Material']}</td><td>{row['Footage']}</td><td>{row['Location']}</td></tr>"
-            return f"<tr><td>{row['Item_ID']}</td><td>{row['Material']}</td><td>{row['Footage']}</td><td>{row['Location']}</td></tr>"
+    # --- Low Stock Alerts (across all categories) ---
+    st.divider()
+    st.markdown("### Low Stock Alerts")
+    low_items = []
+    for _, row in df.iterrows():
+        if row['Category'] in ["Coil", "Roll"] and row['Footage'] < LOW_STOCK_THRESHOLDS.get(row['Material'], 1000.0):
+            low_items.append(f"{row['Item_ID']} - {row['Material']}: {row['Footage']:.1f} ft")
+        # Add other category low stock logic later if needed
 
-        html_table = "<table style='width:100%; border-collapse:collapse;'><tr><th>Item_ID</th><th>Material</th><th>Footage</th><th>Location</th></tr>"
-        for _, row in display_df.sort_values(['Material', 'Location']).iterrows():
-            html_table += make_low_stock_row(row)
-        html_table += "</table>"
-
-        st.markdown(html_table, unsafe_allow_html=True)
-
+    if low_items:
+        st.error(f"LOW STOCK: {len(low_items)} item(s) below threshold")
+        for item in low_items:
+            st.warning(item)
+    else:
+        st.success("All items above low stock thresholds ✅")
 with tab2:
     st.subheader("Production Log - Multi-Size Orders (Coils & Rolls)")
 
-    # Filter available items with footage
     available_items = df[df['Footage'] > 0]
     if available_items.empty:
         st.info("No coils or rolls with footage available for production.")
     else:
         if 'production_lines' not in st.session_state:
-            st.session_state.production_lines = [{"material_type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
+            st.session_state.production_lines = [{"type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
 
         st.markdown("#### Production Lines")
         for i in range(len(st.session_state.production_lines)):
@@ -366,7 +371,7 @@ with tab2:
             with st.container():
                 col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 1, 1, 1])
                 with col1:
-                    line["material_type"] = st.selectbox(f"Type {i+1}", ["Coil", "Roll"], index=["Coil", "Roll"].index(line["material_type"]), key=f"type_{i}")
+                    line["type"] = st.selectbox(f"Type {i+1}", ["Coil", "Roll"], index=["Coil", "Roll"].index(line["type"]), key=f"type_{i}")
                 with col2:
                     line["display_size"] = st.selectbox(f"Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"size_{i}")
                 with col3:
@@ -378,14 +383,15 @@ with tab2:
                         st.session_state.production_lines.pop(i)
                         st.rerun()
 
-                # Item selection (coils or rolls based on type)
-                filtered_items = available_items[available_items['Material'].str.contains("Roll" if line["material_type"] == "Roll" else "")]
+                # Item selection based on type
+                materials_list = COIL_MATERIALS if line["type"] == "Coil" else ROLL_MATERIALS
+                filtered_items = available_items[available_items['Material'].isin(materials_list)]
                 item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
                                 for _, row in filtered_items.iterrows()]
-                line["items"] = st.multiselect(f"{line['material_type']}s for size {i+1}", item_options, default=line["items"], key=f"items_{i}")
+                line["items"] = st.multiselect(f"{line['type']}s for size {i+1}", item_options, default=line["items"], key=f"items_{i}")
 
         if st.button("➕ Add Another Size Line"):
-            st.session_state.production_lines.append({"material_type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
+            st.session_state.production_lines.append({"type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
             st.rerun()
 
         extra_inch = st.number_input("Extra Inch Allowance per Piece (for machine room)", min_value=0.0, value=0.5, step=0.1)
@@ -412,7 +418,7 @@ with tab2:
 
                     for line in st.session_state.production_lines:
                         if line["pieces"] > 0 and not line["items"]:
-                            st.error(f"Select at least one {line['material_type'].lower()} for size {line['display_size']}")
+                            st.error(f"Select at least one {line['type'].lower()} for size {line['display_size']}")
                             st.stop()
 
                         selected_item_ids = [c.split(" - ")[0] for c in line["items"]]
@@ -427,7 +433,7 @@ with tab2:
 
                         deduction_details.append({
                             "display_size": line["display_size"],
-                            "material_type": line["material_type"],
+                            "material_type": line["type"],
                             "material": material_str,
                             "pieces": line["pieces"],
                             "waste": line["waste"],
@@ -454,38 +460,41 @@ with tab2:
                     else:
                         st.warning("Logged but email failed.")
 
-                    st.session_state.production_lines = [{"material_type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
+                    st.session_state.production_lines = [{"type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
                     st.balloons()
                     st.rerun()
+
 with tab3:
     st.subheader("Warehouse Management")
 
-    # --- Receive New Items ---
+    # --- Receive New Items (Coils & Rolls) ---
     st.markdown("### Receive New Items")
     with st.form("receive_items_form", clear_on_submit=True):
-        st.markdown("#### Add New Item Shipment")
+        category = st.selectbox("Category", ["Coil", "Roll"])
 
-        material = st.selectbox("Material Type", COIL_MATERIALS, key="recv_material")
+        if category == "Coil":
+            material = st.selectbox("Material Type", COIL_MATERIALS)
+        else:
+            material = st.selectbox("Material Type", ROLL_MATERIALS)
 
         st.markdown("#### Rack Location Generator (Unlimited)")
         col1, col2, col3 = st.columns(3)
         with col1:
-            bay = st.number_input("Bay Number", min_value=1, value=1, step=1, key="bay")
+            bay = st.number_input("Bay Number", min_value=1, value=1, step=1)
         with col2:
-            section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), key="section")
+            section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
         with col3:
-            level = st.number_input("Level", min_value=1, value=1, step=1, key="level")
+            level = st.number_input("Level", min_value=1, value=1, step=1)
 
         generated_location = f"{bay}{section}{level}"
         st.info(f"**Generated Location Code:** {generated_location}")
 
-        footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=3000.0, key="recv_footage")
+        footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=3000.0)
 
         st.markdown("#### Manual Item ID Input")
-        st.write("Enter the **full starting Item ID** (including number), e.g., `ITEM-016-AL-SM-3000-01`")
-
-        starting_id = st.text_input("Starting Item ID", value="ITEM-016-AL-SM-3000-01", key="starting_id")
-        count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1, key="count")
+        default_prefix = "COIL" if category == "Coil" else "ROLL"
+        starting_id = st.text_input("Starting Item ID", value=f"{default_prefix}-016-AL-SM-3000-01")
+        count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1)
 
         if starting_id.strip() and count > 0:
             try:
@@ -498,7 +507,7 @@ with tab3:
             except:
                 st.warning("Invalid format")
 
-        operator_name = st.text_input("Your Name (who is receiving these items)", key="recv_operator")
+        operator_name = st.text_input("Your Name (who is receiving these items)")
 
         submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
@@ -523,14 +532,15 @@ with tab3:
                             "Material": material,
                             "Footage": footage,
                             "Location": generated_location,
-                            "Status": "Active"
+                            "Status": "Active",
+                            "Category": category
                         })
 
                     new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
                     st.session_state.df = new_df
                     save_inventory()
-                    log_action("Receive Items", f"{count} x {material} to {generated_location}")
-                    st.success(f"Added {count} item(s) to {generated_location} by {operator_name}!")
+                    log_action("Receive Items", f"{count} x {material} ({category}) to {generated_location}")
+                    st.success(f"Added {count} {category.lower()}(s) to {generated_location} by {operator_name}!")
                     st.balloons()
                     st.rerun()
                 except:
@@ -543,21 +553,21 @@ with tab3:
     if df.empty:
         st.info("No items to move yet.")
     else:
-        item_to_move = st.selectbox("Select Item to Move", df['Item_ID'], key="move_item_select")
+        item_to_move = st.selectbox("Select Item to Move", df['Item_ID'])
 
         st.markdown("#### New Location Generator")
         col1, col2, col3 = st.columns(3)
         with col1:
-            new_bay = st.number_input("New Bay", min_value=1, value=1, key="new_bay")
+            new_bay = st.number_input("New Bay", min_value=1, value=1)
         with col2:
-            new_section = st.selectbox("New Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), key="new_section")
+            new_section = st.selectbox("New Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
         with col3:
-            new_level = st.number_input("New Level", min_value=1, value=1, key="new_level")
+            new_level = st.number_input("New Level", min_value=1, value=1)
 
         new_location = f"{new_bay}{new_section}{new_level}"
         st.info(f"**New Location:** {new_location}")
 
-        if st.button("Move Item", key="move_button"):
+        if st.button("Move Item"):
             old_location = df.loc[df['Item_ID'] == item_to_move, 'Location'].values[0]
             df.loc[df['Item_ID'] == item_to_move, 'Location'] = new_location
             save_inventory()
@@ -570,29 +580,29 @@ with tab3:
     # --- Admin Panel ---
     st.markdown("### 🔧 Admin Only: Adjust Footage or Delete Item")
 
-    admin_password = st.text_input("Admin Password", type="password", key="admin_pass")
+    admin_password = st.text_input("Admin Password", type="password")
     correct_password = "mjp@2026!"
 
     if admin_password == correct_password:
         st.success("Admin access granted")
 
         if not df.empty:
-            item_to_manage = st.selectbox("Select Item", df['Item_ID'], key="admin_manage_item")
+            item_to_manage = st.selectbox("Select Item", df['Item_ID'])
 
             current_footage = df.loc[df['Item_ID'] == item_to_manage, 'Footage'].values[0]
-            new_footage = st.number_input("Adjust Footage (ft)", min_value=0.0, value=float(current_footage), key="admin_new_footage")
+            new_footage = st.number_input("Adjust Footage (ft)", min_value=0.0, value=float(current_footage))
 
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Update Footage", key="admin_update"):
+                if st.button("Update Footage"):
                     df.loc[df['Item_ID'] == item_to_manage, 'Footage'] = new_footage
                     save_inventory()
                     log_action("Adjust Footage", f"{item_to_manage} to {new_footage:.1f} ft")
                     st.success(f"Updated footage for {item_to_manage}")
                     st.rerun()
             with col2:
-                if st.button("🗑️ Delete Item", key="admin_delete"):
-                    if st.checkbox("Confirm permanent deletion", key="admin_delete_confirm"):
+                if st.button("🗑️ Delete Item"):
+                    if st.checkbox("Confirm permanent deletion"):
                         df = df[df['Item_ID'] != item_to_manage]
                         st.session_state.df = df
                         save_inventory()
@@ -612,7 +622,7 @@ with tab3:
     if df.empty:
         st.info("No items in inventory yet.")
     else:
-        st.dataframe(df[['Item_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
+        st.dataframe(df[['Item_ID', 'Material', 'Footage', 'Location', 'Category']], use_container_width=True)
 
 with tab4:
     st.subheader("📊 Production Summary & Insights")
@@ -674,7 +684,7 @@ with tab4:
                 col3.metric("Total Pieces Produced", int(total_pieces))
                 col4.metric("Efficiency", f"{efficiency:.1f}%")
 
-                # Group By Selector (multi-select)
+                # Group By Selector
                 st.markdown("#### Group Insights By")
                 group_options = st.multiselect(
                     "Select grouping (add multiple for combined view)",
@@ -705,18 +715,9 @@ with tab4:
                         chart_df['Label'] = chart_df[group_options].astype(str).agg(' - '.join, axis=1)
                     st.bar_chart(chart_df.set_index('Label')['Total_Footage'])
 
-                    if "Size" in group_options:
-                        st.markdown("### Top Sizes by Pieces Produced")
-                        pieces_df = group_summary['Total_Pieces'].head(15).reset_index()
-                        if len(group_options) == 1:
-                            pieces_df['Label'] = pieces_df[group_options[0]].astype(str)
-                        else:
-                            pieces_df['Label'] = pieces_df[group_options].astype(str).agg(' - '.join, axis=1)
-                        st.bar_chart(pieces_df.set_index('Label')['Total_Pieces'])
-
                 # All Orders Table
                 st.markdown("### All Orders")
-                display = filtered[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
+                display = filtered[['Timestamp', 'Operator', 'Client', 'Order_Number', 'Material', 'Size', 'Pieces', 'Waste_FT', 'Coils_Used']].copy()
                 display['Timestamp'] = display['Timestamp'].dt.strftime('%Y-%m-%d %H:%M')
                 display = display.sort_values('Timestamp', ascending=False)
                 st.dataframe(display, use_container_width=True)
