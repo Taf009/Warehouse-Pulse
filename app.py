@@ -434,7 +434,7 @@ with tab2:
                 item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
                                 for _, row in available_for_line.iterrows()]
 
-                line["items"] = st.multiselect(
+                line["items"] = st.multiselect()
                     f"{line['type']}s for size {i+1}",
                     item_options,
                     default=line["items"],
