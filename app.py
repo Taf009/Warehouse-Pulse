@@ -482,16 +482,25 @@ with tab2:
 
             submitted = st.form_submit_button("Complete Order & Send PDF")
 
+                        submitted = st.form_submit_button("Complete Order & Send PDF")
+
             if submitted:
-                if not client_name or not order_number:
-                    st.error("Client Name and Order Number are required")
+                if not client_name or not order_number or not operator_name:
+                    st.error("Client Name, Order Number, and Your Name are required")
                 else:
+                    # Collect all lines from both sections
                     all_lines = []
-                    all_lines.extend([{"type": "Coil", **line} for line in st.session_state.coil_lines if line["pieces"] > 0])
-                    all_lines.extend([{"type": "Roll", **line} for line in st.session_state.roll_lines if line["pieces"] > 0])
+                    if st.session_state.coil_lines:
+                        for line in st.session_state.coil_lines:
+                            if line["pieces"] > 0:
+                                all_lines.append({"type": "Coil", **line})
+                    if st.session_state.roll_lines:
+                        for line in st.session_state.roll_lines:
+                            if line["pieces"] > 0:
+                                all_lines.append({"type": "Roll", **line})
 
                     if not all_lines:
-                        st.error("Enter pieces for at least one size line")
+                        st.error("Enter pieces for at least one size line (coils or rolls)")
                     else:
                         total_used = 0
                         deduction_details = []
@@ -540,6 +549,7 @@ with tab2:
                         else:
                             st.warning("Logged but email failed.")
 
+                        # Reset both sections
                         st.session_state.coil_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
                         st.session_state.roll_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
                         st.balloons()
