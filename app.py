@@ -435,10 +435,10 @@ with tab2:
                                 for _, row in available_for_line.iterrows()]
 
                 line["items"] = st.multiselect()
-                    f"{line['type']}s for size {i+1}",
-                    item_options,
-                    default=line["items"],
-                    key=f"items_{i}"
+                f"{line['type']}s for size {i+1}",
+                item_options,
+                default=line["items"],
+                key=f"items_{i}"
                 
 
                 # Item selection based on type
