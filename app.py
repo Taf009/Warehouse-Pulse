@@ -482,8 +482,6 @@ with tab2:
 
             submitted = st.form_submit_button("Complete Order & Send PDF")
 
-            submitted = st.form_submit_button("Complete Order & Send PDF")
-
             if submitted:
                 if not client_name or not order_number or not operator_name:
                     st.error("Client Name, Order Number, and Your Name are required")
