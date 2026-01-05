@@ -10,6 +10,35 @@ from email.mime.base import MIMEBase
 from email import encoders
 import io
 
+# --- VIVID LOW STOCK ALERT STYLING ---
+st.markdown("""
+<style>
+.vivid-low-stock-banner {
+    background-color: #FF4500;  /* Bright orange-red */
+    padding: 15px;
+    border-radius: 8px;
+    border-left: 8px solid #FF0000;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+.vivid-low-stock-text {
+    color: #FF0000;  /* Bright red */
+    font-weight: bold;
+    font-size: 20px;
+}
+.vivid-low-stock-item {
+    color: #D00000;
+    font-weight: bold;
+    font-size: 16px;
+}
+.vivid-low-stock-row {
+    background-color: #FFFF00 !important;  /* Bright yellow */
+    font-weight: bold;
+    color: #000000 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="MJP Floors Pulse", layout="wide")
 st.title("🏭 MJP Floors Pulse - Production & Inventory")
@@ -341,20 +370,33 @@ with tab1:
         st.dataframe(item_df.sort_values(show_columns[1]), use_container_width=True)
 
     # --- Low Stock Alerts (across all categories) ---
-    st.divider()
+        st.divider()
     st.markdown("### Low Stock Alerts")
+
     low_items = []
     for _, row in df.iterrows():
-        if row['Category'] in ["Coil", "Roll"] and row['Footage'] < LOW_STOCK_THRESHOLDS.get(row['Material'], 1000.0):
-            low_items.append(f"{row['Item_ID']} - {row['Material']}: {row['Footage']:.1f} ft")
-        # Add other category low stock logic later if needed
+        if row['Category'] in ["Coil", "Roll"]:
+            threshold = LOW_STOCK_THRESHOLDS.get(row['Material'], 1000.0)
+            if row['Footage'] < threshold:
+                low_items.append({
+                    "item_id": row['Item_ID'],
+                    "material": row['Material'],
+                    "footage": row['Footage'],
+                    "threshold": threshold
+                })
 
     if low_items:
-        st.error(f"LOW STOCK: {len(low_items)} item(s) below threshold")
+        st.markdown("<div class='vivid-low-stock-banner'>"
+                    "<p class='vivid-low-stock-text'>⚠️ URGENT: LOW STOCK ALERT ⚠️</p>"
+                    "<p>These items are below threshold — reorder ASAP:</p>", 
+                    unsafe_allow_html=True)
         for item in low_items:
-            st.warning(item)
+            st.markdown(f"<p class='vivid-low-stock-item'>• <strong>{item['item_id']}</strong> — {item['material']}: "
+                        f"{item['footage']:.1f} ft (threshold: {item['threshold']} ft)</p>", 
+                        unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
     else:
-        st.success("All items above low stock thresholds ✅")
+        st.success("✅ All coils and rolls are above low stock thresholds!")
 with tab2:
     st.subheader("Production Log - Multi-Size Orders (Coils & Rolls)")
 
