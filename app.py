@@ -435,19 +435,26 @@ with tab2:
                         st.session_state.production_lines.pop(i)
                         st.rerun()
 
-                # --- CORRECT FILTERING BY CATEGORY AND MATERIAL ---
-                filtered_items = available_items[available_items['Category'] == line["type"]]
-                material_list = COIL_MATERIALS if line["type"] == "Coil" else ROLL_MATERIALS
-                filtered_items = filtered_items[filtered_items['Material'].isin(material_list)]
+                                # --- CORRECT FILTERING BY CATEGORY AND MATERIAL ---
+                if line["type"] == "Coil":
+                    filtered_items = available_items[available_items['Category'] == "Coil"]
+                else:
+                    filtered_items = available_items[available_items['Category'] == "Roll"]
 
                 item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
                                 for _, row in filtered_items.iterrows()]
+
+                # Unique key to avoid duplicate key error
+                unique_key = f"items_line_{i}_{st.session_state.get('key_counter', 0)}"
+                if 'key_counter' not in st.session_state:
+                    st.session_state.key_counter = 0
+                st.session_state.key_counter += 1
 
                 line["items"] = st.multiselect(
                     label=f"{line['type']}s for size {i+1}",
                     options=item_options,
                     default=line["items"] if line["items"] else None,
-                    key=f"items_{i}"
+                    key=unique_key
                 )
 
                 
