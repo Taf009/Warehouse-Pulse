@@ -69,6 +69,7 @@ COIL_MATERIALS = [
     ".032 Smooth Aluminum",
     ".032 Stucco Aluminum"
 ]
+
 # --- LOW STOCK THRESHOLDS PER MATERIAL (customize these!) ---
 LOW_STOCK_THRESHOLDS = {
     ".016 Smooth Aluminum": 6000.0,
@@ -76,8 +77,6 @@ LOW_STOCK_THRESHOLDS = {
     ".020 Smooth Aluminum": 3500.0,
     ".016 Stucco Aluminum": 2500.0,
     ".010 Stainless Steel Polythene": 2500.0,
-    # Add all your materials with desired minimum total footage
-    # Default for unlisted materials: 1000 ft
 }
 
 # --- LOGIN SYSTEM ---
@@ -118,10 +117,10 @@ if 'df' not in st.session_state:
         if records:
             st.session_state.df = pd.DataFrame(records)
         else:
-            st.session_state.df = pd.DataFrame(columns=["Coil_ID", "Material", "Footage", "Location", "Status"])
+            st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status"])
     except Exception as e:
         st.error(f"Could not connect to Google Sheet: {e}")
-        st.session_state.df = pd.DataFrame(columns=["Coil_ID", "Material", "Footage", "Location", "Status"])
+        st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status"])
 
 df = st.session_state.df
 
@@ -136,11 +135,12 @@ def save_inventory():
     except Exception as e:
         st.error(f"Failed to save inventory: {e}")
 
+# --- CHECK LOW STOCK AND SEND EMAIL ---
 def check_low_stock_and_alert():
     low_materials = []
     for material in df['Material'].unique():
         total_footage = df[df['Material'] == material]['Footage'].sum()
-        threshold = LOW_STOCK_THRESHOLDS.get(material, 1000.0)  # default 1000 ft
+        threshold = LOW_STOCK_THRESHOLDS.get(material, 1000.0)
         if total_footage < threshold:
             low_materials.append(f"{material}: {total_footage:.1f} ft (below {threshold} ft)")
 
@@ -166,6 +166,7 @@ def check_low_stock_and_alert():
         except Exception as e:
             st.error(f"Low stock detected but email failed: {e}")
 
+# --- SAVE PRODUCTION LOG TO GOOGLE SHEET ---
 def save_production_log(order_number, client_name, operator_name, deduction_details, box_usage):
     try:
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
@@ -307,11 +308,11 @@ with tab1:
 
     # --- Material Summary Table ---
     if df.empty:
-        st.info("No coils in inventory yet. Go to Warehouse Management to add some.")
+        st.info("No items in inventory yet. Go to Warehouse Management to add some.")
     else:
         st.markdown("### 📊 Stock Summary by Material")
         summary = df.groupby('Material').agg(
-            Coil_Count=('Coil_ID', 'count'),
+            Item_Count=('Item_ID', 'count'),
             Total_Footage=('Footage', 'sum')
         ).reset_index()
         summary = summary.sort_values('Total_Footage', ascending=False)
@@ -321,16 +322,16 @@ with tab1:
             summary,
             column_config={
                 "Material": "Material",
-                "Coil_Count": st.column_config.NumberColumn("Number of Coils", format="%d"),
+                "Item_Count": st.column_config.NumberColumn("Number of Items", format="%d"),
                 "Total_Footage": st.column_config.NumberColumn("Total Footage (ft)", format="%.1f ft")
             },
             use_container_width=True,
             hide_index=True
         )
 
-        # --- Individual Coils with Highlighting ---
-        st.markdown("### Individual Coils")
-        display_df = df[['Coil_ID', 'Material', 'Footage', 'Location']].copy()
+        # --- Individual Items with Highlighting ---
+        st.markdown("### Individual Items")
+        display_df = df[['Item_ID', 'Material', 'Footage', 'Location']].copy()
         display_df['Footage'] = display_df['Footage'].round(1)
 
         # Highlight low stock materials in yellow with bold black text
@@ -338,55 +339,54 @@ with tab1:
             total_for_material = df[df['Material'] == row['Material']]['Footage'].sum()
             threshold = LOW_STOCK_THRESHOLDS.get(row['Material'], 1000.0)
             if total_for_material < threshold:
-                return f"<tr style='background-color:#FFFF99; font-weight:bold; color:black;'><td>{row['Coil_ID']}</td><td>{row['Material']}</td><td>{row['Footage']}</td><td>{row['Location']}</td></tr>"
-            return f"<tr><td>{row['Coil_ID']}</td><td>{row['Material']}</td><td>{row['Footage']}</td><td>{row['Location']}</td></tr>"
+                return f"<tr style='background-color:#FFFF99; font-weight:bold; color:black;'><td>{row['Item_ID']}</td><td>{row['Material']}</td><td>{row['Footage']}</td><td>{row['Location']}</td></tr>"
+            return f"<tr><td>{row['Item_ID']}</td><td>{row['Material']}</td><td>{row['Footage']}</td><td>{row['Location']}</td></tr>"
 
-        html_table = "<table style='width:100%; border-collapse:collapse;'><tr><th>Coil_ID</th><th>Material</th><th>Footage</th><th>Location</th></tr>"
+        html_table = "<table style='width:100%; border-collapse:collapse;'><tr><th>Item_ID</th><th>Material</th><th>Footage</th><th>Location</th></tr>"
         for _, row in display_df.sort_values(['Material', 'Location']).iterrows():
             html_table += make_low_stock_row(row)
         html_table += "</table>"
 
         st.markdown(html_table, unsafe_allow_html=True)
-        
-with tab2:
-    st.subheader("Production Log - Multi-Size & Multi-Coil Orders")
 
-    available_coils = df[df['Footage'] > 0]
-    if available_coils.empty:
-        st.info("No coils with footage available for production.")
+with tab2:
+    st.subheader("Production Log - Multi-Size Orders (Coils & Rolls)")
+
+    # Filter available items with footage
+    available_items = df[df['Footage'] > 0]
+    if available_items.empty:
+        st.info("No coils or rolls with footage available for production.")
     else:
         if 'production_lines' not in st.session_state:
-            st.session_state.production_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "override_coils": []}]
+            st.session_state.production_lines = [{"material_type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
 
         st.markdown("#### Production Lines")
         for i in range(len(st.session_state.production_lines)):
             line = st.session_state.production_lines[i]
             with st.container():
-                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 1, 1, 1])
                 with col1:
-                    line["display_size"] = st.selectbox(f"Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"size_{i}")
+                    line["material_type"] = st.selectbox(f"Type {i+1}", ["Coil", "Roll"], index=["Coil", "Roll"].index(line["material_type"]), key=f"type_{i}")
                 with col2:
-                    line["pieces"] = st.number_input(f"Pieces {i+1}", min_value=1, value=line["pieces"], key=f"pieces_{i}")
+                    line["display_size"] = st.selectbox(f"Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"size_{i}")
                 with col3:
-                    line["waste"] = st.number_input(f"Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"waste_{i}")
+                    line["pieces"] = st.number_input(f"Pieces {i+1}", min_value=1, value=line["pieces"], key=f"pieces_{i}")
                 with col4:
-                    if st.button("Remove Line", key=f"remove_line_{i}"):
+                    line["waste"] = st.number_input(f"Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"waste_{i}")
+                with col5:
+                    if st.button("Remove", key=f"remove_line_{i}"):
                         st.session_state.production_lines.pop(i)
                         st.rerun()
 
-                with st.expander(f"Override Coils for {line['display_size']} (optional)"):
-                    coil_options = [f"{row['Coil_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                                    for _, row in available_coils.iterrows()]
-                    line["override_coils"] = st.multiselect("Coils for this line", coil_options, default=line["override_coils"], key=f"override_coils_{i}")
+                # Item selection (coils or rolls based on type)
+                filtered_items = available_items[available_items['Material'].str.contains("Roll" if line["material_type"] == "Roll" else "")]
+                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                                for _, row in filtered_items.iterrows()]
+                line["items"] = st.multiselect(f"{line['material_type']}s for size {i+1}", item_options, default=line["items"], key=f"items_{i}")
 
         if st.button("➕ Add Another Size Line"):
-            st.session_state.production_lines.append({"display_size": "#2", "pieces": 1, "waste": 0.0, "override_coils": []})
+            st.session_state.production_lines.append({"material_type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
             st.rerun()
-
-        st.markdown("#### Global Coils (used for all lines unless overridden)")
-        coil_options = [f"{row['Coil_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                        for _, row in available_coils.iterrows()]
-        global_coils = st.multiselect("Select Global Coils", coil_options)
 
         extra_inch = st.number_input("Extra Inch Allowance per Piece (for machine room)", min_value=0.0, value=0.5, step=0.1)
 
@@ -411,36 +411,40 @@ with tab2:
                     deduction_details = []
 
                     for line in st.session_state.production_lines:
-                        coils_to_use = line["override_coils"] if line["override_coils"] else global_coils
-                        if not coils_to_use:
-                            st.error("Select coils (global or override) for all lines")
+                        if line["pieces"] > 0 and not line["items"]:
+                            st.error(f"Select at least one {line['material_type'].lower()} for size {line['display_size']}")
                             st.stop()
 
-                        selected_coil_ids = [c.split(" - ")[0] for c in coils_to_use]
+                        selected_item_ids = [c.split(" - ")[0] for c in line["items"]]
                         inches_per_piece = SIZE_MAP[line["display_size"].replace("#", "Size ")] + extra_inch
                         used_without_waste = line["pieces"] * inches_per_piece / 12
                         line_total = used_without_waste + line["waste"]
                         total_used += line_total
 
+                        # Get material from first item
+                        materials = df[df['Item_ID'].isin(selected_item_ids)]['Material'].unique()
+                        material_str = materials[0] if len(materials) == 1 else "Mixed"
+
                         deduction_details.append({
                             "display_size": line["display_size"],
+                            "material_type": line["material_type"],
+                            "material": material_str,
                             "pieces": line["pieces"],
                             "waste": line["waste"],
                             "total_used": line_total,
-                            "coils": ", ".join(selected_coil_ids),
-                            "material": material_str
+                            "items": ", ".join(selected_item_ids)
                         })
 
-                        per_coil = line_total / len(selected_coil_ids)
-                        for coil_id in selected_coil_ids:
-                            current = df.loc[df['Coil_ID'] == coil_id, 'Footage'].values[0]
-                            if per_coil > current:
-                                st.error(f"Not enough footage on {coil_id}")
+                        per_item = line_total / len(selected_item_ids)
+                        for item_id in selected_item_ids:
+                            current = df.loc[df['Item_ID'] == item_id, 'Footage'].values[0]
+                            if per_item > current:
+                                st.error(f"Not enough footage on {item_id}")
                                 st.stop()
-                            df.loc[df['Coil_ID'] == coil_id, 'Footage'] -= per_coil
+                            df.loc[df['Item_ID'] == item_id, 'Footage'] -= per_item
 
                     save_inventory()
-                    check_low_stock_and_alert()  # This triggers the email alert for depleted material
+                    check_low_stock_and_alert()
                     save_production_log(order_number, client_name, operator_name, deduction_details, box_usage)
 
                     pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, extra_inch)
@@ -450,17 +454,16 @@ with tab2:
                     else:
                         st.warning("Logged but email failed.")
 
-                    st.session_state.production_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "override_coils": []}]
+                    st.session_state.production_lines = [{"material_type": "Coil", "display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
                     st.balloons()
                     st.rerun()
-
 with tab3:
     st.subheader("Warehouse Management")
 
-    # --- Receive New Coils ---
-    st.markdown("### Receive New Coils")
-    with st.form("receive_coils_form", clear_on_submit=True):
-        st.markdown("#### Add New Coil Shipment")
+    # --- Receive New Items ---
+    st.markdown("### Receive New Items")
+    with st.form("receive_items_form", clear_on_submit=True):
+        st.markdown("#### Add New Item Shipment")
 
         material = st.selectbox("Material Type", COIL_MATERIALS, key="recv_material")
 
@@ -476,13 +479,13 @@ with tab3:
         generated_location = f"{bay}{section}{level}"
         st.info(f"**Generated Location Code:** {generated_location}")
 
-        footage = st.number_input("Footage per Coil (ft)", min_value=0.1, value=3000.0, key="recv_footage")
+        footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=3000.0, key="recv_footage")
 
-        st.markdown("#### Manual Coil ID Input")
-        st.write("Enter the **full starting Coil ID** (including number), e.g., `COIL-016-AL-SM-3000-01`")
+        st.markdown("#### Manual Item ID Input")
+        st.write("Enter the **full starting Item ID** (including number), e.g., `ITEM-016-AL-SM-3000-01`")
 
-        starting_id = st.text_input("Starting Coil ID", value="COIL-016-AL-SM-3000-01", key="starting_id")
-        count = st.number_input("Number of Coils to Add", min_value=1, value=1, step=1, key="count")
+        starting_id = st.text_input("Starting Item ID", value="ITEM-016-AL-SM-3000-01", key="starting_id")
+        count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1, key="count")
 
         if starting_id.strip() and count > 0:
             try:
@@ -490,52 +493,57 @@ with tab3:
                 base_part = "-".join(parts[:-1])
                 start_num = int(parts[-1])
                 preview = [f"{base_part}-{str(start_num + i).zfill(2)}" for i in range(count)]
-                st.markdown("**Generated Coil IDs:**")
+                st.markdown("**Generated Item IDs:**")
                 st.code("\n".join(preview), language="text")
             except:
                 st.warning("Invalid format")
 
-        submitted = st.form_submit_button("🚀 Add Coils to Inventory")
+        operator_name = st.text_input("Your Name (who is receiving these items)", key="recv_operator")
+
+        submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
         if submitted:
-            try:
-                parts = starting_id.strip().upper().split("-")
-                base_part = "-".join(parts[:-1])
-                start_num = int(parts[-1])
+            if not operator_name:
+                st.error("Your name is required")
+            else:
+                try:
+                    parts = starting_id.strip().upper().split("-")
+                    base_part = "-".join(parts[:-1])
+                    start_num = int(parts[-1])
 
-                new_coils = []
-                for i in range(count):
-                    current_num = start_num + i
-                    coil_id = f"{base_part}-{str(current_num).zfill(2)}"
-                    if coil_id in df['Coil_ID'].values:
-                        st.error(f"Duplicate: {coil_id}")
-                        st.stop()
-                    new_coils.append({
-                        "Coil_ID": coil_id,
-                        "Material": material,
-                        "Footage": footage,
-                        "Location": generated_location,
-                        "Status": "Active"
-                    })
+                    new_items = []
+                    for i in range(count):
+                        current_num = start_num + i
+                        item_id = f"{base_part}-{str(current_num).zfill(2)}"
+                        if item_id in df['Item_ID'].values:
+                            st.error(f"Duplicate: {item_id}")
+                            st.stop()
+                        new_items.append({
+                            "Item_ID": item_id,
+                            "Material": material,
+                            "Footage": footage,
+                            "Location": generated_location,
+                            "Status": "Active"
+                        })
 
-                new_df = pd.concat([df, pd.DataFrame(new_coils)], ignore_index=True)
-                st.session_state.df = new_df
-                save_inventory()
-                log_action("Receive Coils", f"{count} x {material} to {generated_location}")
-                st.success(f"Added {count} coil(s) to {generated_location} by {operator_name}!")
-                st.balloons()
-                st.rerun()
-            except:
-                st.error("Invalid Coil ID format")
+                    new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
+                    st.session_state.df = new_df
+                    save_inventory()
+                    log_action("Receive Items", f"{count} x {material} to {generated_location}")
+                    st.success(f"Added {count} item(s) to {generated_location} by {operator_name}!")
+                    st.balloons()
+                    st.rerun()
+                except:
+                    st.error("Invalid Item ID format")
 
     st.divider()
 
-    # --- Move Coil ---
-    st.markdown("### Move Existing Coil")
+    # --- Move Item ---
+    st.markdown("### Move Existing Item")
     if df.empty:
-        st.info("No coils to move yet.")
+        st.info("No items to move yet.")
     else:
-        coil_to_move = st.selectbox("Select Coil to Move", df['Coil_ID'], key="move_coil_select")
+        item_to_move = st.selectbox("Select Item to Move", df['Item_ID'], key="move_item_select")
 
         st.markdown("#### New Location Generator")
         col1, col2, col3 = st.columns(3)
@@ -549,18 +557,18 @@ with tab3:
         new_location = f"{new_bay}{new_section}{new_level}"
         st.info(f"**New Location:** {new_location}")
 
-        if st.button("Move Coil", key="move_button"):
-            old_location = df.loc[df['Coil_ID'] == coil_to_move, 'Location'].values[0]
-            df.loc[df['Coil_ID'] == coil_to_move, 'Location'] = new_location
+        if st.button("Move Item", key="move_button"):
+            old_location = df.loc[df['Item_ID'] == item_to_move, 'Location'].values[0]
+            df.loc[df['Item_ID'] == item_to_move, 'Location'] = new_location
             save_inventory()
-            log_action("Move Coil", f"{coil_to_move} from {old_location} to {new_location}")
-            st.success(f"Moved {coil_to_move} to {new_location} by {operator_name}")
+            log_action("Move Item", f"{item_to_move} from {old_location} to {new_location}")
+            st.success(f"Moved {item_to_move} to {new_location} by {operator_name}")
             st.rerun()
 
     st.divider()
 
     # --- Admin Panel ---
-    st.markdown("### 🔧 Admin Only: Adjust Footage or Delete Coil")
+    st.markdown("### 🔧 Admin Only: Adjust Footage or Delete Item")
 
     admin_password = st.text_input("Admin Password", type="password", key="admin_pass")
     correct_password = "mjp@2026!"
@@ -569,42 +577,42 @@ with tab3:
         st.success("Admin access granted")
 
         if not df.empty:
-            coil_to_manage = st.selectbox("Select Coil", df['Coil_ID'], key="admin_manage_coil")
+            item_to_manage = st.selectbox("Select Item", df['Item_ID'], key="admin_manage_item")
 
-            current_footage = df.loc[df['Coil_ID'] == coil_to_manage, 'Footage'].values[0]
+            current_footage = df.loc[df['Item_ID'] == item_to_manage, 'Footage'].values[0]
             new_footage = st.number_input("Adjust Footage (ft)", min_value=0.0, value=float(current_footage), key="admin_new_footage")
 
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("Update Footage", key="admin_update"):
-                    df.loc[df['Coil_ID'] == coil_to_manage, 'Footage'] = new_footage
+                    df.loc[df['Item_ID'] == item_to_manage, 'Footage'] = new_footage
                     save_inventory()
-                    log_action("Adjust Footage", f"{coil_to_manage} to {new_footage:.1f} ft")
-                    st.success(f"Updated footage for {coil_to_manage}")
+                    log_action("Adjust Footage", f"{item_to_manage} to {new_footage:.1f} ft")
+                    st.success(f"Updated footage for {item_to_manage}")
                     st.rerun()
             with col2:
-                if st.button("🗑️ Delete Coil", key="admin_delete"):
+                if st.button("🗑️ Delete Item", key="admin_delete"):
                     if st.checkbox("Confirm permanent deletion", key="admin_delete_confirm"):
-                        df = df[df['Coil_ID'] != coil_to_manage]
+                        df = df[df['Item_ID'] != item_to_manage]
                         st.session_state.df = df
                         save_inventory()
-                        log_action("Delete Coil", coil_to_manage)
-                        st.success(f"Deleted {coil_to_manage}")
+                        log_action("Delete Item", item_to_manage)
+                        st.success(f"Deleted {item_to_manage}")
                         st.rerun()
 
         else:
-            st.info("No coils to manage")
+            st.info("No items to manage")
     elif admin_password:
         st.error("Incorrect password")
     else:
-        st.info("Enter admin password to adjust footage or delete coils")
+        st.info("Enter admin password to adjust footage or delete items")
 
     st.divider()
     st.subheader("Current Inventory")
     if df.empty:
-        st.info("No coils in inventory yet.")
+        st.info("No items in inventory yet.")
     else:
-        st.dataframe(df[['Coil_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
+        st.dataframe(df[['Item_ID', 'Material', 'Footage', 'Location']], use_container_width=True)
 
 with tab4:
     st.subheader("📊 Production Summary & Insights")
@@ -677,7 +685,6 @@ with tab4:
                 if not group_options:
                     st.warning("Select at least one grouping option")
                 else:
-                    # Dynamic grouping
                     group_summary = filtered.groupby(group_options).agg(
                         Total_Footage=('Total_Used_FT', 'sum'),
                         Total_Waste=('Waste_FT', 'sum'),
@@ -689,32 +696,23 @@ with tab4:
                     st.markdown(f"### Breakdown by {', '.join(group_options)}")
                     st.dataframe(group_summary, use_container_width=True)
 
-                    # --- Top by Footage Used (always grouped by Material for clarity) ---
-                    st.markdown("### Top Materials by Footage Used")
-                    material_footage = filtered.groupby('Material')['Total_Used_FT'].sum().sort_values(ascending=False)
-                    material_chart = pd.DataFrame({
-                        "Material": material_footage.index,
-                        "Footage (ft)": material_footage.values
-                    })
-                    st.bar_chart(material_chart.set_index("Material"))
+                    # Labeled Bar Chart
+                    st.markdown(f"### Top by Footage Used")
+                    chart_df = group_summary['Total_Footage'].head(15).reset_index()
+                    if len(group_options) == 1:
+                        chart_df['Label'] = chart_df[group_options[0]].astype(str)
+                    else:
+                        chart_df['Label'] = chart_df[group_options].astype(str).agg(' - '.join, axis=1)
+                    st.bar_chart(chart_df.set_index('Label')['Total_Footage'])
 
-                    # --- Optional: Top Sizes ---
-                    st.markdown("### Top Sizes Produced")
-                    size_pieces = filtered.groupby('Size')['Pieces'].sum().sort_values(ascending=False).head(10)
-                    size_chart = pd.DataFrame({
-                        "Size": size_pieces.index,
-                        "Pieces": size_pieces.values
-                    })
-                    st.bar_chart(size_chart.set_index("Size"))
-
-                    # --- Top Clients ---
-                    st.markdown("### Top Clients by Footage")
-                    client_footage = filtered.groupby('Client')['Total_Used_FT'].sum().sort_values(ascending=False).head(10)
-                    client_chart = pd.DataFrame({
-                        "Client": client_footage.index,
-                        "Footage (ft)": client_footage.values
-                    })
-                    st.bar_chart(client_chart.set_index("Client"))
+                    if "Size" in group_options:
+                        st.markdown("### Top Sizes by Pieces Produced")
+                        pieces_df = group_summary['Total_Pieces'].head(15).reset_index()
+                        if len(group_options) == 1:
+                            pieces_df['Label'] = pieces_df[group_options[0]].astype(str)
+                        else:
+                            pieces_df['Label'] = pieces_df[group_options].astype(str).agg(' - '.join, axis=1)
+                        st.bar_chart(pieces_df.set_index('Label')['Total_Pieces'])
 
                 # All Orders Table
                 st.markdown("### All Orders")
@@ -725,7 +723,8 @@ with tab4:
 
     except Exception as e:
         st.error(f"Could not load production log: {e}")
-        st.info("Make sure you have a 'Production_Log' tab with correct headers.")        
+        st.info("Make sure you have a 'Production_Log' tab with correct headers.")
+
 with tab5:
     st.subheader("Audit Trail - All Actions")
     try:
