@@ -649,41 +649,47 @@ with tab3:
 
         submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
+                submitted = st.form_submit_button("🚀 Add Items to Inventory")
+
         if submitted:
             if not operator_name:
                 st.error("Your name is required")
             else:
-                # Remove the second try: block — just run the code
-                parts = starting_id.strip().upper().split("-")
-                base_part = "-".join(parts[:-1])
-                start_num = int(parts[-1])
+                try:
+                    parts = starting_id.strip().upper().split("-")
+                    base_part = "-".join(parts[:-1])
+                    start_num = int(parts[-1])
 
-                new_items = []
-                for i in range(count):
-                    current_num = start_num + i
-                    item_id = f"{base_part}-{str(current_num).zfill(2)}"
-                    if item_id in df['Item_ID'].values:
-                        st.error(f"Duplicate: {item_id}")
-                        st.stop()
-                    new_items.append({
-                        "Item_ID": item_id,
-                        "Material": material,
-                        "Footage": footage,
-                        "Location": generated_location,
-                        "Status": "Active"
-                    })
-                    
-                    # Fix NaN before saving
-                    st.session_state.df = st.session_state.df.fillna(0)
+                    new_items = []
+                    for i in range(count):
+                        current_num = start_num + i
+                        item_id = f"{base_part}-{str(current_num).zfill(2)}"
+                        if item_id in df['Item_ID'].values:
+                            st.error(f"Duplicate: {item_id}")
+                            st.stop()
+                        new_items.append({
+                            "Item_ID": item_id,
+                            "Material": material,
+                            "Footage": footage,
+                            "Location": generated_location,
+                            "Status": "Active"
+                        })
 
                     new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
                     st.session_state.df = new_df
+
+                    # Fix NaN before saving
+                    st.session_state.df = st.session_state.df.fillna(0)
+
                     save_inventory()
                     st.success(f"Added {count} {item_type.lower()} to {generated_location} by {operator_name}!")
                     st.balloons()
                     st.rerun()
-                    except:
-                          st.error("Invalid Item ID format")
+
+                except ValueError:
+                    st.error("Invalid Item ID format — last part must be a number")
+                except Exception as e:
+                    st.error(f"Unexpected error: {e}")
     st.divider()
 
     # --- Move Item ---
