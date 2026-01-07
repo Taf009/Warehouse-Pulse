@@ -600,9 +600,9 @@ with tab3:
 
         # Manual Item ID Input
         st.markdown("#### Manual Item ID Input")
-        st.write("Enter the **full starting Item ID** (including number), e.g., `COIL-016-AL-SM-3000-01` or `ROLL-RPR-016-001`")
+        st.write("Enter the **full starting Item ID** (including number), e.g., `COIL-016-AL-SM-3000-01` or `ROLL-RPR-016-AL-SM-100`")
 
-        starting_id = st.text_input("Starting Item ID", value=f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-001")
+        starting_id = st.text_input("Starting Item ID", value=f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-AL-SM-100")
         count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1)
 
         # Live preview
