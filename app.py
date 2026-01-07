@@ -439,10 +439,11 @@ with tab1:
 with tab2:
     st.subheader("Production Log - Multi-Size & Multi-Coil Orders")
 
-    # Filter items with footage and in Coil or Roll category
+    # Correct filter — only items with footage > 0
     available_items = df[df['Footage'] > 0]
+
     if available_items.empty:
-        st.info("No coils or rolls with footage available for production.")
+        st.info("No items with footage available for production. Add some in Warehouse Management.")
     else:
         if 'production_lines' not in st.session_state:
             st.session_state.production_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
@@ -463,6 +464,10 @@ with tab2:
                         st.session_state.production_lines.pop(i)
                         st.rerun()
 
+                # Use available_items (all items with footage)
+                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                                for _, row in available_items.iterrows()]
+                line["items"] = st.multiselect(f"Items for size {i+1}", item_options, default=line["items"], key=f"items_{i}")
                 # Item selection from available items
                 item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
                                 for _, row in available_items.iterrows()]
