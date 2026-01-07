@@ -437,20 +437,36 @@ with tab1:
     else:
         st.success("✅ All coils and rolls are above low stock thresholds!")
 with tab2:
-    st.subheader("Production Log - Multi-Size Orders (Coils & Rolls)")
+    st.subheader("Production Log - Multi-Size & Multi-Coil Orders")
 
-    available_coils = df[(df['Category'] == "Coil") & (df['Footage'] > 0)]
-    available_rolls = df[(df['Category'] == "Roll") & (df['Footage'] > 0)]
-
-    if available_coils.empty and available_rolls.empty:
+    # Filter items with footage and in Coil or Roll category
+    available_items = df[(df['Footage'] > 0) & (df['Category'].isin(["Coil", "Roll"]))]
+    if available_items.empty:
         st.info("No coils or rolls with footage available for production.")
     else:
-        # Initialize lines
-        if 'coil_lines' not in st.session_state:
-            st.session_state.coil_lines = []
-        if 'roll_lines' not in st.session_state:
-            st.session_state.roll_lines = []
+        if 'production_lines' not in st.session_state:
+            st.session_state.production_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
 
+        st.markdown("#### Production Lines")
+        for i in range(len(st.session_state.production_lines)):
+            line = st.session_state.production_lines[i]
+            with st.container():
+                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                with col1:
+                    line["display_size"] = st.selectbox(f"Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"size_{i}")
+                with col2:
+                    line["pieces"] = st.number_input(f"Pieces {i+1}", min_value=1, value=line["pieces"], key=f"pieces_{i}")
+                with col3:
+                    line["waste"] = st.number_input(f"Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"waste_{i}")
+                with col4:
+                    if st.button("Remove Line", key=f"remove_line_{i}"):
+                        st.session_state.production_lines.pop(i)
+                        st.rerun()
+
+                # Item selection from available items
+                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                                for _, row in available_items.iterrows()]
+                line["items"] = st.multiselect(f"Items for size {i+1}", item_options, default=line["items"], key=f"items_{i}")
         # --- COILS SECTION ---
         st.markdown("### Coils Production")
         if available_coils.empty:
