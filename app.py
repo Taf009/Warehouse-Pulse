@@ -600,74 +600,46 @@ with tab2:
 with tab3:
     st.subheader("Manage")
 
-    # --- Receive New Items (Separate for Coils and Rolls) ---
+        # --- Receive New Items ---
     st.markdown("### Receive New Items")
 
     item_type = st.radio("What are you receiving?", ["Coils", "Rolls"], horizontal=True)
 
-    with st.form("receive_form", clear_on_submit=True):
+    with st.form("receive_items_form", clear_on_submit=True):
         if item_type == "Coils":
             st.markdown("#### Receiving Coils")
             material = st.selectbox("Material Type", COIL_MATERIALS, key="coil_material")
             prefix = "COIL"
             default_footage = 3000.0
         else:
-            st.markdown("#### Receiving Pallet of Rolls")
+            st.markdown("#### Receiving Rolls")
             material = st.selectbox("Material Type", ROLL_MATERIALS, key="roll_material")
-
-            rolls_per_pallet = st.number_input("Number of Rolls on Pallet", min_value=1, value=16, step=1)
-            footage_per_roll = st.number_input("Footage per Roll (ft)", min_value=0.1, value=100.0)
-            total_footage = rolls_per_pallet * footage_per_roll
-            st.info(f"**Total Footage on Pallet:** {total_footage:.1f} ft")
-
-            pallet_id = st.text_input("Pallet ID (main ID for traceability)", value="ROLL-RPR-016-001")
-
-            # Show individual roll IDs for labeling (not saved)
-            individual_ids = [f"{pallet_id}-{chr(65 + i)}" for i in range(rolls_per_pallet)]  # A, B, C...
-            st.markdown("**Individual Roll IDs (for labeling only):**")
-            st.code("\n".join(individual_ids), language="text")
-
-            # Use total footage for the pallet
-            footage = total_footage
-            count = 1  # Only one pallet item
-
             prefix = "ROLL"
-            
-        # --- Unlimited Rack Location Generator (with Floor support) ---
-        st.markdown("#### LOCATION")
-        col1, col2, col3, col4 = st.columns(4)
+            default_footage = 100.0
+
+        # Location Generator
+        st.markdown("#### Rack Location Generator (Unlimited)")
+        col1, col2, col3 = st.columns(3)
         with col1:
             bay = st.number_input("Bay Number", min_value=1, value=1, step=1)
         with col2:
-            floor = st.checkbox("On Floor?")
+            section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
         with col3:
-            if floor:
-                floor_section = st.number_input("Floor Section", min_value=1, value=1, step=1)
-                section_letter = ""
-            else:
-                section_letter = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-                floor_section = 0
-        with col4:
             level = st.number_input("Level", min_value=1, value=1, step=1)
 
-        if floor:
-            generated_location = f"Bay {bay} Floor Section {floor_section} Level {level}"
-        else:
-            generated_location = f"{bay}{section_letter}{level}"
-
+        generated_location = f"{bay}{section}{level}"
         st.info(f"**Generated Location Code:** {generated_location}")
-        footage = st.number_input(f"Footage per {item_type[:-1]} (ft)", min_value=0.1, value=default_footage)
+
+        footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=default_footage)
 
         # Manual Item ID Input
         st.markdown("#### Manual Item ID Input")
-        st.write("Enter the **full starting Item ID** (including number), e.g., `COIL-016-AL-SM-3000-01` or `ROLL-RPR-016-AL-SM-100`")
-
-        default_start = f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-AL-SM-100"
+        default_start = f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-001"
         starting_id = st.text_input("Starting Item ID", value=default_start)
 
         count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1)
 
-                # Live preview
+        # Live preview
         if starting_id.strip() and count > 0:
             try:
                 parts = starting_id.strip().upper().split("-")
@@ -681,10 +653,9 @@ with tab3:
 
         operator_name = st.text_input("Your Name (who is receiving these items)")
 
-        # ← This line is now correctly indented inside the form
         submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
-    # ← This if block is now correctly OUTSIDE the form (less indented)
+    # Submit logic (outside the form)
     if submitted:
         if not operator_name:
             st.error("Your name is required")
@@ -719,11 +690,8 @@ with tab3:
                 st.success(f"Added {count} {item_type.lower()} to {generated_location} by {operator_name}!")
                 st.balloons()
                 st.rerun()
-
-            except ValueError:
-                st.error("Invalid Item ID format — last part must be a number")
-            except Exception as e:
-                st.error(f"Unexpected error: {e}")
+            except:
+                st.error("Invalid Item ID format")
     st.divider()
 
     # --- Move Item ---
