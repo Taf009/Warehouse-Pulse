@@ -653,11 +653,10 @@ with tab3:
             if not operator_name:
                 st.error("Your name is required")
             else:
-                try:
-                    parts = starting_id.strip().upper().split("-")
-                    base_part = "-".join(parts[:-1])
-                    start_num = int(parts[-1])
-
+                # Remove the second try: block — just run the code
+                parts = starting_id.strip().upper().split("-")
+                base_part = "-".join(parts[:-1])
+                start_num = int(parts[-1])
                     new_items = []
                     for i in range(count):
                         current_num = start_num + i
