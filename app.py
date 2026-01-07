@@ -633,7 +633,7 @@ with tab3:
 
         count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1)
 
-        # Live preview
+                # Live preview
         if starting_id.strip() and count > 0:
             try:
                 parts = starting_id.strip().upper().split("-")
@@ -657,21 +657,22 @@ with tab3:
                 parts = starting_id.strip().upper().split("-")
                 base_part = "-".join(parts[:-1])
                 start_num = int(parts[-1])
-                    new_items = []
-                    for i in range(count):
-                        current_num = start_num + i
-                        item_id = f"{base_part}-{str(current_num).zfill(2)}"
-                        if item_id in df['Item_ID'].values:
-                            st.error(f"Duplicate: {item_id}")
-                            st.stop()
-                        new_items.append({
-                            "Item_ID": item_id,
-                            "Material": material,
-                            "Footage": footage,
-                            "Location": generated_location,
-                            "Status": "Active"
-                        })
 
+                new_items = []
+                for i in range(count):
+                    current_num = start_num + i
+                    item_id = f"{base_part}-{str(current_num).zfill(2)}"
+                    if item_id in df['Item_ID'].values:
+                        st.error(f"Duplicate: {item_id}")
+                        st.stop()
+                    new_items.append({
+                        "Item_ID": item_id,
+                        "Material": material,
+                        "Footage": footage,
+                        "Location": generated_location,
+                        "Status": "Active"
+                    })
+                    
                     # Fix NaN before saving
                     st.session_state.df = st.session_state.df.fillna(0)
 
