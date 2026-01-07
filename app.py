@@ -559,18 +559,26 @@ with tab2:
                         st.rerun()
                             
 with tab3:
-    st.subheader("Warehouse Management")
+    st.subheader("Manage")
 
-    # --- Receive New Items (Coils & Rolls) ---
+        # --- Receive New Items (Separate for Coils and Rolls) ---
     st.markdown("### Receive New Items")
-    with st.form("receive_items_form", clear_on_submit=True):
-        category = st.selectbox("Category", ["Coil", "Roll"])
 
-        if category == "Coil":
-            material = st.selectbox("Material Type", COIL_MATERIALS)
+    item_type = st.radio("What are you receiving?", ["Coils", "Rolls"], horizontal=True)
+
+    with st.form("receive_form", clear_on_submit=True):
+        if item_type == "Coils":
+            st.markdown("#### Receiving Coils")
+            material = st.selectbox("Material Type", COIL_MATERIALS, key="coil_material")
+            prefix = "COIL"
+            default_footage = 3000.0
         else:
-            material = st.selectbox("Material Type", ROLL_MATERIALS)
+            st.markdown("#### Receiving Rolls")
+            material = st.selectbox("Material Type", ROLL_MATERIALS, key="roll_material")
+            prefix = "ROLL"
+            default_footage = 100.0
 
+        # Location Generator
         st.markdown("#### Rack Location Generator (Unlimited)")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -583,13 +591,16 @@ with tab3:
         generated_location = f"{bay}{section}{level}"
         st.info(f"**Generated Location Code:** {generated_location}")
 
-        footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=3000.0)
+        footage = st.number_input(f"Footage per {item_type[:-1]} (ft)", min_value=0.1, value=default_footage)
 
+        # Manual Item ID Input
         st.markdown("#### Manual Item ID Input")
-        default_prefix = "COIL" if category == "Coil" else "ROLL"
-        starting_id = st.text_input("Starting Item ID", value=f"{default_prefix}-016-AL-SM-3000-01")
+        st.write("Enter the **full starting Item ID** (including number), e.g., `COIL-016-AL-SM-3000-01` or `ROLL-RPR-016-001`")
+
+        starting_id = st.text_input("Starting Item ID", value=f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-001")
         count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1)
 
+        # Live preview
         if starting_id.strip() and count > 0:
             try:
                 parts = starting_id.strip().upper().split("-")
@@ -599,11 +610,11 @@ with tab3:
                 st.markdown("**Generated Item IDs:**")
                 st.code("\n".join(preview), language="text")
             except:
-                st.warning("Invalid format")
+                st.warning("Invalid format — last part must be a number")
 
         operator_name = st.text_input("Your Name (who is receiving these items)")
 
-        submitted = st.form_submit_button("🚀 Add Coils to Inventory")
+        submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
         if submitted:
             if not operator_name:
@@ -614,12 +625,10 @@ with tab3:
                     base_part = "-".join(parts[:-1])
                     start_num = int(parts[-1])
 
-                    prefix = "COIL" if category == "Coil" else "ROLL"  # <-- Now inside try:
-
                     new_items = []
                     for i in range(count):
                         current_num = start_num + i
-                        item_id = f"{prefix}-{base_part}-{str(current_num).zfill(2)}"
+                        item_id = f"{base_part}-{str(current_num).zfill(2)}"
                         if item_id in df['Item_ID'].values:
                             st.error(f"Duplicate: {item_id}")
                             st.stop()
@@ -634,14 +643,11 @@ with tab3:
                     new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
                     st.session_state.df = new_df
                     save_inventory()
-                    st.success(f"Added {count} item(s) to {generated_location} by {operator_name}!")
+                    st.success(f"Added {count} {item_type.lower()} to {generated_location} by {operator_name}!")
                     st.balloons()
                     st.rerun()
-
-                except ValueError:
-                    st.error("Invalid Item ID format — last part must be a number")
-                except Exception as e:
-                    st.error(f"Unexpected error: {e}")
+                except:
+                    st.error("Invalid Item ID format")
     st.divider()
 
     # --- Move Item ---
