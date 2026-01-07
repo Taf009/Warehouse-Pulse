@@ -614,20 +614,20 @@ with tab3:
                     base_part = "-".join(parts[:-1])
                     start_num = int(parts[-1])
 
-                new_items = []
-                prefix = "COIL" if category == "Coil" else "ROLL"  # <-- This line switches the prefix
-                for i in range(count):
-                    current_num = start_num + i
-                    item_id = f"{prefix}-{base_part}-{str(current_num).zfill(2)}"  # <-- Uses the new prefix
-                    if item_id in df['Item_ID'].values:  # <-- Changed to Item_ID
-                        st.error(f"Duplicate: {item_id}")
-                        st.stop()
-                    new_items.append({
-                        "Item_ID": item_id,  # <-- Changed to Item_ID
-                        "Material": material,
-                        "Footage": footage,
-                        "Location": generated_location,
-                        "Status": "Active"
+                    new_items = []
+                    prefix = "COIL" if category == "Coil" else "ROLL"  # <-- This line switches the prefix
+                    for i in range(count):
+                        current_num = start_num + i
+                        item_id = f"{prefix}-{base_part}-{str(current_num).zfill(2)}"  # <-- Uses the new prefix
+                        if item_id in df['Item_ID'].values:  # <-- Changed to Item_ID
+                           st.error(f"Duplicate: {item_id}")
+                           st.stop()
+                        new_items.append({
+                            "Item_ID": item_id,  # <-- Changed to Item_ID
+                            "Material": material,
+                            "Footage": footage,
+                            "Location": generated_location,
+                            "Status": "Active"
                     })
 
                 new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
