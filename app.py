@@ -440,7 +440,7 @@ with tab2:
     st.subheader("Production Log - Multi-Size & Multi-Coil Orders")
 
     # Filter items with footage and in Coil or Roll category
-    available_items = df[(df['Footage'] > 0) & (df['Category'].isin(["Coil", "Roll"]))]
+    available_items = df[df['Footage'] > 0]
     if available_items.empty:
         st.info("No coils or rolls with footage available for production.")
     else:
