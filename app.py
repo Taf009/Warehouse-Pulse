@@ -682,8 +682,8 @@ with tab3:
                     st.success(f"Added {count} {item_type.lower()} to {generated_location} by {operator_name}!")
                     st.balloons()
                     st.rerun()
-                except:
-                    st.error("Invalid Item ID format")
+                    except:
+                          st.error("Invalid Item ID format")
     st.divider()
 
     # --- Move Item ---
