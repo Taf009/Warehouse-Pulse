@@ -465,8 +465,8 @@ with tab2:
                         st.rerun()
 
                 # Use available_items (all items with footage)
-                                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                                for _, row in available_items.iterrows()]
+                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                for _, row in available_items.iterrows()]
 
                 # Unique key to prevent duplicate key error
                 unique_key = f"items_line_{i}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
