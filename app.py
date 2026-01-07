@@ -649,7 +649,7 @@ with tab3:
 
         submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
-                submitted = st.form_submit_button("🚀 Add Items to Inventory")
+        submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
         if submitted:
             if not operator_name:
