@@ -571,34 +571,35 @@ with tab3:
 
     item_type = st.radio("What are you receiving?", ["Coils", "Rolls"], horizontal=True)
 
-    with st.form("receive_form", clear_on_submit=True):
+        with st.form("receive_form", clear_on_submit=True):
         if item_type == "Coils":
             st.markdown("#### Receiving Coils")
             material = st.selectbox("Material Type", COIL_MATERIALS, key="coil_material")
             prefix = "COIL"
             default_footage = 3000.0
-                else:
-                    st.markdown("#### Receiving Pallet of Rolls")
-                    material = st.selectbox("Material Type", ROLL_MATERIALS, key="roll_material")
+        else:
+            st.markdown("#### Receiving Pallet of Rolls")
+            material = st.selectbox("Material Type", ROLL_MATERIALS, key="roll_material")
 
-                    rolls_per_pallet = st.number_input("Number of Rolls on Pallet", min_value=1, value=16, step=1)
-                    footage_per_roll = st.number_input("Footage per Roll (ft)", min_value=0.1, value=100.0)
-                    total_footage = rolls_per_pallet * footage_per_roll
-                    st.info(f"**Total Footage on Pallet:** {total_footage:.1f} ft")
+            rolls_per_pallet = st.number_input("Number of Rolls on Pallet", min_value=1, value=16, step=1)
+            footage_per_roll = st.number_input("Footage per Roll (ft)", min_value=0.1, value=100.0)
+            total_footage = rolls_per_pallet * footage_per_roll
+            st.info(f"**Total Footage on Pallet:** {total_footage:.1f} ft")
 
-                    pallet_id = st.text_input("Pallet ID (main ID for traceability)", value="ROLL-RPR-016-001")
+            pallet_id = st.text_input("Pallet ID (main ID for traceability)", value="ROLL-RPR-016-001")
 
-                    # Show individual roll IDs for labeling (not saved)
-                    individual_ids = [f"{pallet_id}-{chr(65 + i)}" for i in range(rolls_per_pallet)]  # A, B, C...
-                    st.markdown("**Individual Roll IDs (for labeling only):**")
-                    st.code("\n".join(individual_ids), language="text")
+            # Show individual roll IDs for labeling (not saved)
+            individual_ids = [f"{pallet_id}-{chr(65 + i)}" for i in range(rolls_per_pallet)]  # A, B, C...
+            st.markdown("**Individual Roll IDs (for labeling only):**")
+            st.code("\n".join(individual_ids), language="text")
 
-                    # Use total footage for the pallet
-                    footage = total_footage
-                    count = 1  # Only one pallet item
+            # Use total footage for the pallet
+            footage = total_footage
+            count = 1  # Only one pallet item
 
-                    prefix = "ROLL"
-                # --- Unlimited Rack Location Generator (with Floor support) ---
+            prefix = "ROLL"
+            
+        # --- Unlimited Rack Location Generator (with Floor support) ---
         st.markdown("#### LOCATION")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
