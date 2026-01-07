@@ -324,9 +324,14 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Dashboard", "Production Log", "Warehous
 with tab1:
     st.subheader("Current Inventory Summary")
 
-    # --- Category Selector ---
+        # --- Category Selector ---
     st.markdown("#### View by Category")
-    all_categories = ["All Categories"] + sorted(df['Category'].unique().tolist()) if not df.empty else ["All Categories"]
+    if df.empty:
+        all_categories = ["All Categories"]
+    else:
+        unique_categories = df['Category'].dropna().unique().tolist()
+        all_categories = ["All Categories"] + sorted([str(cat) for cat in unique_categories])  # Force string for safety
+
     selected_category = st.selectbox("Select Category", all_categories, key="dashboard_category")
 
     # Filter data
