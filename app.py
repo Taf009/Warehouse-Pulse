@@ -657,6 +657,9 @@ with tab3:
                             "Status": "Active"
                         })
 
+                    # Fix NaN before saving
+                    st.session_state.df = st.session_state.df.fillna(0)
+
                     new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
                     st.session_state.df = new_df
                     save_inventory()
