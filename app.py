@@ -571,7 +571,7 @@ with tab3:
 
     item_type = st.radio("What are you receiving?", ["Coils", "Rolls"], horizontal=True)
 
-        with st.form("receive_form", clear_on_submit=True):
+    with st.form("receive_form", clear_on_submit=True):
         if item_type == "Coils":
             st.markdown("#### Receiving Coils")
             material = st.selectbox("Material Type", COIL_MATERIALS, key="coil_material")
