@@ -603,7 +603,7 @@ with tab3:
 
         operator_name = st.text_input("Your Name (who is receiving these items)")
 
-                submitted = st.form_submit_button("🚀 Add Coils to Inventory")
+            submitted = st.form_submit_button("🚀 Add Coils to Inventory")
 
         if submitted:
             if not operator_name:
