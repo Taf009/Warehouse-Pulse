@@ -164,11 +164,26 @@ def save_inventory():
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_url(st.secrets["SHEET_URL"])
         inv_ws = sh.worksheet("Inventory")
-        inv_ws.clear()
-        inv_ws.update([df.columns.tolist()] + df.values.tolist())
+
+        # Get current data first (for safety)
+        current_data = inv_ws.get_all_values()
+
+        # Prepare new data
+        new_data = [df.columns.tolist()] + df.values.tolist()
+
+        # Only clear and write if new data is valid
+        if new_data and len(new_data) > 0:
+            inv_ws.clear()  # Only clear if we have good data
+            inv_ws.update('A1', new_data)
+        else:
+            st.error("No data to save — aborting to prevent wipe")
+            # Restore from current_data if possible
+            if len(current_data) > 1:
+                inv_ws.update('A1', current_data)
+
     except Exception as e:
         st.error(f"Failed to save inventory: {e}")
-
+        st.info("Your data was NOT cleared — safety mode prevented wipe")
 # --- LOW STOCK CHECK & EMAIL ---
 def check_low_stock_and_alert():
     low_materials = []
