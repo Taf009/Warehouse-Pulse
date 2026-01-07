@@ -10,44 +10,42 @@ from email.mime.base import MIMEBase
 from email import encoders
 import io
 
-# --- VIVID LOW STOCK ALERT STYLING ---
+# --- LOW STOCK ALERT STYLING ---
 st.markdown("""
 <style>
-.vivid-low-stock-banner {
-    background-color: #FF4500;  /* Bright orange-red */
+.low-stock-banner {
+    background-color: #FFB74D;  /* Soft amber */
     padding: 15px;
     border-radius: 8px;
-    border-left: 8px solid #FF0000;
-    margin-bottom: 25px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    border-left: 6px solid #FF8F00;
+    margin-bottom: 20px;
 }
-.vivid-low-stock-text {
-    color: #FF0000;  /* Bright red */
+.low-stock-text {
+    color: #000000;  /* Bold black */
     font-weight: bold;
-    font-size: 20px;
+    font-size: 18px;
 }
-.vivid-low-stock-item {
-    color: #D00000;
+.low-stock-item {
+    color: #000000;
     font-weight: bold;
-    font-size: 16px;
 }
-.vivid-low-stock-row {
-    background-color: #FFFF00 !important;  /* Bright yellow */
+.low-stock-row {
+    background-color: #FFF9C4 !important;  /* Light yellow */
     font-weight: bold;
     color: #000000 !important;
 }
 </style>
 """, unsafe_allow_html=True)
-
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="MJP Floors Pulse", layout="wide")
 st.title("🏭 MJP Floors Pulse - Production & Inventory")
 
 # --- SIZE MAP ---
 SIZE_DISPLAY = {
-    "#2": 13.0,
-    "#3": 14.5,
-    "#4": 16.0,
+    "1#": 12.0,
+    "#2": 13.5,
+    "#3": 14.75,
+    "#4": 16.25,
     "#5": 18.0,
     "#6": 20.0,
     "#7": 23.0,
@@ -55,7 +53,28 @@ SIZE_DISPLAY = {
     "#9": 29.5,
     "#10": 32.5,
     "#11": 36.0,
-    "#12": 39.5,
+    "#12": 39.25,
+    "#13": 42.25,
+    "#14": 46.5,
+    "#15": 49.5,
+    "#16": 52.75,
+    "#17": 57,
+    "#18": 60.25,
+    "#19": 63.25,
+    "#20": 66.5,
+    "#21": 69.75,
+    "#22": 72.75,
+    "#23": 76,
+    "#24": 79.25,
+    "#25": 82.5,
+    "#26": 85.5,
+    "#27": 88.5,
+    "#28": 92,
+    "#29": 95,
+    "#30": 98.25,
+    "#31": 101.5,
+    "#32": 104.5,
+    "#33": 107.75,
 }
 SIZE_MAP = {k.replace("#", "Size "): v for k, v in SIZE_DISPLAY.items()}
 
@@ -662,47 +681,49 @@ with tab3:
 
         operator_name = st.text_input("Your Name (who is receiving these items)")
 
+        # ← This line is now correctly indented inside the form
         submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
-        if submitted:
-            if not operator_name:
-                st.error("Your name is required")
-            else:
-                try:
-                    parts = starting_id.strip().upper().split("-")
-                    base_part = "-".join(parts[:-1])
-                    start_num = int(parts[-1])
+    # ← This if block is now correctly OUTSIDE the form (less indented)
+    if submitted:
+        if not operator_name:
+            st.error("Your name is required")
+        else:
+            try:
+                parts = starting_id.strip().upper().split("-")
+                base_part = "-".join(parts[:-1])
+                start_num = int(parts[-1])
 
-                    new_items = []
-                    for i in range(count):
-                        current_num = start_num + i
-                        item_id = f"{base_part}-{str(current_num).zfill(2)}"
-                        if item_id in df['Item_ID'].values:
-                            st.error(f"Duplicate: {item_id}")
-                            st.stop()
-                        new_items.append({
-                            "Item_ID": item_id,
-                            "Material": material,
-                            "Footage": footage,
-                            "Location": generated_location,
-                            "Status": "Active"
-                        })
+                new_items = []
+                for i in range(count):
+                    current_num = start_num + i
+                    item_id = f"{base_part}-{str(current_num).zfill(2)}"
+                    if item_id in df['Item_ID'].values:
+                        st.error(f"Duplicate: {item_id}")
+                        st.stop()
+                    new_items.append({
+                        "Item_ID": item_id,
+                        "Material": material,
+                        "Footage": footage,
+                        "Location": generated_location,
+                        "Status": "Active"
+                    })
 
-                    new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
-                    st.session_state.df = new_df
+                new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
+                st.session_state.df = new_df
 
-                    # Fix NaN before saving
-                    st.session_state.df = st.session_state.df.fillna(0)
+                # Fix NaN before saving
+                st.session_state.df = st.session_state.df.fillna(0)
 
-                    save_inventory()
-                    st.success(f"Added {count} {item_type.lower()} to {generated_location} by {operator_name}!")
-                    st.balloons()
-                    st.rerun()
+                save_inventory()
+                st.success(f"Added {count} {item_type.lower()} to {generated_location} by {operator_name}!")
+                st.balloons()
+                st.rerun()
 
-                except ValueError:
-                    st.error("Invalid Item ID format — last part must be a number")
-                except Exception as e:
-                    st.error(f"Unexpected error: {e}")
+            except ValueError:
+                st.error("Invalid Item ID format — last part must be a number")
+            except Exception as e:
+                st.error(f"Unexpected error: {e}")
     st.divider()
 
     # --- Move Item ---
