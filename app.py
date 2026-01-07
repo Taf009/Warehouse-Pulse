@@ -480,8 +480,8 @@ with tab2:
         
         # --- COILS SECTION ---
         st.markdown("### Coils Production")
-        if available_coils.empty:
-            st.info("No coils available")
+        if available_items.empty:
+            st.info("No items available")
         else:
             for i in range(len(st.session_state.coil_lines)):
                 line = st.session_state.coil_lines[i]
