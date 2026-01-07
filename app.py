@@ -465,13 +465,19 @@ with tab2:
                         st.rerun()
 
                 # Use available_items (all items with footage)
-                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
                                 for _, row in available_items.iterrows()]
-                line["items"] = st.multiselect(f"Items for size {i+1}", item_options, default=line["items"], key=f"items_{i}")
-                # Item selection from available items
-                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                                for _, row in available_items.iterrows()]
-                line["items"] = st.multiselect(f"Items for size {i+1}", item_options, default=line["items"], key=f"items_{i}")
+
+                # Unique key to prevent duplicate key error
+                unique_key = f"items_line_{i}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+
+                line["items"] = st.multiselect(
+                    label=f"Items for size {i+1}",
+                    options=item_options,
+                    default=line["items"] if line["items"] else None,
+                    key=unique_key
+                )
+        
         # --- COILS SECTION ---
         st.markdown("### Coils Production")
         if available_coils.empty:
