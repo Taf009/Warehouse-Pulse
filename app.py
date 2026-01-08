@@ -490,14 +490,14 @@ with tab1:
 with tab2:
     st.subheader("Production Log - Multi-Size Orders")
 
-    # 1. Filter available items specifically for the dropdowns
+    # 1. Filter available items
     available_coils = df[(df['Category'] == "Coil") & (df['Footage'] > 0)]
     available_rolls = df[(df['Category'] == "Roll") & (df['Footage'] > 0)]
 
     if available_coils.empty and available_rolls.empty:
-        st.info("No coils or rolls with footage available for production. Add some in Warehouse Management.")
+        st.info("No coils or rolls with footage available for production.")
     else:
-        # 2. Initialize session state lines if they don't exist
+        # 2. Initialize session state
         if 'coil_lines' not in st.session_state:
             st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
         if 'roll_lines' not in st.session_state:
@@ -505,8 +505,7 @@ with tab2:
 
         # --- COILS SECTION ---
         st.markdown("### 🌀 Coils Production")
-        # Individual allowance bar for Coils
-        coil_extra = st.number_input("Coil Extra Inch Allowance (per piece)", min_value=0.0, value=0.5, step=0.1, key="c_extra_bar")
+        coil_extra = st.number_input("Coil Extra Inch Allowance", min_value=0.0, value=0.5, step=0.1, key="c_extra_bar")
         
         coil_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft)" for _, row in available_coils.iterrows()]
 
@@ -524,7 +523,7 @@ with tab2:
                         st.session_state.coil_lines.pop(i)
                         st.rerun()
                 
-                # Safety check: ensures previous selections still exist in inventory to prevent the multiselect crash
+                # FIX for image_82cdc3.png: Validate that selected items still exist in current inventory
                 valid_defaults = [item for item in line["items"] if item in coil_options]
                 line["items"] = st.multiselect(f"Source Coils {i+1}", coil_options, default=valid_defaults, key=f"coil_items_{i}")
 
@@ -536,8 +535,7 @@ with tab2:
 
         # --- ROLLS SECTION ---
         st.markdown("### 🗞️ Rolls Production")
-        # Individual allowance bar for Rolls
-        roll_extra = st.number_input("Roll Extra Inch Allowance (per piece)", min_value=0.0, value=0.5, step=0.1, key="r_extra_bar")
+        roll_extra = st.number_input("Roll Extra Inch Allowance", min_value=0.0, value=0.5, step=0.1, key="r_extra_bar")
 
         roll_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft)" for _, row in available_rolls.iterrows()]
 
@@ -555,7 +553,7 @@ with tab2:
                         st.session_state.roll_lines.pop(i)
                         st.rerun()
 
-                # Safety check for rolls inventory to prevent the multiselect crash
+                # FIX for image_82cdc3.png: Validate selected rolls
                 valid_roll_defaults = [item for item in line["items"] if item in roll_options]
                 line["items"] = st.multiselect(f"Source Rolls {i+1}", roll_options, default=valid_roll_defaults, key=f"roll_items_{i}")
 
@@ -563,67 +561,83 @@ with tab2:
             st.session_state.roll_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
             st.rerun()
 
-        st.divider()
-
         # --- SUBMIT FORM ---
         with st.form("production_submit_form"):
             st.markdown("#### 📑 Order Details")
             f1, f2, f3 = st.columns(3)
             with f1: client_name = st.text_input("Client Name")
-            with f2: order_number = st.text_input("Internal Order Number")
+            with f2: order_number = st.text_input("Internal Order #")
             with f3: operator_name = st.text_input("Operator Name")
 
             st.markdown("#### 📦 Box Usage")
             box_types = ["Small Metal Box", "Big Metal Box", "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"]
-            box_usage = {}
-            b_cols = st.columns(5)
-            for idx, box in enumerate(box_types):
-                with b_cols[idx]:
-                    box_usage[box] = st.number_input(box, min_value=0, value=0, step=1, key=f"box_{box}")
+            box_usage = {box: st.number_input(box, min_value=0, step=1, key=f"box_{box}") for box in box_types}
 
-            submitted = st.form_submit_button("🚀 Complete Order & Send PDF", use_container_width=True)
+            submitted = st.form_submit_button("🚀 Complete Order & Send PDF")
 
             if submitted:
                 if not client_name or not order_number or not operator_name:
-                    st.error("Client Name, Order Number, and Operator Name are required.")
+                    st.error("Missing header information.")
                 else:
-                    deduction_details = []
+                    production_details = []
                     
-                    # 3. Process Coils (using coil_extra)
+                    # 3. Process Coils
                     for line in st.session_state.coil_lines:
                         if line["pieces"] > 0 and line["items"]:
                             base_inches = SIZE_MAP.get(line["display_size"].replace("#", "Size "), 0)
                             total_ft = (line["pieces"] * (base_inches + coil_extra) / 12) + line["waste"]
+                            
+                            # Get material name for PDF
+                            mat_name = line["items"][0].split(" - ")[1].split(" (")[0]
+                            
                             target_id = line["items"][0].split(" - ")[0]
                             df.loc[df['Item_ID'] == target_id, 'Footage'] -= total_ft
-                            deduction_details.append({**line, "total_used": total_ft, "material_type": "Coil"})
+                            
+                            # FIX for image_82e42e.png: Use key 'material' and 'total_used'
+                            production_details.append({
+                                "display_size": line["display_size"],
+                                "pieces": line["pieces"],
+                                "material": mat_name,
+                                "items": ", ".join([it.split(" - ")[0] for it in line["items"]]),
+                                "total_used": total_ft
+                            })
 
-                    # 4. Process Rolls (using roll_extra)
+                    # 4. Process Rolls
                     for line in st.session_state.roll_lines:
                         if line["pieces"] > 0 and line["items"]:
                             base_inches = SIZE_MAP.get(line["display_size"].replace("#", "Size "), 0)
                             total_ft = (line["pieces"] * (base_inches + roll_extra) / 12) + line["waste"]
+                            
+                            mat_name = line["items"][0].split(" - ")[1].split(" (")[0]
+                            
                             target_id = line["items"][0].split(" - ")[0]
                             df.loc[df['Item_ID'] == target_id, 'Footage'] -= total_ft
-                            deduction_details.append({**line, "total_used": total_ft, "material_type": "Roll"})
+                            
+                            production_details.append({
+                                "display_size": line["display_size"],
+                                "pieces": line["pieces"],
+                                "material": mat_name,
+                                "items": ", ".join([it.split(" - ")[0] for it in line["items"]]),
+                                "total_used": total_ft
+                            })
 
-                    if not deduction_details:
-                        st.error("Please enter pieces for at least one size line.")
+                    if not production_details:
+                        st.error("No production pieces entered.")
                     else:
                         save_inventory()
                         
-                        # Generate PDF (passing coil_extra to satisfy the function argument requirement)
-                        pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, coil_extra)
+                        # FIX for image_82d850.png: Pass 'coil_extra' as the 'extra_inch' argument
+                        pdf_buffer = generate_production_pdf(
+                            order_number, client_name, operator_name, 
+                            production_details, box_usage, coil_extra
+                        )
 
                         if send_production_pdf(pdf_buffer, order_number, client_name):
-                            st.success(f"Order {order_number} completed and PDF sent!")
+                            st.success("Order Processed!")
                             st.balloons()
-                            # Reset lines for fresh start
                             st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
                             st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
-                            st.rerun()
-                        else:
-                            st.warning("Order logged but email failed. Check connection.")                            
+                            st.rerun()                            
 with tab3:
     st.subheader("📦 Smart Inventory Receiver")
     
