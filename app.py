@@ -478,43 +478,44 @@ with tab1:
                 cat_type = row['Type'] 
                 
                 # --- 1. SET DEFAULTS (Prevents NameError) ---
-                display_val = f"{int(ft)}"
-                unit_label = "Units"
-                sub_info = "In Stock"
+                # We use these exact names to match your st.metric call below
+                display_value = f"{int(ft)}"
+                unit_text = "Units"
+                sub_label = "In Stock"
 
                 # --- 2. LOGIC BRANCHES ---
                 if cat_type == "Rolls":
-                    # Check for RPR in material name (case insensitive)
+                    # Smart check for RPR 200ft vs Standard 100ft
                     divisor = 200 if "RPR" in mat.upper() else 100
                     roll_qty = ft / divisor
                     
-                    display_val = f"{roll_qty:.1f}"
-                    unit_label = f"Rolls ({divisor}ft)"
-                    sub_info = f"Total: {ft} FT"
+                    display_value = f"{roll_qty:.1f}"
+                    unit_text = f"Rolls ({divisor}ft)"
+                    sub_label = f"Total: {ft} FT"
                 
                 elif cat_type == "Coils":
-                    display_val = f"{ft}"
-                    unit_label = "FT"
-                    sub_info = f"{int(units)} Separate Coils"
+                    display_value = f"{ft}"
+                    unit_text = "FT"
+                    sub_label = f"{int(units)} Separate Coils"
                 
                 elif cat_type == "Fab Straps":
-                    display_val = f"{int(ft)}"
-                    unit_label = "Bundles"
-                    sub_info = "Standard Stock"
+                    display_value = f"{int(ft)}"
+                    unit_text = "Bundles"
+                    sub_label = "Standard Stock"
 
                 elif cat_type == "Elbows":
-                    display_val = f"{int(ft)}"
-                    unit_label = "Pcs"
-                    sub_info = "Standard Stock"
+                    display_value = f"{int(ft)}"
+                    unit_text = "Pcs"
+                    sub_label = "Standard Stock"
 
                 # --- 3. RENDER THE CARD ---
+                # This uses the guaranteed variables from above
                 st.metric(
                     label=mat, 
-                    value=f"{display_val} {unit_label}",
-                    delta=sub_info,
+                    value=f"{display_value} {unit_text}",
+                    delta=sub_label,
                     delta_color="off"
-                )
-                
+                )                
                 # Logic for Coils
                 elif cat_type == "Coils":
                     display_val = f"{ft}"
