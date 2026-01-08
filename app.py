@@ -606,168 +606,132 @@ with tab2:
                         st.balloons()
                         st.rerun()                            
 with tab3:
-    st.subheader("Manage Inventory")
+    st.subheader("📦 Smart Inventory Receiver")
     
-    # Selection for item type
-    item_type = st.radio("What are you receiving?", ["Coils", "Rolls"], horizontal=True)
+    # 1. High-Level Category Selection
+    cat_choice = st.radio(
+        "What are you receiving?", 
+        ["Coils", "Rolls", "Elbows", "Fab Straps", "Mineral Wool", "Other"],
+        horizontal=True
+    )
 
-    # --- Receive New Items Form ---
-    with st.form("receive_items_form", clear_on_submit=True):
-        # Material selection based on item type
-        material = st.selectbox("Material Type", COIL_MATERIALS if item_type == "Coils" else ROLL_MATERIALS)
-        prefix = "COIL" if item_type == "Coils" else "ROLL"
-        default_footage = 3000.0 if item_type == "Coils" else 100.0
-
-        # --- Location Selector logic ---
-        st.markdown("#### Location Selector")
-        loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
-
-        if loc_type == "Rack System":
-            c1, c2, c3 = st.columns(3)
-            with c1: 
-                bay = st.number_input("Bay Number", min_value=1, value=1, step=1)
-            with c2: 
-                section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-            with c3: 
-                level = st.number_input("Level", min_value=1, value=1, step=1)
-            generated_location = f"{bay}{section}{level}"
-        else:
-            # Unlimited options for floor storage
-            floor_zone = st.text_input("Floor Zone / Area Name (e.g., Zone A, North Wall)", value="FLOOR")
-            generated_location = floor_zone.strip().upper()
-
-        st.info(f"📍 **Assigned Location:** {generated_location}")
+    with st.form("smart_receive_form", clear_on_submit=True):
+        # --- DYNAMIC MATERIAL BUILDER ---
+        # This section builds the 'Material' name based on the category
         
-        # --- Footage and ID Inputs ---
-        footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=default_footage)
-        
-        st.markdown("#### Manual Item ID Input")
-        default_start = f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-001"
-        starting_id = st.text_input("Starting Item ID", value=default_start)
-        
-        count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1)
-        operator_name_input = st.text_input("Your Name (who is receiving these items)")
-
-        submitted = st.form_submit_button("🚀 Add Items to Inventory")
-
-    # --- Processing the Form Submission ---
-    if submitted:
-        if not operator_name_input:
-            st.error("Operator name is required")
-        else:
-            try:
-                # Calculate ID sequence
-                parts = starting_id.strip().upper().split("-")
-                base_part = "-".join(parts[:-1])
-                start_num = int(parts[-1])
-
-                new_items = []
-                for i in range(count):
-                    current_num = start_num + i
-                    item_id = f"{base_part}-{str(current_num).zfill(2)}"
-                    
-                    # Prevent duplicates
-                    if item_id in df['Item_ID'].values:
-                        st.error(f"Duplicate detected: {item_id}")
-                        st.stop()
-                        
-                    new_items.append({
-                        "Item_ID": item_id,
-                        "Material": material,
-                        "Footage": footage,
-                        "Location": generated_location,
-                        "Status": "Active",
-                        "Category": "Coil" if item_type == "Coils" else "Roll" # Crucial for Tab 1 & 2
-                    })
-
-                # Update state and save
-                new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
-                st.session_state.df = new_df.fillna(0)
-
-                save_inventory()
-                st.success(f"Successfully added {count} {item_type.lower()} to {generated_location}!")
-                st.balloons()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Invalid Item ID format: {e}. Last part must be a number.")
-
-    st.divider()
-
-    # --- Move Item ---
-    st.markdown("### Move Existing Item")
-    if df.empty:
-        st.info("No items to move yet.")
-    else:
-        item_to_move = st.selectbox("Select Item to Move", df['Item_ID'])
-        
-        # New location for moving
-        move_loc_type = st.radio("New Storage Type", ["Rack System", "Floor / Open Space"], key="move_type")
-        if move_loc_type == "Rack System":
-            mc1, mc2, mc3 = st.columns(3)
-            with mc1: n_bay = st.number_input("New Bay", min_value=1, value=1, key="m_bay")
-            with mc2: n_sec = st.selectbox("New Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), key="m_sec")
-            with mc3: n_lvl = st.number_input("New Level", min_value=1, value=1, key="m_lvl")
-            new_location = f"{n_bay}{n_sec}{n_lvl}"
-        else:
-            new_floor = st.text_input("New Floor Zone", value="FLOOR", key="m_floor")
-            new_location = new_floor.strip().upper()
-
-        if st.button("Move Item"):
-            old_loc = df.loc[df['Item_ID'] == item_to_move, 'Location'].values[0]
-            df.loc[df['Item_ID'] == item_to_move, 'Location'] = new_location
-            save_inventory()
-            log_action("Move Item", f"{item_to_move} from {old_loc} to {new_location}")
-            st.success(f"Moved {item_to_move} to {new_location}")
-            st.rerun()
-    st.divider()
-
-    # --- Admin Panel ---
-    st.markdown("### 🔧 Admin Only: Adjust Footage or Delete Item")
-
-    admin_password = st.text_input("Admin Password", type="password")
-    correct_password = "mjp@2026!"
-
-    if admin_password == correct_password:
-        st.success("Admin access granted")
-
-        if not df.empty:
-            item_to_manage = st.selectbox("Select Item", df['Item_ID'])
-
-            current_footage = df.loc[df['Item_ID'] == item_to_manage, 'Footage'].values[0]
-            new_footage = st.number_input("Adjust Footage (ft)", min_value=0.0, value=float(current_footage))
-
+        if cat_choice == "Elbows":
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Update Footage"):
-                    df.loc[df['Item_ID'] == item_to_manage, 'Footage'] = new_footage
-                    save_inventory()
-                    log_action("Adjust Footage", f"{item_to_manage} to {new_footage:.1f} ft")
-                    st.success(f"Updated footage for {item_to_manage}")
-                    st.rerun()
+                angle = st.selectbox("Angle", ["45°", "90°"])
             with col2:
-                if st.button("🗑️ Delete Item"):
-                    if st.checkbox("Confirm permanent deletion"):
-                        df = df[df['Item_ID'] != item_to_manage]
-                        st.session_state.df = df
-                        save_inventory()
-                        log_action("Delete Item", item_to_manage)
-                        st.success(f"Deleted {item_to_manage}")
-                        st.rerun()
+                size = st.number_input("Size (1-60)", min_value=1, max_value=60, value=1)
+            material = f"{angle} Elbow - Size {size}"
+            unit_label = "Pcs"
+            default_qty = 1.0
 
+        elif cat_choice == "Fab Straps":
+            col1, col2 = st.columns(2)
+            with col1:
+                gauge = st.selectbox("Gauge", [".015", ".020"])
+            with col2:
+                size = st.number_input("Size (1-50)", min_value=1, max_value=50, value=1)
+            material = f"Fab Strap {gauge} - Size {size}"
+            unit_label = "Pcs/Bundle"
+            default_qty = 10.0
+
+        elif cat_choice == "Mineral Wool":
+            col1, col2 = st.columns(2)
+            with col1:
+                p_size = st.text_input("Pipe Size", placeholder="e.g. 2-inch")
+            with col2:
+                thick = st.text_input("Thickness", placeholder="e.g. 1.5-inch")
+            material = f"Min Wool: {p_size} x {thick}"
+            unit_label = "Sections"
+            default_qty = 1.0
+
+        elif cat_choice == "Other":
+            category_name = st.text_input("New Category Name", placeholder="e.g. Insulation")
+            material = st.text_input("Material Description", placeholder="e.g. Fiberglass Roll")
+            unit_label = "Qty/Footage"
+            default_qty = 1.0
+        
+        else: # Coils and Rolls
+            material = st.selectbox("Material Type", COIL_MATERIALS if cat_choice == "Coils" else ROLL_MATERIALS)
+            unit_label = "Footage"
+            default_qty = 3000.0 if cat_choice == "Coils" else 100.0
+
+        st.markdown("---")
+        
+        # --- COMMON FIELDS ---
+        col_qty, col_cnt = st.columns(2)
+        with col_qty:
+            qty_val = st.number_input(f"{unit_label} per Item", min_value=0.1, value=float(default_qty))
+        with col_cnt:
+            item_count = st.number_input("Number of physical units/items", min_value=1, value=1)
+
+        # Location Selector (Rack vs Floor)
+        st.markdown("#### Location Selector")
+        loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True, key="loc_radio")
+        if loc_type == "Rack System":
+            l1, l2, l3 = st.columns(3)
+            with l1: bay = st.number_input("Bay", min_value=1, value=1)
+            with l2: sec = st.selectbox("Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+            with l3: lvl = st.number_input("Level", min_value=1, value=1)
+            gen_loc = f"{bay}{sec}{lvl}"
         else:
-            st.info("No items to manage")
-    elif admin_password:
-        st.error("Incorrect password")
-    else:
-        st.info("Enter admin password to adjust footage or delete items")
+            floor_zone = st.text_input("Floor Zone Name", value="FLOOR")
+            gen_loc = floor_zone.strip().upper()
+
+        st.info(f"📍 **Assigned Location:** {gen_loc}")
+
+        # ID Generation
+        prefix = cat_choice.upper()[:4]
+        starting_id = st.text_input("Starting ID", value=f"{prefix}-1001")
+        operator = st.text_input("Receiving Operator")
+
+        submitted = st.form_submit_button("📥 Add to Inventory")
+
+    # --- SAVE LOGIC ---
+    if submitted:
+        if not operator:
+            st.error("Operator name is required.")
+        else:
+            try:
+                parts = starting_id.strip().upper().split("-")
+                base = "-".join(parts[:-1])
+                start_num = int(parts[-1])
+                
+                new_entries = []
+                for i in range(item_count):
+                    new_id = f"{base}-{start_num + i}"
+                    new_entries.append({
+                        "Item_ID": new_id,
+                        "Material": material,
+                        "Footage": qty_val, # We store all quantities in the 'Footage' column for math
+                        "Location": gen_loc,
+                        "Status": "Active",
+                        "Category": cat_choice if cat_choice != "Other" else category_name
+                    })
+                
+                st.session_state.df = pd.concat([df, pd.DataFrame(new_entries)], ignore_index=True)
+                save_inventory()
+                st.success(f"Successfully added {item_count} items to {gen_loc}!")
+                st.rerun()
+            except:
+                st.error("ID must end with a number (e.g., ELBO-101)")
 
     st.divider()
-    st.subheader("Current Inventory")
-    if df.empty:
-        st.info("No items in inventory yet.")
-    else:
-        st.dataframe(df[['Item_ID', 'Material', 'Footage', 'Location', 'Category']], use_container_width=True)
-
+    
+    # --- MOVE ITEM SECTION ---
+    st.markdown("### 🚚 Move Item")
+    if not df.empty:
+        move_id = st.selectbox("Select Item ID to Move", df['Item_ID'].unique())
+        new_move_loc = st.text_input("New Location (Rack or Floor)")
+        if st.button("Confirm Move"):
+            df.loc[df['Item_ID'] == move_id, 'Location'] = new_move_loc.strip().upper()
+            save_inventory()
+            st.success(f"Item {move_id} moved to {new_move_loc}")
+            st.rerun()
 with tab4:
     st.subheader("📊 Production Summary & Insights")
 
