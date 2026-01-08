@@ -425,10 +425,8 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "St
 
 with tab1:
     # 1. Dashboard Navigation
-    # Dynamically get all categories present in your data (Coil, Roll, Mineral Wool, etc.)
     if not df.empty:
         available_categories = sorted(df['Category'].unique().tolist())
-        # Add an "All Materials" option at the start
         view_options = ["All Materials"] + available_categories
         
         selected_view = st.radio(
@@ -440,23 +438,20 @@ with tab1:
         
         # Filter data based on selection
         if selected_view == "All Materials":
-            display_df = df
+            display_df = df.copy()
             st.subheader("📊 Global Material Pulse")
         else:
-            display_df = df[df['Category'] == selected_view]
+            display_df = df[df['Category'] == selected_view].copy()
             st.subheader(f"📊 {selected_view} Inventory Pulse")
 
-    if df.empty:
-        st.info("No data available. Add inventory in the Warehouse tab.")
-    else:
-        # 2. DATA AGGREGATION (Filtered)
+        # 2. DATA AGGREGATION
         summary_df = display_df.groupby(['Material', 'Category']).agg({
             'Footage': 'sum',
             'Item_ID': 'count'
         }).reset_index()
         summary_df.columns = ['Material', 'Type', 'Total_Footage', 'Unit_Count']
 
-        # 3. TOP-LEVEL METRICS (Calculated based on current view)
+        # 3. TOP-LEVEL METRICS
         m1, m2, m3 = st.columns(3)
         current_total_ft = display_df['Footage'].sum()
         current_unit_count = len(display_df)
@@ -468,7 +463,7 @@ with tab1:
 
         st.divider()
 
-        # 4. THE PULSE GRID (Fixed Syntax & Intelligent RPR Logic)
+        # 4. THE PULSE GRID (Cleaned & Intelligent)
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
@@ -477,113 +472,59 @@ with tab1:
                 units = row['Unit_Count']
                 cat_type = row['Type'] 
                 
-                # --- 1. SET DEFAULTS (Prevents NameError) ---
-                # We use these exact names to match your st.metric call below
-                display_value = f"{int(ft)}"
+                # --- SET DEFAULTS ---
+                display_val = f"{ft:,.1f}"
                 unit_text = "Units"
-                sub_label = "In Stock"
+                status_color = "#00C853" # Default Green
+                status_text = "✅ STOCK HEALTHY"
 
-                # --- 2. LOGIC BRANCHES ---
+                # --- SPECIAL LOGIC FOR ROLLS (RPR 200ft vs 100ft) ---
                 if cat_type == "Rolls":
-                    # Smart check for RPR 200ft vs Standard 100ft
                     divisor = 200 if "RPR" in mat.upper() else 100
                     roll_qty = ft / divisor
-                    
-                    display_value = f"{roll_qty:.1f}"
+                    display_val = f"{roll_qty:.1f}"
                     unit_text = f"Rolls ({divisor}ft)"
-                    sub_label = f"Total: {ft} FT"
-                
-                elif cat_type == "Coils":
-                    display_value = f"{ft}"
-                    unit_text = "FT"
-                    sub_label = f"{int(units)} Separate Coils"
-                
                 elif cat_type == "Fab Straps":
-                    display_value = f"{int(ft)}"
                     unit_text = "Bundles"
-                    sub_label = "Standard Stock"
-
+                    display_val = f"{int(ft)}"
                 elif cat_type == "Elbows":
-                    display_value = f"{int(ft)}"
                     unit_text = "Pcs"
-                    sub_label = "Standard Stock"
-
-                # --- 3. RENDER THE CARD ---
-                # This uses the guaranteed variables from above
-                st.metric(
-                    label=mat, 
-                    value=f"{display_value} {unit_text}",
-                    delta=sub_label,
-                    delta_color="off"
-                )                
-                # Logic for Coils
+                    display_val = f"{int(ft)}"
                 elif cat_type == "Coils":
-                    display_val = f"{ft}"
-                    unit_label = "FT"
-                    sub_info = f"{int(units)} Separate Coils"
-                
-                # Logic for Straps
-                elif cat_type == "Fab Straps":
-                    display_val = f"{int(ft)}"
-                    unit_label = "Bundles"
-                    sub_info = "Bundle Stock"
+                    unit_text = "FT"
 
-                # Logic for Elbows
-                elif cat_type == "Elbows":
-                    display_val = f"{int(ft)}"
-                    unit_label = "Pcs"
-                    sub_info = "Piece Stock"
-
-                # Render the clean Metric Card
-                st.metric(
-                    label=mat, 
-                    value=f"{display_val} {unit_label}",
-                    delta=sub_info,
-                    delta_color="off"
-                )
-                # Display the Metric Card
-                st.metric(
-                    label=mat, 
-                    value=f"{display_value} {unit_text}",
-                    delta=sub_label,
-                    delta_color="off"
-                )
-                # Display the Metric Card
-                st.metric(
-                    label=mat, 
-                    value=f"{ft} {unit_text}" if unit_text == "FT" else f"{int(ft)} {unit_text}",
-                    delta=sub_label,
-                    delta_color="normal" if "Rolls" in sub_label else "off"
-                )
-                # Threshold/Health Logic
-                limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type == "Fab Straps" else 1000.0)
+                # --- HEALTH/THRESHOLD LOGIC ---
+                # Default limit is 10 for bundles/pcs, or 1000 for footage
+                limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type in ["Fab Straps", "Elbows"] else 1000.0)
                 
                 if ft < limit:
                     status_color, status_text = "#FF4B4B", "🚨 REORDER REQUIRED"
                 elif ft < (limit * 1.5):
                     status_color, status_text = "#FFA500", "⚠️ MONITOR CLOSELY"
-                else:
-                    status_color, status_text = "#00C853", "✅ STOCK HEALTHY"
 
+                # --- RENDER THE VISUAL CARD ---
                 st.markdown(f"""
                 <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
-                            border-left: 12px solid {status_color}; margin-bottom: 15px;">
+                            border-left: 12px solid {status_color}; margin-bottom: 15px; min-height: 180px;">
                     <p style="color: #666; font-size: 12px; margin: 0; font-weight: bold;">{cat_type.upper()}</p>
                     <h3 style="margin: 5px 0;">{mat}</h3>
-                    <h1 style="margin: 10px 0; color: {status_color};">{ft:,.1f} <span style="font-size: 18px;">{unit_text}</span></h1>
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="font-weight: bold; color: {status_color};">{status_text}</span>
-                        <span style="color: #888; font-size: 12px;">{units} separate IDs</span>
+                    <h1 style="margin: 10px 0; color: {status_color};">{display_val} <span style="font-size: 18px;">{unit_text}</span></h1>
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; pt-10px; margin-top: 10px;">
+                        <span style="font-weight: bold; color: {status_color}; font-size: 13px;">{status_text}</span>
+                        <span style="color: #888; font-size: 12px;">Total: {ft:,.1f} FT ({units} IDs)</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-        # 5. INDIVIDUAL ITEM TABLE (Filtered)
-        with st.expander(f"🔍 View {selected_view} Serial Numbers"):
+
+        # 5. INDIVIDUAL ITEM TABLE
+        with st.expander(f"🔍 View {selected_view} Serial Numbers / Detail"):
             st.dataframe(
                 display_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location']].sort_values('Material'), 
                 use_container_width=True, 
                 hide_index=True
             )
+    else:
+        st.info("No data available. Add inventory in the Warehouse tab.")
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
 
