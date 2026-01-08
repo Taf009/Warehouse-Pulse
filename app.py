@@ -468,7 +468,7 @@ with tab1:
 
         st.divider()
 
-        # 4. THE PULSE GRID (Smart Roll Logic: RPR=200ft, Others=100ft)
+        # 4. THE PULSE GRID (Clean & Intelligent)
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
@@ -477,29 +477,44 @@ with tab1:
                 units = row['Unit_Count']
                 cat_type = row['Type'] 
                 
-                if cat_type == "Rolls":
-                    # Determine divisor based on Material Name
-                    divisor = 200 if "RPR" in mat.upper() else 100
-                    
-                    roll_count = ft / divisor
-                    display_value = f"{roll_count:.1f}"
-                    unit_text = f"x {divisor}ft Rolls"
-                    sub_label = f"Total: {ft} FT"
-                    
-                elif cat_type == "Coils":
-                    display_value = f"{ft}"
-                    unit_text = "FT"
-                    sub_label = f"{int(units)} Total Coils"
-                    
-                elif cat_type == "Fab Straps":
-                    display_value = f"{int(ft)}"
-                    unit_text = "Bundles"
-                    sub_label = "Stocked"
-                else:
-                    display_value = f"{int(ft)}"
-                    unit_text = "Units"
-                    sub_label = ""
+                # Default settings
+                display_val = f"{int(ft)}"
+                unit_label = "Units"
+                sub_info = "Stocked"
 
+                # Logic for Rolls (RPR 200ft vs Standard 100ft)
+                if cat_type == "Rolls":
+                    divisor = 200 if "RPR" in mat.upper() else 100
+                    roll_qty = ft / divisor
+                    display_val = f"{roll_qty:.1f}"
+                    unit_label = f"Rolls ({divisor}ft)"
+                    sub_info = f"Total: {ft} FT"
+                
+                # Logic for Coils
+                elif cat_type == "Coils":
+                    display_val = f"{ft}"
+                    unit_label = "FT"
+                    sub_info = f"{int(units)} Separate Coils"
+                
+                # Logic for Straps
+                elif cat_type == "Fab Straps":
+                    display_val = f"{int(ft)}"
+                    unit_label = "Bundles"
+                    sub_info = "Bundle Stock"
+
+                # Logic for Elbows
+                elif cat_type == "Elbows":
+                    display_val = f"{int(ft)}"
+                    unit_label = "Pcs"
+                    sub_info = "Piece Stock"
+
+                # Render the clean Metric Card
+                st.metric(
+                    label=mat, 
+                    value=f"{display_val} {unit_label}",
+                    delta=sub_info,
+                    delta_color="off"
+                )
                 # Display the Metric Card
                 st.metric(
                     label=mat, 
