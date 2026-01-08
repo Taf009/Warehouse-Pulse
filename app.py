@@ -10,6 +10,45 @@ from email.mime.base import MIMEBase
 from email import encoders
 import io
 
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+
+def send_email_to_admin(client, order_no, pdf_bytes):
+    # --- CONFIGURATION ---
+    SENDER_EMAIL = "internal.mjp@gmail.com"
+    SENDER_PASSWORD = "jxsajugwtbukgdwb" # Not your login password, a generated 'App Password'
+    ADMIN_EMAIL = "tmilazi@gmail.com"
+    SMTP_SERVER = "smtp.gmail.com"
+    SMTP_PORT = 587
+
+    # Create Message
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = ADMIN_EMAIL
+    msg['Subject'] = f"New Production Order: {order_no} - {client}"
+
+    body = f"Attached is the Production & Picking Ticket for Order #{order_no} ({client})."
+    msg.attach(MIMEText(body, 'plain'))
+
+    # Attach PDF
+    part = MIMEApplication(pdf_bytes, Name=f"Order_{order_no}.pdf")
+    part['Content-Disposition'] = f'attachment; filename="Order_{order_no}.pdf"'
+    msg.attach(part)
+
+    # Send Process
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"Email failed: {e}")
+        return False
+
 # --- LOW STOCK ALERT STYLING ---
 st.markdown("""
 <style>
