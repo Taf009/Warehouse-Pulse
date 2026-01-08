@@ -601,7 +601,7 @@ with tab3:
             prefix = "ROLL"
             default_footage = 100.0
 
-        # --- Location Generator ---
+# --- Location Generator ---
 st.markdown("#### Location Selector")
 loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
 
@@ -620,11 +620,13 @@ else:
     generated_location = floor_zone.strip().upper()
 
 st.info(f"📍 **Assigned Location:** {generated_location}")
-        footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=default_footage)
 
-        # Manual Item ID Input
-        st.markdown("#### Manual Item ID Input")
-        default_start = f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-001"
+# --- EVERYTHING BELOW THIS MUST BE AT THE SAME INDENTATION LEVEL AS 'if' ---
+footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=default_footage)
+
+# Manual Item ID Input
+st.markdown("#### Manual Item ID Input")
+default_start = f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-001"
         starting_id = st.text_input("Starting Item ID", value=default_start)
 
         count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1)
