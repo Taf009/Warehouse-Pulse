@@ -468,7 +468,7 @@ with tab1:
 
         st.divider()
 
-        # 4. THE PULSE GRID (Clean & Intelligent)
+        # 4. THE PULSE GRID (Fixed & Error-Proof)
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
@@ -477,10 +477,11 @@ with tab1:
                 units = row['Unit_Count']
                 cat_type = row['Type'] 
                 
-                # Default settings
+                # --- START FIX: Initialize variables with defaults ---
                 display_val = f"{int(ft)}"
                 unit_label = "Units"
-                sub_info = "Stocked"
+                sub_info = "In Stock"
+                # -----------------------------------------------------
 
                 # Logic for Rolls (RPR 200ft vs Standard 100ft)
                 if cat_type == "Rolls":
@@ -489,6 +490,29 @@ with tab1:
                     display_val = f"{roll_qty:.1f}"
                     unit_label = f"Rolls ({divisor}ft)"
                     sub_info = f"Total: {ft} FT"
+                
+                elif cat_type == "Coils":
+                    display_val = f"{ft}"
+                    unit_label = "FT"
+                    sub_info = f"{int(units)} Separate Coils"
+                
+                elif cat_type == "Fab Straps":
+                    display_val = f"{int(ft)}"
+                    unit_label = "Bundles"
+                    sub_info = "Bundle Stock"
+
+                elif cat_type == "Elbows":
+                    display_val = f"{int(ft)}"
+                    unit_label = "Pcs"
+                    sub_info = "Piece Stock"
+
+                # Render the Metric Card using the guaranteed variables
+                st.metric(
+                    label=mat, 
+                    value=f"{display_val} {unit_label}",
+                    delta=sub_info,
+                    delta_color="off"
+                )
                 
                 # Logic for Coils
                 elif cat_type == "Coils":
