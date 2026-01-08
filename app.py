@@ -356,86 +356,65 @@ def send_production_pdf(pdf_buffer, order_number, client_name):
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Dashboard", "Production Log", "Warehouse Management", "Daily Summary", "Audit Trail"])
 
 with tab1:
-    st.subheader("Current Inventory Summary")
+    st.subheader("📊 Material Pulse - Live Inventory Levels")
 
-        # --- Category Selector ---
-    st.markdown("#### View by Category")
     if df.empty:
-        all_categories = ["All Categories"]
+        st.info("Inventory is empty. Add items in Warehouse Management to see the pulse.")
     else:
-        unique_categories = df['Category'].dropna().unique().tolist()
-        all_categories = ["All Categories"] + sorted([str(cat) for cat in unique_categories])  # Force string for safety
+        # 1. Calculate the Pulse (Total footage per material)
+        # We filter for only active stock to keep the numbers clean
+        pulse_df = df.groupby(['Material', 'Category']).agg({
+            'Footage': 'sum',
+            'Item_ID': 'count'
+        }).reset_index()
+        pulse_df.columns = ['Material', 'Type', 'Total Footage', 'Roll/Coil Count']
 
-    selected_category = st.selectbox("Select Category", all_categories, key="dashboard_category")
+        # 2. Key Metrics Row (Total Stock)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Coil Stock", f"{df[df['Category']=='Coil']['Footage'].sum():,.0f} ft")
+        col2.metric("Total Roll Stock", f"{df[df['Category']=='Roll']['Footage'].sum():,.0f} ft")
+        col3.metric("Unique Materials", len(pulse_df['Material'].unique()))
 
-    # Filter data
-    if selected_category == "All Categories" or df.empty:
-        display_df = df
-    else:
-        display_df = df[df['Category'] == selected_category]
-
-    if display_df.empty:
-        st.info(f"No items in {selected_category} yet.")
-    else:
-        # Summary Metrics for selected category
-        st.markdown(f"### {selected_category} Summary")
-        col1, col2 = st.columns(2)
-        col1.metric("Number of Items", len(display_df))
-        if 'Footage' in display_df.columns:
-            total_footage = display_df['Footage'].sum()
-            col2.metric("Total Footage (ft)", f"{total_footage:.1f}")
-        elif 'Quantity' in display_df.columns:
-            total_qty = display_df['Quantity'].sum()
-            col2.metric("Total Quantity", int(total_qty))
-
-        # Per-Material Summary (if applicable)
-        if 'Material' in display_df.columns:
-            st.markdown("### Breakdown by Material")
-            material_summary = display_df.groupby('Material').agg(
-                Item_Count=('Item_ID', 'count'),
-                Total_Footage=('Footage', 'sum') if 'Footage' in display_df.columns else ('Quantity', 'sum')
-            ).reset_index()
-            material_summary = material_summary.sort_values(material_summary.columns[-1], ascending=False)
-            material_summary[material_summary.columns[-1]] = material_summary[material_summary.columns[-1]].round(1)
-            st.dataframe(material_summary, use_container_width=True, hide_index=True)
-
-        # Individual Items Table
-        st.markdown("### Individual Items")
-        show_columns = ['Item_ID', 'Material' if 'Material' in display_df.columns else 'Description', 
-                        'Footage' if 'Footage' in display_df.columns else 'Quantity', 'Location']
-        item_df = display_df[show_columns].copy()
-        if 'Footage' in item_df.columns:
-            item_df['Footage'] = item_df['Footage'].round(1)
-        st.dataframe(item_df.sort_values(show_columns[1]), use_container_width=True)
-
-    # --- Low Stock Alerts (across all categories) ---
         st.divider()
-    st.markdown("### Low Stock Alerts")
 
-    low_items = []
-    for _, row in df.iterrows():
-        if row['Category'] in ["Coil", "Roll"]:
-            threshold = LOW_STOCK_THRESHOLDS.get(row['Material'], 1000.0)
-            if row['Footage'] < threshold:
-                low_items.append({
-                    "item_id": row['Item_ID'],
-                    "material": row['Material'],
-                    "footage": row['Footage'],
-                    "threshold": threshold
-                })
+        # 3. The Pulse Display
+        st.markdown("### ⚡ Live Stock Levels by Material")
+        
+        # Create columns for a grid-like dashboard
+        cols = st.columns(2) 
+        for idx, row in pulse_df.iterrows():
+            with cols[idx % 2]: # Alternates between the two columns
+                mat_name = row['Material']
+                total_ft = row['Total Footage']
+                count = row['Roll/Coil Count']
+                
+                # Get threshold for this material
+                threshold = LOW_STOCK_THRESHOLDS.get(mat_name, 1000.0)
+                
+                # Determine health color
+                if total_ft < threshold:
+                    color = "red"
+                    status = "🚨 REORDER NOW"
+                elif total_ft < (threshold * 1.5):
+                    color = "orange"
+                    status = "⚠️ LOW STOCK"
+                else:
+                    color = "green"
+                    status = "✅ HEALTHY"
+                
+                # Custom HTML card for each material
+                st.markdown(f"""
+                <div style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; margin-bottom: 10px; border-left: 10px solid {color};">
+                    <h4 style="margin:0;">{mat_name}</h4>
+                    <p style="margin:0; font-size: 0.9em; color: gray;">{row['Type']} | {count} units in stock</p>
+                    <h2 style="margin:10px 0; color: {color};">{total_ft:,.1f} <span style="font-size: 0.5em;">ft</span></h2>
+                    <p style="margin:0; font-weight: bold;">{status} <span style="font-weight: normal; color: gray;">(Limit: {threshold}ft)</span></p>
+                </div>
+                """, unsafe_allow_html=True)
 
-    if low_items:
-        st.markdown("<div class='vivid-low-stock-banner'>"
-                    "<p class='vivid-low-stock-text'>⚠️ URGENT: LOW STOCK ALERT ⚠️</p>"
-                    "<p>These items are below threshold — reorder ASAP:</p>", 
-                    unsafe_allow_html=True)
-        for item in low_items:
-            st.markdown(f"<p class='vivid-low-stock-item'>• <strong>{item['item_id']}</strong> — {item['material']}: "
-                        f"{item['footage']:.1f} ft (threshold: {item['threshold']} ft)</p>", 
-                        unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    else:
-        st.success("✅ All coils and rolls are above low stock thresholds!")
+        # 4. Hidden Detail View
+        with st.expander("🔍 View Individual Item IDs (Serial Numbers)"):
+            st.dataframe(df[['Item_ID', 'Material', 'Footage', 'Location', 'Category']], use_container_width=True)
 with tab2:
     st.subheader("Production Log - Multi-Size Orders")
     
