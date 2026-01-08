@@ -617,8 +617,6 @@ with tab3:
 
     with st.form("smart_receive_form", clear_on_submit=True):
         # --- DYNAMIC MATERIAL BUILDER ---
-        # This section builds the 'Material' name based on the category
-        
         if cat_choice == "Elbows":
             col1, col2 = st.columns(2)
             with col1:
@@ -636,8 +634,8 @@ with tab3:
             with col2:
                 size = st.number_input("Size (1-50)", min_value=1, max_value=50, value=1)
             material = f"Fab Strap {gauge} - Size {size}"
-            unit_label = "Pcs/Bundle"
-            default_qty = 10.0
+            unit_label = "Bundles (1 bundle = 15 straps)"
+            default_qty = 1.0 # Set to 1.0 because you count by bundle
 
         elif cat_choice == "Mineral Wool":
             col1, col2 = st.columns(2)
@@ -665,6 +663,7 @@ with tab3:
         # --- COMMON FIELDS ---
         col_qty, col_cnt = st.columns(2)
         with col_qty:
+            # For Fab Straps, this will represent the number of bundles per ID
             qty_val = st.number_input(f"{unit_label} per Item", min_value=0.1, value=float(default_qty))
         with col_cnt:
             item_count = st.number_input("Number of physical units/items", min_value=1, value=1)
@@ -707,7 +706,7 @@ with tab3:
                     new_entries.append({
                         "Item_ID": new_id,
                         "Material": material,
-                        "Footage": qty_val, # We store all quantities in the 'Footage' column for math
+                        "Footage": qty_val, # For Straps, this stores the bundle count
                         "Location": gen_loc,
                         "Status": "Active",
                         "Category": cat_choice if cat_choice != "Other" else category_name
@@ -718,7 +717,7 @@ with tab3:
                 st.success(f"Successfully added {item_count} items to {gen_loc}!")
                 st.rerun()
             except:
-                st.error("ID must end with a number (e.g., ELBO-101)")
+                st.error("ID must end with a number (e.g., STRAP-101)")
 
     st.divider()
     
