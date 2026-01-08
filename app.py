@@ -244,32 +244,33 @@ if 'df' not in st.session_state:
 
 df = st.session_state.df
 
-# --- SAVE FUNCTION ---
+# --- SAVE FUNCTION (PROTECTED VERSION) ---
 def save_inventory():
     try:
+        # 1. Safety Check: If the dataframe is empty, DO NOT SAVE.
+        # This prevents accidental wiping of your Google Sheet.
+        if st.session_state.df is None or st.session_state.df.empty:
+            st.error("⚠️ CRITICAL: Inventory data is empty. Save aborted to prevent data loss.")
+            return
+
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_url(st.secrets["SHEET_URL"])
         inv_ws = sh.worksheet("Inventory")
 
-        # Get current data first (for safety)
-        current_data = inv_ws.get_all_values()
+        # 2. Prepare the data for Google Sheets
+        # We use the current state of 'df' to create the list for the sheet
+        new_data = [st.session_state.df.columns.tolist()] + st.session_state.df.values.tolist()
 
-        # Prepare new data
-        new_data = [df.columns.tolist()] + df.values.tolist()
-
-        # Only clear and write if new data is valid
-        if new_data and len(new_data) > 0:
-            inv_ws.clear()  # Only clear if we have good data
-            inv_ws.update('A1', new_data)
-        else:
-            st.error("No data to save — aborting to prevent wipe")
-            # Restore from current_data if possible
-            if len(current_data) > 1:
-                inv_ws.update('A1', current_data)
+        # 3. Update the worksheet
+        inv_ws.clear()
+        inv_ws.update('A1', new_data)
+        
+        # A small notification that disappears after a few seconds
+        st.toast("✅ Inventory synchronized with Google Sheets.")
 
     except Exception as e:
         st.error(f"Failed to save inventory: {e}")
-        st.info("Your data was NOT cleared — safety mode prevented wipe")
+        st.info("Safety mode: Your data was NOT cleared on the Google Sheet.")
 # --- LOW STOCK CHECK & EMAIL ---
 def check_low_stock_and_alert():
     low_materials = []
