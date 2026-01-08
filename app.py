@@ -1000,17 +1000,61 @@ with tab5:
         st.error(f"Error loading Insights: {e}")
         
 with tab6:
-    st.subheader("Audit Trail - All Actions")
+    st.subheader("📜 System Audit Trail")
+    st.caption("Complete history of inventory movements and production logs sent to Admin.")
+
     try:
+        # 1. Access the Audit_Trail Worksheet
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_url(st.secrets["SHEET_URL"])
-        log_ws = sh.worksheet("Audit_Log")
-        records = log_ws.get_all_records()
-        if records:
-            audit_df = pd.DataFrame(records)
-            audit_df = audit_df.sort_values('Timestamp', ascending=False)
-            st.dataframe(audit_df, use_container_width=True)
+        
+        # Check if worksheet exists, if not, provide instructions
+        try:
+            audit_ws = sh.worksheet("Audit_Trail")
+            audit_records = audit_ws.get_all_records()
+        except:
+            st.error("The 'Audit_Trail' worksheet was not found in your Google Sheet.")
+            st.stop()
+
+        if not audit_records:
+            st.info("No audit logs recorded yet.")
         else:
-            st.info("No actions logged yet.")
-    except:
-        st.info("Create an 'Audit_Log' tab in your sheet with headers: Timestamp, User, Action, Details")
+            audit_df = pd.DataFrame(audit_records)
+            audit_df['Timestamp'] = pd.to_datetime(audit_df['Timestamp'])
+            
+            # 2. Search & Filter Controls
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                search_query = st.text_input("Search by Order #, Operator, or Material", placeholder="e.g. 10445 or John Doe")
+            with col2:
+                action_filter = st.multiselect("Filter Activity", options=audit_df['Action'].unique().tolist(), default=audit_df['Action'].unique().tolist())
+
+            # Apply Filters
+            filtered_audit = audit_df[audit_df['Action'].isin(action_filter)]
+            if search_query:
+                filtered_audit = filtered_audit[
+                    filtered_audit.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
+                ]
+
+            # 3. Visual Timeline of Activities
+            for _, row in filtered_audit.sort_values('Timestamp', ascending=False).head(50).iterrows():
+                # Define colors/icons based on action type
+                if "Production" in row['Action']:
+                    icon = "📤"
+                    color = "blue"
+                elif "Remove" in row['Action'] or "Pick" in row['Action']:
+                    icon = "📦"
+                    color = "orange"
+                else:
+                    icon = "✅"
+                    color = "gray"
+
+                with st.container():
+                    st.markdown(f"""
+                    **{icon} {row['Action']}** *{row['Timestamp'].strftime('%Y-%m-%d %I:%M %p')}* — **Operator:** {row['User']}  
+                    > **Details:** {row['Details']}  
+                    ---
+                    """)
+
+    except Exception as e:
+        st.error(f"Audit Trail Error: {e}")
