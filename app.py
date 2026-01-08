@@ -421,7 +421,7 @@ def send_production_pdf(pdf_buffer, order_number, client_name):
         return False
 
 # --- TABS ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Dashboard", "Production Log", "Warehouse Management", "Daily Summary", "Audit Trail"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
 
 with tab1:
     # 1. Dashboard Navigation
@@ -670,6 +670,73 @@ with tab2:
                             st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
                             st.rerun()                            
 with tab3:
+    st.subheader("🛒 Stock Picking & Sales")
+    st.markdown("Use this tab for **direct sales** (Rolls/Coils) or **picking stock items** (Straps/Elbows/Wool).")
+
+    with st.form("dedicated_pick_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Step 1: Filter by Category
+            pick_cat = st.selectbox("What are you picking?", ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"], key="pick_cat_select")
+            
+            # Step 2: Show only items available in that category
+            cat_data = df[df['Category'] == pick_cat]
+            if not cat_data.empty:
+                mat_options = sorted(cat_data['Material'].unique())
+                selected_mat = st.selectbox("Select Size/Material", mat_options)
+            else:
+                st.warning("Out of stock in this category.")
+                selected_mat = None
+
+        with col2:
+            if selected_mat:
+                # Step 3: Handle the 'lol' Roll Sales (Serialized) vs Straps (Bulk)
+                if pick_cat in ["Rolls", "Coils"]:
+                    # Show specific IDs for the selected roll/coil
+                    ids = cat_data[cat_data['Material'] == selected_mat]['Item_ID'].tolist()
+                    pick_id = st.selectbox("Select Serial # to Sell", ids)
+                    pick_qty = 1 # Selling the whole roll
+                    st.info(f"Selling full unit: {pick_id}")
+                else:
+                    # Just pick a quantity for bulk items
+                    pick_id = "BULK"
+                    pick_qty = st.number_input("How many (Bundles/Pcs)?", min_value=1, step=1)
+
+        st.divider()
+        # Step 4: Record who and where
+        c1, c2 = st.columns(2)
+        customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
+        picker_name = c2.text_input("Authorized By", value=st.session_state.username)
+
+        submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True)
+
+    # --- PROCESSING THE PICK ---
+    if submit_pick and selected_mat:
+        if not customer:
+            st.error("Please enter a Customer or Job Name.")
+        else:
+            if pick_cat in ["Rolls", "Coils"]:
+                # Mark specific Serial ID as gone (0 footage)
+                df.loc[df['Item_ID'] == pick_id, 'Footage'] = 0
+                st.success(f"Sold {pick_cat} {pick_id} to {customer}")
+            else:
+                # Subtract quantity from the bulk material row
+                mask = (df['Category'] == pick_cat) & (df['Material'] == selected_mat)
+                current_stock = df.loc[mask, 'Footage'].values[0]
+                
+                if current_stock >= pick_qty:
+                    df.loc[mask, 'Footage'] -= pick_qty
+                    st.success(f"Removed {pick_qty} of {selected_mat} for {customer}")
+                else:
+                    st.error(f"Not enough stock! Current balance: {current_stock}")
+
+            # Save to Google Sheets and Log Action
+            save_inventory()
+            log_action("PICKING", f"Removed {pick_qty} {selected_mat} for {customer}")
+            st.rerun()
+
+with tab4:
     st.subheader("📦 Smart Inventory Receiver")
     
     # 1. High-Level Category Selection
@@ -811,7 +878,7 @@ if submitted:
             save_inventory()
             st.success(f"Item {move_id} moved to {new_move_loc}")
             st.rerun()
-with tab4:
+with tab5:
     st.subheader("📊 Production Summary & Insights")
 
     try:
@@ -913,7 +980,7 @@ with tab4:
         st.error(f"Could not load production log: {e}")
         st.info("Make sure you have a 'Production_Log' tab with correct headers.")
 
-with tab5:
+with tab6:
     st.subheader("Audit Trail - All Actions")
     try:
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
