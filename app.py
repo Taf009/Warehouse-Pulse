@@ -95,13 +95,18 @@ st.markdown("""
 head_col1, head_col2 = st.columns([1, 5])
 
 with head_col1:
-    # This loads the image you saved in Step 1
-    st.image("logo.png", width=120)
+    try:
+        # This will only run if logo.png exists in your GitHub folder
+        st.image("logo.png", width=120)
+    except:
+        # This prevents the app from crashing if the file is missing
+        st.markdown("## ⚡") 
 
 with head_col2:
     st.markdown('<h1 class="title-text">MJP PULSE</h1>', unsafe_allow_html=True)
     st.markdown("#### *Production & Inventory Management System*")
 
+st.divider()
 st.divider()
 # --- SIZE MAP ---
 SIZE_DISPLAY = {
