@@ -438,6 +438,8 @@ with tab1:
         st.success("✅ All coils and rolls are above low stock thresholds!")
 with tab2:
     st.subheader("Production Log - Multi-Size Orders")
+        # Filter all items with footage (coils and rolls)
+    available_items = df[df['Footage'] > 0]
 
     # Filter available items with footage
     available_coils = df[(df['Category'] == "Coil") & (df['Footage'] > 0)]
