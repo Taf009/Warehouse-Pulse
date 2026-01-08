@@ -488,115 +488,108 @@ with tab1:
                 hide_index=True
             )
 with tab2:
-    st.subheader("🛠️ Inventory Actions")
+    st.subheader("📋 Order Fulfillment & Production Log")
     
-    # 1. UNIFIED ORDER HEADER
-    # This info applies to both Production and Picking
-    st.markdown("### 📑 Order Details")
-    col_cl, col_ord, col_op = st.columns(3)
-    with col_cl:
-        client = st.text_input("Client Name", placeholder="e.g. ABC Mechanical")
-    with col_ord:
-        order_no = st.text_input("Order / PO #", placeholder="e.g. PO-5002")
-    with col_op:
-        operator = st.text_input("Picker / Operator Name")
+    # 1. Load available inventory for selection
+    available_items = df[(df['Footage'] > 0) & (df['Status'] == 'Active')]
 
-    st.divider()
+    if df.empty:
+        st.info("Inventory is empty. Add materials in Warehouse Management first.")
+    else:
+        # Initialize session state for order lines
+        if 'order_lines' not in st.session_state:
+            st.session_state.order_lines = [{
+                "source": "Cut from Material", 
+                "size": "#2", 
+                "qty": 1, 
+                "sheet_length": 10.0, 
+                "waste": 0.0, 
+                "selected_ids": []
+            }]
 
-    # 2. SELECT ACTION MODE
-    action_mode = st.radio(
-        "Action Type", 
-        ["Manufacturing (Cut from Coil/Roll)", "Picking (Straps, Elbows, Wool, etc.)"], 
-        horizontal=True
-    )
+        # --- ORDER ENTRY SECTION ---
+        for i, line in enumerate(st.session_state.order_lines):
+            with st.container():
+                st.markdown(f"**Item Line {i+1}**")
+                c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 0.5])
+                
+                with c1:
+                    line["source"] = st.selectbox("Source", ["Cut from Material", "Pull from Pre-made Stock"], key=f"src_{i}")
+                
+                with c2:
+                    size_options = list(SIZE_DISPLAY.keys()) + ["Straight Sheet (ft)"]
+                    line["size"] = st.selectbox("Size / Type", size_options, key=f"sz_{i}")
+                
+                with c3:
+                    label = "Sheet Length (ft)" if line["size"] == "Straight Sheet (ft)" else "Pieces"
+                    val_key = "sheet_length" if line["size"] == "Straight Sheet (ft)" else "qty"
+                    line[val_key] = st.number_input(label, min_value=0.1 if "length" in label else 1.0, step=0.1 if "length" in label else 1.0, key=f"qty_len_{i}")
+                
+                with c4:
+                    if st.button("🗑️", key=f"rm_line_{i}"):
+                        st.session_state.order_lines.pop(i)
+                        st.rerun()
 
-    # ==========================================
-    # MODE A: MANUFACTURING (Metal Deduction)
-    # ==========================================
-    if action_mode == "Manufacturing (Cut from Coil/Roll)":
-        st.markdown("### 📋 Production Log")
-        available_metals = df[(df['Footage'] > 0) & (df['Category'].isin(['Coil', 'Roll']))]
-
-        if available_metals.empty:
-            st.warning("No metal stock available.")
-        else:
-            if 'prod_lines' not in st.session_state:
-                st.session_state.prod_lines = [{"size": "#2", "qty_val": 1.0, "waste": 0.0, "selected_ids": []}]
-
-            for i, line in enumerate(st.session_state.prod_lines):
-                with st.container():
-                    c1, c2, c3 = st.columns([2, 1, 0.5])
-                    with c1:
-                        size_opts = list(SIZE_DISPLAY.keys()) + ["Straight Sheet (ft)"]
-                        line["size"] = st.selectbox("Size/Type", size_opts, key=f"p_sz_{i}")
-                    with c2:
-                        lbl = "Length (ft)" if line["size"] == "Straight Sheet (ft)" else "Pcs"
-                        line["qty_val"] = st.number_input(lbl, min_value=0.1, step=0.1, key=f"p_qty_{i}")
-                    with c3:
-                        if st.button("🗑️", key=f"p_rm_{i}"):
-                            st.session_state.prod_lines.pop(i); st.rerun()
-
-                    # Material Selection
-                    opts = [f"{r['Item_ID']} | {r['Material']} ({r['Footage']:.1f}ft)" for _, r in available_metals.iterrows()]
-                    line["selected_ids"] = st.multiselect("Source Material ID", opts, key=f"p_id_{i}")
-                    line["waste"] = st.number_input("Waste (ft)", min_value=0.0, key=f"p_wst_{i}")
+                # Material Selection Logic
+                if line["source"] == "Cut from Material":
+                    # Show only Coils/Rolls for cutting
+                    raw_options = available_items[available_items['Category'].isin(['Coil', 'Roll'])]
+                    opt_list = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f}ft @ {r['Location']})" for _, r in raw_options.iterrows()]
+                    
+                    line["selected_ids"] = st.multiselect("Select Material Source ID(s)", opt_list, key=f"sel_{i}")
+                    line["waste"] = st.number_input("Waste (ft)", min_value=0.0, step=0.1, key=f"wst_{i}")
+                    
+                    # Footage Calculation Preview
+                    if line["size"] == "Straight Sheet (ft)":
+                        total_needed = line["sheet_length"] + line["waste"]
+                    else:
+                        # Standard sizes use the SIZE_DISPLAY multiplier (if available)
+                        multiplier = SIZE_DISPLAY.get(line["size"], 1.0)
+                        total_needed = (line["qty"] * multiplier) + line["waste"]
+                    
+                    st.caption(f"📏 Estimated Footage to deduct: **{total_needed:.2f} ft**")
+                else:
+                    st.success("✅ Pulling from finished stock. No raw material will be deducted.")
+                
                 st.divider()
 
-            if st.button("➕ Add Another Item to Production"):
-                st.session_state.prod_lines.append({"size": "#2", "qty_val": 1.0, "waste": 0.0, "selected_ids": []})
-                st.rerun()
+        # Add Line Button
+        if st.button("➕ Add Another Item to Order"):
+            st.session_state.order_lines.append({
+                "source": "Cut from Material", "size": "#2", "qty": 1, 
+                "sheet_length": 10.0, "waste": 0.0, "selected_ids": []
+            })
+            st.rerun()
 
-            if st.button("🚀 Process Production & Deduct Metal"):
-                if not client or not order_no or not operator:
-                    st.error("Missing Order Details at the top!")
-                else:
-                    # Deduction Logic for Production
-                    for line in st.session_state.prod_lines:
-                        if line["selected_ids"]:
-                            mult = SIZE_DISPLAY.get(line["size"], 1.0) if line["size"] != "Straight Sheet (ft)" else line["qty_val"]
-                            count = line["qty_val"] if line["size"] != "Straight Sheet (ft)" else 1.0
-                            total_deduct = (mult * count) + line["waste"]
-                            
-                            target_id = line["selected_ids"][0].split(" | ")[0]
-                            df.loc[df['Item_ID'] == target_id, 'Footage'] -= total_deduct
-                            log_action("Production", f"Order {order_no}: {line['size']} x {line['qty_val']} cut from {target_id}")
+        # --- SUBMISSION ---
+        st.markdown("### Finalize Order")
+        col_cl, col_ord, col_op = st.columns(3)
+        with col_cl: client = st.text_input("Client Name", placeholder="e.g. ABC Insulation")
+        with col_ord: order_no = st.text_input("Order #", placeholder="e.g. PO-998")
+        with col_op: operator = st.text_input("Operator Name")
 
-                    save_inventory()
-                    st.success(f"Production Order {order_no} processed!")
-                    st.rerun()
-
-    # ==========================================
-    # MODE B: PICKING (Unit Deduction)
-    # ==========================================
-    else:
-        st.markdown("### 📦 Picking Log (Finished Goods)")
-        # Filter items that are NOT raw coils/rolls, or show all
-        pick_stock = df[(df['Footage'] > 0)]
-
-        with st.form("picking_form", clear_on_submit=True):
-            target = st.selectbox("Select Item to Pick", options=[f"{r['Item_ID']} | {r['Category']} - {r['Material']}" for _, r in pick_stock.iterrows()])
-            
-            col_a, col_b = st.columns(2)
-            with col_a:
-                qty_to_pick = st.number_input("Quantity to Remove", min_value=0.1)
-            with col_b:
-                reason = st.selectbox("Reason", ["Standard Order", "Replacement", "Sample"])
-            
-            submit_pick = st.form_submit_button("✅ Process Pick-up")
-
-        if submit_pick:
+        if st.button("🚀 Process & Log Order"):
             if not client or not order_no or not operator:
-                st.error("Missing Order Details at the top!")
+                st.error("Please fill in Client, Order #, and Operator.")
             else:
-                sel_id = target.split(" | ")[0]
-                df.loc[df['Item_ID'] == sel_id, 'Footage'] -= qty_to_pick
-                
-                if df.loc[df['Item_ID'] == sel_id, 'Footage'] <= 0:
-                    df.loc[df['Item_ID'] == sel_id, 'Status'] = 'Consumed'
+                # Logic to process deductions
+                for line in st.session_state.order_lines:
+                    if line["source"] == "Cut from Material" and line["selected_ids"]:
+                        # 1. Calculate Footage
+                        if line["size"] == "Straight Sheet (ft)":
+                            deduction = line["sheet_length"] + line["waste"]
+                        else:
+                            deduction = (line["qty"] * SIZE_DISPLAY.get(line["size"], 1.0)) + line["waste"]
+                        
+                        # 2. Update the first ID selected (simplified deduction logic)
+                        target_id = line["selected_ids"][0].split(" - ")[0]
+                        df.loc[df['Item_ID'] == target_id, 'Footage'] -= deduction
                 
                 save_inventory()
-                log_action("Picking", f"Order {order_no}: {qty_to_pick} of {sel_id} picked for {client}")
-                st.success(f"Pick-up for Order {order_no} logged successfully!")
+                # Clear session state for next order
+                st.session_state.order_lines = [{"source": "Cut from Material", "size": "#2", "qty": 1, "sheet_length": 10.0, "waste": 0.0, "selected_ids": []}]
+                st.success(f"Order {order_no} for {client} processed and inventory updated!")
+                st.balloons()
                 st.rerun()                            
 with tab3:
     st.subheader("📦 Smart Inventory Receiver")
