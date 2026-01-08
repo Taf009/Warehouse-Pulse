@@ -449,171 +449,116 @@ with tab1:
                 hide_index=True
             )
 with tab2:
-    st.subheader("Production Log - Multi-Size Orders")
+    st.subheader("🛠️ Inventory Actions")
     
-    # Correctly filter available stock by Category
-    available_coils = df[(df['Category'] == "Coil") & (df['Footage'] > 0)]
-    available_rolls = df[(df['Category'] == "Roll") & (df['Footage'] > 0)]
+    # 1. UNIFIED ORDER HEADER
+    # This info applies to both Production and Picking
+    st.markdown("### 📑 Order Details")
+    col_cl, col_ord, col_op = st.columns(3)
+    with col_cl:
+        client = st.text_input("Client Name", placeholder="e.g. ABC Mechanical")
+    with col_ord:
+        order_no = st.text_input("Order / PO #", placeholder="e.g. PO-5002")
+    with col_op:
+        operator = st.text_input("Picker / Operator Name")
 
-    if available_coils.empty and available_rolls.empty:
-        st.info("No coils or rolls with footage available for production. Add some in Warehouse Management.")
-    else:
-        # Initialize session state lines
-        if 'coil_lines' not in st.session_state:
-            st.session_state.coil_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
-        if 'roll_lines' not in st.session_state:
-            st.session_state.roll_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
-        
-        # --- COILS SECTION ---
-        st.markdown("### Coils Production")
-        if not available_coils.empty:
-            # Create the list of options specifically for coils
-            coil_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                            for _, row in available_coils.iterrows()]
-            
-            for i in range(len(st.session_state.coil_lines)):
-                line = st.session_state.coil_lines[i]
-                with st.container():
-                    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-                    with col1:
-                        line["display_size"] = st.selectbox(f"Coil Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"coil_size_{i}")
-                    with col2:
-                        line["pieces"] = st.number_input(f"Coil Pieces {i+1}", min_value=0, value=line["pieces"], key=f"coil_pieces_{i}")
-                    with col3:
-                        line["waste"] = st.number_input(f"Coil Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"coil_waste_{i}")
-                    with col4:
-                        if st.button("Remove", key=f"remove_coil_line_{i}"):
-                            st.session_state.coil_lines.pop(i)
-                            st.rerun()
+    st.divider()
 
-                    line["items"] = st.multiselect(f"Coils for size {i+1}", coil_options, default=line["items"], key=f"coil_items_select_{i}")
+    # 2. SELECT ACTION MODE
+    action_mode = st.radio(
+        "Action Type", 
+        ["Manufacturing (Cut from Coil/Roll)", "Picking (Straps, Elbows, Wool, etc.)"], 
+        horizontal=True
+    )
 
-            if st.button("➕ Add Coil Size Line"):
-                st.session_state.coil_lines.append({"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
-                st.rerun()
+    # ==========================================
+    # MODE A: MANUFACTURING (Metal Deduction)
+    # ==========================================
+    if action_mode == "Manufacturing (Cut from Coil/Roll)":
+        st.markdown("### 📋 Production Log")
+        available_metals = df[(df['Footage'] > 0) & (df['Category'].isin(['Coil', 'Roll']))]
+
+        if available_metals.empty:
+            st.warning("No metal stock available.")
         else:
-            st.info("No coils available in inventory.")
+            if 'prod_lines' not in st.session_state:
+                st.session_state.prod_lines = [{"size": "#2", "qty_val": 1.0, "waste": 0.0, "selected_ids": []}]
 
-        # --- ROLLS SECTION ---
-        st.markdown("### Rolls Production")
-        if not available_rolls.empty:
-            # Create the list of options specifically for rolls
-            roll_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                            for _, row in available_rolls.iterrows()]
-            
-            for i in range(len(st.session_state.roll_lines)):
-                line = st.session_state.roll_lines[i]
+            for i, line in enumerate(st.session_state.prod_lines):
                 with st.container():
-                    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-                    with col1:
-                        line["display_size"] = st.selectbox(f"Roll Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"roll_size_{i}")
-                    with col2:
-                        line["pieces"] = st.number_input(f"Roll Pieces {i+1}", min_value=0, value=line["pieces"], key=f"roll_pieces_{i}")
-                    with col3:
-                        line["waste"] = st.number_input(f"Roll Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"roll_waste_{i}")
-                    with col4:
-                        if st.button("Remove", key=f"remove_roll_line_{i}"):
-                            st.session_state.roll_lines.pop(i)
-                            st.rerun()
+                    c1, c2, c3 = st.columns([2, 1, 0.5])
+                    with c1:
+                        size_opts = list(SIZE_DISPLAY.keys()) + ["Straight Sheet (ft)"]
+                        line["size"] = st.selectbox("Size/Type", size_opts, key=f"p_sz_{i}")
+                    with c2:
+                        lbl = "Length (ft)" if line["size"] == "Straight Sheet (ft)" else "Pcs"
+                        line["qty_val"] = st.number_input(lbl, min_value=0.1, step=0.1, key=f"p_qty_{i}")
+                    with c3:
+                        if st.button("🗑️", key=f"p_rm_{i}"):
+                            st.session_state.prod_lines.pop(i); st.rerun()
 
-                    line["items"] = st.multiselect(f"Rolls for size {i+1}", roll_options, default=line["items"], key=f"roll_items_select_{i}")
+                    # Material Selection
+                    opts = [f"{r['Item_ID']} | {r['Material']} ({r['Footage']:.1f}ft)" for _, r in available_metals.iterrows()]
+                    line["selected_ids"] = st.multiselect("Source Material ID", opts, key=f"p_id_{i}")
+                    line["waste"] = st.number_input("Waste (ft)", min_value=0.0, key=f"p_wst_{i}")
+                st.divider()
 
-            if st.button("➕ Add Roll Size Line"):
-                st.session_state.roll_lines.append({"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
+            if st.button("➕ Add Another Item to Production"):
+                st.session_state.prod_lines.append({"size": "#2", "qty_val": 1.0, "waste": 0.0, "selected_ids": []})
                 st.rerun()
-        else:
-            st.info("No rolls available in inventory.")
-            
-        # ... (The rest of your form logic for Client Name, Order Number, and Submit remains the same)
-        extra_inch = st.number_input("Extra Inch Allowance per Piece", min_value=0.0, value=0.5, step=0.1)
 
-        with st.form("production_submit_form"):
-            st.markdown("#### Order Details")
-            client_name = st.text_input("Client Name")
-            order_number = st.text_input("Internal Order Number")
-
-            st.markdown("#### Box Usage")
-            box_types = ["Small Metal Box", "Big Metal Box", "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"]
-            box_usage = {}
-            for box in box_types:
-                box_usage[box] = st.number_input(box, min_value=0, value=0, step=1, key=f"box_{box}")
-
-            submitted = st.form_submit_button("Complete Order & Send PDF")
-
-            if submitted:
-                if not client_name or not order_number:
-                    st.error("Client Name and Order Number are required")
+            if st.button("🚀 Process Production & Deduct Metal"):
+                if not client or not order_no or not operator:
+                    st.error("Missing Order Details at the top!")
                 else:
-                    all_lines = []
-                    has_production = False
+                    # Deduction Logic for Production
+                    for line in st.session_state.prod_lines:
+                        if line["selected_ids"]:
+                            mult = SIZE_DISPLAY.get(line["size"], 1.0) if line["size"] != "Straight Sheet (ft)" else line["qty_val"]
+                            count = line["qty_val"] if line["size"] != "Straight Sheet (ft)" else 1.0
+                            total_deduct = (mult * count) + line["waste"]
+                            
+                            target_id = line["selected_ids"][0].split(" | ")[0]
+                            df.loc[df['Item_ID'] == target_id, 'Footage'] -= total_deduct
+                            log_action("Production", f"Order {order_no}: {line['size']} x {line['qty_val']} cut from {target_id}")
 
-                    # Coils
-                    for line in st.session_state.coil_lines:
-                        if line["pieces"] > 0:
-                            has_production = True
-                            if not line["items"]:
-                                st.error(f"Select coils for coil size {line['display_size']}")
-                                st.stop()
-                            all_lines.append({"type": "Coil", **line})
+                    save_inventory()
+                    st.success(f"Production Order {order_no} processed!")
+                    st.rerun()
 
-                    # Rolls
-                    for line in st.session_state.roll_lines:
-                        if line["pieces"] > 0:
-                            has_production = True
-                            if not line["items"]:
-                                st.error(f"Select rolls for roll size {line['display_size']}")
-                                st.stop()
-                            all_lines.append({"type": "Roll", **line})
+    # ==========================================
+    # MODE B: PICKING (Unit Deduction)
+    # ==========================================
+    else:
+        st.markdown("### 📦 Picking Log (Finished Goods)")
+        # Filter items that are NOT raw coils/rolls, or show all
+        pick_stock = df[(df['Footage'] > 0)]
 
-                    if not has_production:
-                        st.error("Enter pieces for at least one size line")
-                    else:
-                        total_used = 0
-                        deduction_details = []
+        with st.form("picking_form", clear_on_submit=True):
+            target = st.selectbox("Select Item to Pick", options=[f"{r['Item_ID']} | {r['Category']} - {r['Material']}" for _, r in pick_stock.iterrows()])
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                qty_to_pick = st.number_input("Quantity to Remove", min_value=0.1)
+            with col_b:
+                reason = st.selectbox("Reason", ["Standard Order", "Replacement", "Sample"])
+            
+            submit_pick = st.form_submit_button("✅ Process Pick-up")
 
-                        for line in all_lines:
-                            selected_item_ids = [c.split(" - ")[0] for c in line["items"]]
-                            inches_per_piece = SIZE_MAP[line["display_size"].replace("#", "Size ")] + extra_inch
-                            used_without_waste = line["pieces"] * inches_per_piece / 12
-                            line_total = used_without_waste + line["waste"]
-                            total_used += line_total
-
-                            materials = df[df['Item_ID'].isin(selected_item_ids)]['Material'].unique()
-                            material_str = materials[0] if len(materials) == 1 else "Mixed"
-
-                            deduction_details.append({
-                                "display_size": line["display_size"],
-                                "material_type": line["type"],
-                                "material": material_str,
-                                "pieces": line["pieces"],
-                                "waste": line["waste"],
-                                "total_used": line_total,
-                                "items": ", ".join(selected_item_ids)
-                            })
-
-                            per_item = line_total / len(selected_item_ids)
-                            for item_id in selected_item_ids:
-                                current = df.loc[df['Item_ID'] == item_id, 'Footage'].values[0]
-                                if per_item > current:
-                                    st.error(f"Not enough footage on {item_id}")
-                                    st.stop()
-                                df.loc[df['Item_ID'] == item_id, 'Footage'] -= per_item
-
-                        save_inventory()
-                        check_low_stock_and_alert()
-                        save_production_log(order_number, client_name, operator_name, deduction_details, box_usage)
-
-                        pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, extra_inch)
-
-                        if send_production_pdf(pdf_buffer, order_number, client_name):
-                            st.success(f"Order {order_number} completed by {operator_name}! PDF sent.")
-                        else:
-                            st.warning("Logged but email failed.")
-
-                        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
-                        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
-                        st.balloons()
-                        st.rerun()                            
+        if submit_pick:
+            if not client or not order_no or not operator:
+                st.error("Missing Order Details at the top!")
+            else:
+                sel_id = target.split(" | ")[0]
+                df.loc[df['Item_ID'] == sel_id, 'Footage'] -= qty_to_pick
+                
+                if df.loc[df['Item_ID'] == sel_id, 'Footage'] <= 0:
+                    df.loc[df['Item_ID'] == sel_id, 'Status'] = 'Consumed'
+                
+                save_inventory()
+                log_action("Picking", f"Order {order_no}: {qty_to_pick} of {sel_id} picked for {client}")
+                st.success(f"Pick-up for Order {order_no} logged successfully!")
+                st.rerun()                            
 with tab3:
     st.subheader("📦 Smart Inventory Receiver")
     
