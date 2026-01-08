@@ -749,35 +749,54 @@ with tab3:
 
         submitted = st.form_submit_button("📥 Add to Inventory")
 
-    # --- SAVE LOGIC ---
-    if submitted:
-        if not operator:
-            st.error("Operator name is required.")
+    # --- UPDATED SAVE LOGIC FOR TAB 3 ---
+if submitted:
+    if not operator:
+        st.error("Operator name is required.")
+    else:
+        # Check if it's a bulk item (not a Coil or Roll)
+        is_bulk = cat_choice not in ["Coils", "Rolls"]
+        
+        if is_bulk:
+            # Look for an existing row with the same Material name
+            mask = (df['Material'] == material) & (df['Category'] == cat_choice)
+            
+            if mask.any():
+                # Item exists! Just add the new quantity to the old quantity
+                df.loc[mask, 'Footage'] += item_count
+                st.success(f"Added {item_count} {unit_label} to existing {material} stock.")
+            else:
+                # New item type! Create one single row for it
+                new_entry = {
+                    "Item_ID": f"{cat_choice.upper()}-BULK", 
+                    "Material": material,
+                    "Footage": item_count,
+                    "Location": gen_loc,
+                    "Status": "Active",
+                    "Category": cat_choice
+                }
+                st.session_state.df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+                st.success(f"Created new bulk entry for {material}.")
+        
         else:
+            # Keep the old Unique ID logic for Coils and Rolls
             try:
                 parts = starting_id.strip().upper().split("-")
                 base = "-".join(parts[:-1])
                 start_num = int(parts[-1])
-                
                 new_entries = []
                 for i in range(item_count):
                     new_id = f"{base}-{start_num + i}"
                     new_entries.append({
-                        "Item_ID": new_id,
-                        "Material": material,
-                        "Footage": qty_val, # For Straps, this stores the bundle count
-                        "Location": gen_loc,
-                        "Status": "Active",
-                        "Category": cat_choice if cat_choice != "Other" else category_name
+                        "Item_ID": new_id, "Material": material, "Footage": qty_val,
+                        "Location": gen_loc, "Status": "Active", "Category": cat_choice
                     })
-                
                 st.session_state.df = pd.concat([df, pd.DataFrame(new_entries)], ignore_index=True)
-                save_inventory()
-                st.success(f"Successfully added {item_count} items to {gen_loc}!")
-                st.rerun()
             except:
-                st.error("ID must end with a number (e.g., STRAP-101)")
+                st.error("Coils/Rolls still require a unique ID (e.g., COIL-101)")
 
+        save_inventory()
+        st.rerun()
     st.divider()
     
     # --- MOVE ITEM SECTION ---
