@@ -439,19 +439,17 @@ with tab1:
 with tab2:
     st.subheader("Production Log - Multi-Size Orders")
 
-        # Filter available items
-    available_coils = df[(df['Category'] == "Coil") & (df['Footage'] > 0)]
-    available_rolls = df[(df['Category'] == "Roll") & (df['Footage'] > 0)]
+        # Simple filter — show all items with footage (temporary to get it working)
+    available_items = df[df['Footage'] > 0]
 
-    if available_coils.empty and available_rolls.empty:
-        st.info("No coils or rolls with footage available for production.")
+    if available_items.empty:
+        st.info("No items with footage available for production. Add some in Warehouse Management.")
     else:
         # Initialize lines
         if 'coil_lines' not in st.session_state:
             st.session_state.coil_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
         if 'roll_lines' not in st.session_state:
             st.session_state.roll_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
-
         st.markdown("#### Production Lines")
         for i in range(len(st.session_state.production_lines)):
             line = st.session_state.production_lines[i]
