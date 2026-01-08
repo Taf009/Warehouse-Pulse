@@ -107,7 +107,6 @@ with head_col2:
     st.markdown("#### *Production & Inventory Management System*")
 
 st.divider()
-st.divider()
 # --- SIZE MAP ---
 SIZE_DISPLAY = {
     "1#": 12.0,
