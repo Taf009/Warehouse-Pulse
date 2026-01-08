@@ -696,11 +696,13 @@ with tab3:
             with col1:
                 gauge = st.selectbox("Gauge", [".015", ".020"])
             with col2:
-                size = st.number_input("Size (1-50)", min_value=1, max_value=50, value=1)
-            material = f"Fab Strap {gauge} - Size {size}"
-            qty_val = 1.0  # Each ID represents 1 bundle
+              # We change this to a selectbox or text input to use the # symbol
+               size_num = st.number_input("Size Number", min_value=1, max_value=50, value=1)
+    
+            # This creates the name: "Fab Strap .015 - #10"
+            material = f"Fab Strap {gauge} - #{size_num}"
+            qty_val = 1.0  
             unit_label = "Bundles"
-
         elif cat_choice == "Mineral Wool":
             col1, col2 = st.columns(2)
             with col1:
