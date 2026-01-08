@@ -400,18 +400,28 @@ with tab1:
 
         st.divider()
 
-        # 4. THE PULSE GRID
+        # 4. THE PULSE GRID (with Dynamic Units)
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
                 mat = row['Material']
                 ft = row['Total_Footage']
                 units = row['Unit_Count']
+                cat_type = row['Type'] # This is 'Coils', 'Fab Straps', etc.
                 
-                # Fetch threshold (defaults to 1000 if not found)
-                limit = LOW_STOCK_THRESHOLDS.get(mat, 1000.0)
+                # Dynamic Unit Labeling
+                if cat_type == "Coils" or cat_type == "Rolls":
+                    unit_text = "FT"
+                elif cat_type == "Fab Straps":
+                    unit_text = "Bundles"
+                elif cat_type == "Elbows":
+                    unit_text = "Pcs"
+                else:
+                    unit_text = "Units"
+
+                # Threshold/Health Logic
+                limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type == "Fab Straps" else 1000.0)
                 
-                # Health Logic
                 if ft < limit:
                     status_color, status_text = "#FF4B4B", "🚨 REORDER REQUIRED"
                 elif ft < (limit * 1.5):
@@ -422,16 +432,15 @@ with tab1:
                 st.markdown(f"""
                 <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
                             border-left: 12px solid {status_color}; margin-bottom: 15px;">
-                    <p style="color: #666; font-size: 12px; margin: 0; font-weight: bold;">{row['Type'].upper()}</p>
+                    <p style="color: #666; font-size: 12px; margin: 0; font-weight: bold;">{cat_type.upper()}</p>
                     <h3 style="margin: 5px 0;">{mat}</h3>
-                    <h1 style="margin: 10px 0; color: {status_color};">{ft:,.1f} <span style="font-size: 18px;">FT</span></h1>
+                    <h1 style="margin: 10px 0; color: {status_color};">{ft:,.1f} <span style="font-size: 18px;">{unit_text}</span></h1>
                     <div style="display: flex; justify-content: space-between;">
                         <span style="font-weight: bold; color: {status_color};">{status_text}</span>
-                        <span style="color: #888; font-size: 12px;">{units} units</span>
+                        <span style="color: #888; font-size: 12px;">{units} separate IDs</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-
         # 5. INDIVIDUAL ITEM TABLE (Filtered)
         with st.expander(f"🔍 View {selected_view} Serial Numbers"):
             st.dataframe(
