@@ -1000,61 +1000,55 @@ with tab5:
         st.error(f"Error loading Insights: {e}")
         
 with tab6:
-    st.subheader("📜 System Audit Trail")
-    st.caption("Complete history of inventory movements and production logs sent to Admin.")
+    st.subheader("📜 System Audit Log")
+    st.caption("Complete history of material movements, production runs, and admin submissions.")
 
     try:
-        # 1. Access the Audit_Trail Worksheet
+        # 1. Access the Worksheet using your specific name
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_url(st.secrets["SHEET_URL"])
         
-        # Check if worksheet exists, if not, provide instructions
         try:
-            audit_ws = sh.worksheet("Audit_Trail")
+            audit_ws = sh.worksheet("Audit_Log")
             audit_records = audit_ws.get_all_records()
-        except:
-            st.error("The 'Audit_Trail' worksheet was not found in your Google Sheet.")
+        except gspread.exceptions.WorksheetNotFound:
+            st.error("The worksheet 'Audit_Log' was not found. Please check your Google Sheet tabs.")
             st.stop()
 
         if not audit_records:
-            st.info("No audit logs recorded yet.")
+            st.info("No audit logs recorded yet. Logs will appear here as materials are picked or produced.")
         else:
             audit_df = pd.DataFrame(audit_records)
-            audit_df['Timestamp'] = pd.to_datetime(audit_df['Timestamp'])
             
-            # 2. Search & Filter Controls
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                search_query = st.text_input("Search by Order #, Operator, or Material", placeholder="e.g. 10445 or John Doe")
-            with col2:
-                action_filter = st.multiselect("Filter Activity", options=audit_df['Action'].unique().tolist(), default=audit_df['Action'].unique().tolist())
+            # Ensure Timestamp is handled correctly
+            audit_df['Timestamp'] = pd.to_datetime(audit_df['Timestamp'], errors='coerce')
+            
+            # 2. FILTER & SEARCH BAR
+            search_col, filter_col = st.columns([2, 1])
+            with search_col:
+                query = st.text_input("🔍 Search Logs", placeholder="Search Order #, Operator, or Action...")
+            with filter_col:
+                # Allows you to quickly see only Production submissions
+                actions = ["All"] + sorted(audit_df['Action'].unique().tolist())
+                selected_action = st.selectbox("Filter by Action", actions)
 
             # Apply Filters
-            filtered_audit = audit_df[audit_df['Action'].isin(action_filter)]
-            if search_query:
-                filtered_audit = filtered_audit[
-                    filtered_audit.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
-                ]
+            if selected_action != "All":
+                audit_df = audit_df[audit_df['Action'] == selected_action]
+            
+            if query:
+                audit_df = audit_df[audit_df.astype(str).apply(lambda x: x.str.contains(query, case=False)).any(axis=1)]
 
-            # 3. Visual Timeline of Activities
-            for _, row in filtered_audit.sort_values('Timestamp', ascending=False).head(50).iterrows():
-                # Define colors/icons based on action type
-                if "Production" in row['Action']:
-                    icon = "📤"
-                    color = "blue"
-                elif "Remove" in row['Action'] or "Pick" in row['Action']:
-                    icon = "📦"
-                    color = "orange"
-                else:
-                    icon = "✅"
-                    color = "gray"
+            # 3. DISPLAY THE LOG
+            # Sorting so newest is at the top
+            audit_df = audit_df.sort_values('Timestamp', ascending=False)
 
-                with st.container():
-                    st.markdown(f"""
-                    **{icon} {row['Action']}** *{row['Timestamp'].strftime('%Y-%m-%d %I:%M %p')}* — **Operator:** {row['User']}  
-                    > **Details:** {row['Details']}  
-                    ---
-                    """)
+            # Styled Dataframe for a clean "Log" look
+            st.dataframe(
+                audit_df[['Timestamp', 'Action', 'User', 'Details']], 
+                use_container_width=True, 
+                hide_index=True
+            )
 
     except Exception as e:
-        st.error(f"Audit Trail Error: {e}")
+        st.error(f"Audit Log Display Error: {e}")
