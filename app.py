@@ -463,7 +463,7 @@ with tab1:
 
         st.divider()
 
-        # 4. THE PULSE GRID (Cleaned & Intelligent)
+        # 4. THE PULSE GRID
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
@@ -472,46 +472,55 @@ with tab1:
                 units = row['Unit_Count']
                 cat_type = row['Type'] 
                 
-                # --- SET DEFAULTS ---
-                display_val = f"{ft:,.1f}"
+                # --- A. SET DEFAULTS ---
+                display_value = f"{ft:,.1f}"
                 unit_text = "Units"
-                status_color = "#00C853" # Default Green
-                status_text = "✅ STOCK HEALTHY"
+                sub_label_text = "In Stock"
 
-                # --- SPECIAL LOGIC FOR ROLLS (RPR 200ft vs 100ft) ---
+                # --- B. LOGIC BRANCHES ---
                 if cat_type == "Rolls":
+                    # Smart check for RPR 200ft vs Standard 100ft
                     divisor = 200 if "RPR" in mat.upper() else 100
                     roll_qty = ft / divisor
-                    display_val = f"{roll_qty:.1f}"
+                    display_value = f"{roll_qty:.1f}"
                     unit_text = f"Rolls ({divisor}ft)"
-                elif cat_type == "Fab Straps":
-                    unit_text = "Bundles"
-                    display_val = f"{int(ft)}"
-                elif cat_type == "Elbows":
-                    unit_text = "Pcs"
-                    display_val = f"{int(ft)}"
+                    sub_label_text = f"Total: {ft:,.1f} FT"
+                
                 elif cat_type == "Coils":
+                    display_value = f"{ft:,.1f}"
                     unit_text = "FT"
+                    sub_label_text = f"{int(units)} Separate Coils"
+                
+                elif cat_type == "Fab Straps":
+                    display_value = f"{int(ft)}"
+                    unit_text = "Bundles"
+                    sub_label_text = "Standard Stock"
 
-                # --- HEALTH/THRESHOLD LOGIC ---
-                # Default limit is 10 for bundles/pcs, or 1000 for footage
+                elif cat_type == "Elbows":
+                    display_value = f"{int(ft)}"
+                    unit_text = "Pcs"
+                    sub_label_text = "Standard Stock"
+
+                # --- C. THRESHOLD / HEALTH LOGIC ---
                 limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type in ["Fab Straps", "Elbows"] else 1000.0)
                 
                 if ft < limit:
                     status_color, status_text = "#FF4B4B", "🚨 REORDER REQUIRED"
                 elif ft < (limit * 1.5):
                     status_color, status_text = "#FFA500", "⚠️ MONITOR CLOSELY"
+                else:
+                    status_color, status_text = "#00C853", "✅ STOCK HEALTHY"
 
-                # --- RENDER THE VISUAL CARD ---
+                # --- D. RENDER THE CARD ---
                 st.markdown(f"""
                 <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
                             border-left: 12px solid {status_color}; margin-bottom: 15px; min-height: 180px;">
-                    <p style="color: #666; font-size: 12px; margin: 0; font-weight: bold;">{cat_type.upper()}</p>
-                    <h3 style="margin: 5px 0;">{mat}</h3>
-                    <h1 style="margin: 10px 0; color: {status_color};">{display_val} <span style="font-size: 18px;">{unit_text}</span></h1>
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; pt-10px; margin-top: 10px;">
-                        <span style="font-weight: bold; color: {status_color}; font-size: 13px;">{status_text}</span>
-                        <span style="color: #888; font-size: 12px;">Total: {ft:,.1f} FT ({units} IDs)</span>
+                    <p style="color: #666; font-size: 11px; margin: 0; font-weight: bold;">{cat_type.upper()}</p>
+                    <h3 style="margin: 5px 0; font-size: 18px;">{mat}</h3>
+                    <h1 style="margin: 10px 0; color: {status_color};">{display_value} <span style="font-size: 16px;">{unit_text}</span></h1>
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
+                        <span style="font-weight: bold; color: {status_color}; font-size: 12px;">{status_text}</span>
+                        <span style="color: #888; font-size: 11px;">{sub_label_text} ({units} IDs)</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
