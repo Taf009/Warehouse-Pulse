@@ -601,19 +601,25 @@ with tab3:
             prefix = "ROLL"
             default_footage = 100.0
 
-        # Location Generator
-        st.markdown("#### Rack Location Generator (Unlimited)")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            bay = st.number_input("Bay Number", min_value=1, value=1, step=1)
-        with col2:
-            section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-        with col3:
-            level = st.number_input("Level", min_value=1, value=1, step=1)
+        # --- Location Generator ---
+st.markdown("#### Location Selector")
+loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
 
-        generated_location = f"{bay}{section}{level}"
-        st.info(f"**Generated Location Code:** {generated_location}")
+if loc_type == "Rack System":
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        bay = st.number_input("Bay Number", min_value=1, value=1, step=1)
+    with col2:
+        section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+    with col3:
+        level = st.number_input("Level", min_value=1, value=1, step=1)
+    generated_location = f"{bay}{section}{level}"
+else:
+    # Unlimited options for floor storage
+    floor_zone = st.text_input("Floor Zone / Area Name (e.g., Zone A, Loading Dock, Floor 1)", value="Floor")
+    generated_location = floor_zone.strip().upper()
 
+st.info(f"📍 **Assigned Location:** {generated_location}")
         footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=default_footage)
 
         # Manual Item ID Input
