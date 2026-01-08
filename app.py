@@ -438,17 +438,15 @@ with tab1:
         st.success("✅ All coils and rolls are above low stock thresholds!")
 with tab2:
     st.subheader("Production Log - Multi-Size Orders")
-        # Filter all items with footage (coils and rolls)
-    available_items = df[df['Footage'] > 0]
-
-    # Filter available items with footage
+    
+    # Correctly filter available stock by Category
     available_coils = df[(df['Category'] == "Coil") & (df['Footage'] > 0)]
     available_rolls = df[(df['Category'] == "Roll") & (df['Footage'] > 0)]
 
     if available_coils.empty and available_rolls.empty:
         st.info("No coils or rolls with footage available for production. Add some in Warehouse Management.")
     else:
-        # Initialize lines
+        # Initialize session state lines
         if 'coil_lines' not in st.session_state:
             st.session_state.coil_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
         if 'roll_lines' not in st.session_state:
@@ -457,6 +455,10 @@ with tab2:
         # --- COILS SECTION ---
         st.markdown("### Coils Production")
         if not available_coils.empty:
+            # Create the list of options specifically for coils
+            coil_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                            for _, row in available_coils.iterrows()]
+            
             for i in range(len(st.session_state.coil_lines)):
                 line = st.session_state.coil_lines[i]
                 with st.container():
@@ -472,19 +474,21 @@ with tab2:
                             st.session_state.coil_lines.pop(i)
                             st.rerun()
 
-                    item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                        for _, row in available_items.iterrows()]
-                    line["items"] = st.multiselect(f"Coils for size {i+1}", coil_options, default=line["items"], key=f"coil_items_{i}")
+                    line["items"] = st.multiselect(f"Coils for size {i+1}", coil_options, default=line["items"], key=f"coil_items_select_{i}")
 
             if st.button("➕ Add Coil Size Line"):
                 st.session_state.coil_lines.append({"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
                 st.rerun()
         else:
-            st.info("No coils available")
+            st.info("No coils available in inventory.")
 
         # --- ROLLS SECTION ---
         st.markdown("### Rolls Production")
         if not available_rolls.empty:
+            # Create the list of options specifically for rolls
+            roll_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                            for _, row in available_rolls.iterrows()]
+            
             for i in range(len(st.session_state.roll_lines)):
                 line = st.session_state.roll_lines[i]
                 with st.container():
@@ -500,16 +504,15 @@ with tab2:
                             st.session_state.roll_lines.pop(i)
                             st.rerun()
 
-                    item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
-                        for _, row in available_items.iterrows()]
-                    line["items"] = st.multiselect(f"Rolls for size {i+1}", roll_options, default=line["items"], key=f"roll_items_{i}")
+                    line["items"] = st.multiselect(f"Rolls for size {i+1}", roll_options, default=line["items"], key=f"roll_items_select_{i}")
 
             if st.button("➕ Add Roll Size Line"):
                 st.session_state.roll_lines.append({"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
                 st.rerun()
         else:
-            st.info("No rolls available")
-
+            st.info("No rolls available in inventory.")
+            
+        # ... (The rest of your form logic for Client Name, Order Number, and Submit remains the same)
         extra_inch = st.number_input("Extra Inch Allowance per Piece", min_value=0.0, value=0.5, step=0.1)
 
         with st.form("production_submit_form"):
@@ -657,7 +660,7 @@ with tab3:
 
         submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
-    # Submit logic (outside the form)
+    # Find the "if submitted:" block inside Tab 3 and update the new_items.append section:
     if submitted:
         if not operator_name:
             st.error("Your name is required")
@@ -674,28 +677,27 @@ with tab3:
                     if item_id in df['Item_ID'].values:
                         st.error(f"Duplicate: {item_id}")
                         st.stop()
+                    
+                    # FIXED: Added Category field here
                     new_items.append({
                         "Item_ID": item_id,
                         "Material": material,
                         "Footage": footage,
                         "Location": generated_location,
-                        "Status": "Active"
+                        "Status": "Active",
+                        "Category": "Coil" if item_type == "Coils" else "Roll" 
                     })
 
                 new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
                 st.session_state.df = new_df
-
-                # Fix NaN before saving
                 st.session_state.df = st.session_state.df.fillna(0)
 
                 save_inventory()
-                st.success(f"Added {count} {item_type.lower()} to {generated_location} by {operator_name}!")
-                st.balloons()
+                st.success(f"Added {count} {item_type.lower()} to {generated_location}!")
                 st.rerun()
-            except:
-                st.error("Invalid Item ID format")
-    st.divider()
-
+            except Exception as e:
+                st.error(f"Invalid Item ID format: {e}")
+                
     # --- Move Item ---
     st.markdown("### Move Existing Item")
     if df.empty:
