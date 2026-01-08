@@ -582,77 +582,57 @@ with tab2:
                         st.balloons()
                         st.rerun()                            
 with tab3:
-    st.subheader("Manage")
-
-        # --- Receive New Items ---
-    st.markdown("### Receive New Items")
-
+    st.subheader("Manage Inventory")
+    
+    # Selection for item type
     item_type = st.radio("What are you receiving?", ["Coils", "Rolls"], horizontal=True)
 
+    # --- Receive New Items Form ---
     with st.form("receive_items_form", clear_on_submit=True):
-        if item_type == "Coils":
-            st.markdown("#### Receiving Coils")
-            material = st.selectbox("Material Type", COIL_MATERIALS, key="coil_material")
-            prefix = "COIL"
-            default_footage = 3000.0
+        # Material selection based on item type
+        material = st.selectbox("Material Type", COIL_MATERIALS if item_type == "Coils" else ROLL_MATERIALS)
+        prefix = "COIL" if item_type == "Coils" else "ROLL"
+        default_footage = 3000.0 if item_type == "Coils" else 100.0
+
+        # --- Location Selector logic ---
+        st.markdown("#### Location Selector")
+        loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
+
+        if loc_type == "Rack System":
+            c1, c2, c3 = st.columns(3)
+            with c1: 
+                bay = st.number_input("Bay Number", min_value=1, value=1, step=1)
+            with c2: 
+                section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+            with c3: 
+                level = st.number_input("Level", min_value=1, value=1, step=1)
+            generated_location = f"{bay}{section}{level}"
         else:
-            st.markdown("#### Receiving Rolls")
-            material = st.selectbox("Material Type", ROLL_MATERIALS, key="roll_material")
-            prefix = "ROLL"
-            default_footage = 100.0
+            # Unlimited options for floor storage
+            floor_zone = st.text_input("Floor Zone / Area Name (e.g., Zone A, North Wall)", value="FLOOR")
+            generated_location = floor_zone.strip().upper()
 
-# --- Location Generator ---
-st.markdown("#### Location Selector")
-loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
-
-if loc_type == "Rack System":
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        bay = st.number_input("Bay Number", min_value=1, value=1, step=1)
-    with col2:
-        section = st.selectbox("Section Letter", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-    with col3:
-        level = st.number_input("Level", min_value=1, value=1, step=1)
-    generated_location = f"{bay}{section}{level}"
-else:
-    # Unlimited options for floor storage
-    floor_zone = st.text_input("Floor Zone / Area Name (e.g., Zone A, Loading Dock, Floor 1)", value="Floor")
-    generated_location = floor_zone.strip().upper()
-
-st.info(f"📍 **Assigned Location:** {generated_location}")
-
-# --- EVERYTHING BELOW THIS MUST BE AT THE SAME INDENTATION LEVEL AS 'if' ---
-footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=default_footage)
-
-# Manual Item ID Input
-st.markdown("#### Manual Item ID Input")
-default_start = f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-001"
+        st.info(f"📍 **Assigned Location:** {generated_location}")
+        
+        # --- Footage and ID Inputs ---
+        footage = st.number_input("Footage per Item (ft)", min_value=0.1, value=default_footage)
+        
+        st.markdown("#### Manual Item ID Input")
+        default_start = f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{prefix}-RPR-016-001"
         starting_id = st.text_input("Starting Item ID", value=default_start)
-
+        
         count = st.number_input("Number of Items to Add", min_value=1, value=1, step=1)
-
-        # Live preview
-        if starting_id.strip() and count > 0:
-            try:
-                parts = starting_id.strip().upper().split("-")
-                base_part = "-".join(parts[:-1])
-                start_num = int(parts[-1])
-                preview = [f"{base_part}-{str(start_num + i).zfill(2)}" for i in range(count)]
-                st.markdown("**Generated Item IDs:**")
-                st.code("\n".join(preview), language="text")
-            except:
-                st.warning("Invalid format — last part must be a number")
-
-        operator_name = st.text_input("Your Name (who is receiving these items)")
+        operator_name_input = st.text_input("Your Name (who is receiving these items)")
 
         submitted = st.form_submit_button("🚀 Add Items to Inventory")
 
-    # Find the "if submitted:" block inside Tab 3 and update the new_items.append section:
+    # --- Processing the Form Submission ---
     if submitted:
-        if not operator_name:
-            st.error("Your name is required")
+        if not operator_name_input:
+            st.error("Operator name is required")
         else:
             try:
+                # Calculate ID sequence
                 parts = starting_id.strip().upper().split("-")
                 base_part = "-".join(parts[:-1])
                 start_num = int(parts[-1])
@@ -661,57 +641,60 @@ default_start = f"{prefix}-016-AL-SM-3000-01" if item_type == "Coils" else f"{pr
                 for i in range(count):
                     current_num = start_num + i
                     item_id = f"{base_part}-{str(current_num).zfill(2)}"
-                    if item_id in df['Item_ID'].values:
-                        st.error(f"Duplicate: {item_id}")
-                        st.stop()
                     
-                    # FIXED: Added Category field here
+                    # Prevent duplicates
+                    if item_id in df['Item_ID'].values:
+                        st.error(f"Duplicate detected: {item_id}")
+                        st.stop()
+                        
                     new_items.append({
                         "Item_ID": item_id,
                         "Material": material,
                         "Footage": footage,
                         "Location": generated_location,
                         "Status": "Active",
-                        "Category": "Coil" if item_type == "Coils" else "Roll" 
+                        "Category": "Coil" if item_type == "Coils" else "Roll" # Crucial for Tab 1 & 2
                     })
 
+                # Update state and save
                 new_df = pd.concat([df, pd.DataFrame(new_items)], ignore_index=True)
-                st.session_state.df = new_df
-                st.session_state.df = st.session_state.df.fillna(0)
+                st.session_state.df = new_df.fillna(0)
 
                 save_inventory()
-                st.success(f"Added {count} {item_type.lower()} to {generated_location}!")
+                st.success(f"Successfully added {count} {item_type.lower()} to {generated_location}!")
+                st.balloons()
                 st.rerun()
             except Exception as e:
-                st.error(f"Invalid Item ID format: {e}")
-                
+                st.error(f"Invalid Item ID format: {e}. Last part must be a number.")
+
+    st.divider()
+
     # --- Move Item ---
     st.markdown("### Move Existing Item")
     if df.empty:
         st.info("No items to move yet.")
     else:
         item_to_move = st.selectbox("Select Item to Move", df['Item_ID'])
-
-        st.markdown("#### New Location Generator")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            new_bay = st.number_input("New Bay", min_value=1, value=1)
-        with col2:
-            new_section = st.selectbox("New Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-        with col3:
-            new_level = st.number_input("New Level", min_value=1, value=1)
-
-        new_location = f"{new_bay}{new_section}{new_level}"
-        st.info(f"**New Location:** {new_location}")
+        
+        # New location for moving
+        move_loc_type = st.radio("New Storage Type", ["Rack System", "Floor / Open Space"], key="move_type")
+        if move_loc_type == "Rack System":
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1: n_bay = st.number_input("New Bay", min_value=1, value=1, key="m_bay")
+            with mc2: n_sec = st.selectbox("New Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), key="m_sec")
+            with mc3: n_lvl = st.number_input("New Level", min_value=1, value=1, key="m_lvl")
+            new_location = f"{n_bay}{n_sec}{n_lvl}"
+        else:
+            new_floor = st.text_input("New Floor Zone", value="FLOOR", key="m_floor")
+            new_location = new_floor.strip().upper()
 
         if st.button("Move Item"):
-            old_location = df.loc[df['Item_ID'] == item_to_move, 'Location'].values[0]
+            old_loc = df.loc[df['Item_ID'] == item_to_move, 'Location'].values[0]
             df.loc[df['Item_ID'] == item_to_move, 'Location'] = new_location
             save_inventory()
-            log_action("Move Item", f"{item_to_move} from {old_location} to {new_location}")
-            st.success(f"Moved {item_to_move} to {new_location} by {operator_name}")
+            log_action("Move Item", f"{item_to_move} from {old_loc} to {new_location}")
+            st.success(f"Moved {item_to_move} to {new_location}")
             st.rerun()
-
     st.divider()
 
     # --- Admin Panel ---
