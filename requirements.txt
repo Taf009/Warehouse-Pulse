@@ -4,3 +4,4 @@ gspread
 gspread-dataframe
 google-auth
 fpdf2
+plotly
