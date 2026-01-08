@@ -76,9 +76,33 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="MJP Floors Pulse", layout="wide")
-st.title("🏭 MJP Floors Pulse - Production & Inventory")
+# Setup page layout
+st.set_page_config(page_title="MJP Pulse", layout="wide")
 
+# Custom CSS for the Title
+st.markdown("""
+    <style>
+    .title-text {
+        font-family: 'Helvetica Neue', sans-serif;
+        font-weight: 800;
+        color: #1E3A8A; /* Professional Dark Blue */
+        margin-top: -10px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Branding Header
+head_col1, head_col2 = st.columns([1, 5])
+
+with head_col1:
+    # This loads the image you saved in Step 1
+    st.image("logo.png", width=120)
+
+with head_col2:
+    st.markdown('<h1 class="title-text">MJP PULSE</h1>', unsafe_allow_html=True)
+    st.markdown("#### *Production & Inventory Management System*")
+
+st.divider()
 # --- SIZE MAP ---
 SIZE_DISPLAY = {
     "1#": 12.0,
