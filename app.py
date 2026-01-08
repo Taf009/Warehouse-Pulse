@@ -468,34 +468,45 @@ with tab1:
 
         st.divider()
 
-        # 4. THE PULSE GRID (with Dynamic Units & Roll Conversion)
+        # 4. THE PULSE GRID (Smart Roll Logic: RPR=200ft, Others=100ft)
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
                 mat = row['Material']
                 ft = row['Total_Footage']
                 units = row['Unit_Count']
-                cat_type = row['Type'] # This is 'Coils', 'Fab Straps', etc.
+                cat_type = row['Type'] 
                 
-                # Dynamic Unit Labeling & Conversion Logic
                 if cat_type == "Rolls":
-                    unit_text = "FT"
-                    # Convert 750.5 FT into ~7.5 Rolls for the sub-label
-                    roll_est = ft / 100
-                    sub_label = f"~{roll_est:.1f} Rolls"
+                    # Determine divisor based on Material Name
+                    divisor = 200 if "RPR" in mat.upper() else 100
+                    
+                    roll_count = ft / divisor
+                    display_value = f"{roll_count:.1f}"
+                    unit_text = f"x {divisor}ft Rolls"
+                    sub_label = f"Total: {ft} FT"
+                    
                 elif cat_type == "Coils":
+                    display_value = f"{ft}"
                     unit_text = "FT"
-                    sub_label = f"{int(units)} Coils"
+                    sub_label = f"{int(units)} Total Coils"
+                    
                 elif cat_type == "Fab Straps":
+                    display_value = f"{int(ft)}"
                     unit_text = "Bundles"
                     sub_label = "Stocked"
-                elif cat_type == "Elbows":
-                    unit_text = "Pcs"
-                    sub_label = "Stocked"
                 else:
+                    display_value = f"{int(ft)}"
                     unit_text = "Units"
                     sub_label = ""
 
+                # Display the Metric Card
+                st.metric(
+                    label=mat, 
+                    value=f"{display_value} {unit_text}",
+                    delta=sub_label,
+                    delta_color="off"
+                )
                 # Display the Metric Card
                 st.metric(
                     label=mat, 
