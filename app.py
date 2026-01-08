@@ -507,8 +507,9 @@ with tab2:
         st.markdown("### 🌀 Coils Production")
         coil_allowance = st.number_input("Coil Extra Inch Allowance (per piece)", min_value=0.0, value=0.5, step=0.1, key="c_allowance_bar")
         
-        for i in range(len(st.session_state.coil_lines)):
-            line = st.session_state.coil_lines[i]
+        coil_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
+
+        for i, line in enumerate(st.session_state.coil_lines):
             with st.container():
                 c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
                 with c1:
@@ -522,8 +523,9 @@ with tab2:
                         st.session_state.coil_lines.pop(i)
                         st.rerun()
                 
-                coil_opts = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
-                line["items"] = st.multiselect(f"Source Coils for line {i+1}", coil_opts, default=line["items"], key=f"c_sel_{i}")
+                # FIX: Filter the default items to ensure they exist in current options
+                valid_defaults = [item for item in line["items"] if item in coil_options]
+                line["items"] = st.multiselect(f"Source Coils for line {i+1}", coil_options, default=valid_defaults, key=f"c_sel_{i}")
 
         if st.button("➕ Add Coil Size Line"):
             st.session_state.coil_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
@@ -535,8 +537,9 @@ with tab2:
         st.markdown("### 🗞️ Rolls Production")
         roll_allowance = st.number_input("Roll Extra Inch Allowance (per piece)", min_value=0.0, value=0.5, step=0.1, key="r_allowance_bar")
 
-        for i in range(len(st.session_state.roll_lines)):
-            line = st.session_state.roll_lines[i]
+        roll_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_rolls.iterrows()]
+
+        for i, line in enumerate(st.session_state.roll_lines):
             with st.container():
                 r1, r2, r3, r4 = st.columns([2, 1, 1, 0.5])
                 with r1:
@@ -550,13 +553,16 @@ with tab2:
                         st.session_state.roll_lines.pop(i)
                         st.rerun()
                 
-                roll_opts = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_rolls.iterrows()]
-                line["items"] = st.multiselect(f"Source Rolls for line {i+1}", roll_opts, default=line["items"], key=f"r_sel_{i}")
+                # FIX: Filter the default items to ensure they exist in current options
+                valid_roll_defaults = [item for item in line["items"] if item in roll_options]
+                line["items"] = st.multiselect(f"Source Rolls for line {i+1}", roll_options, default=valid_roll_defaults, key=f"r_sel_{i}")
 
         if st.button("➕ Add Roll Size Line"):
             st.session_state.roll_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
             st.rerun()
 
+        # --- REST OF YOUR SUBMIT FORM ---
+        # (Keep your existing st.form logic here)
         st.divider()
         
         # --- FINAL SUBMISSION FORM ---
