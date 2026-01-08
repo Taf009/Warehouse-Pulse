@@ -468,7 +468,7 @@ with tab1:
 
         st.divider()
 
-        # 4. THE PULSE GRID (with Dynamic Units)
+        # 4. THE PULSE GRID (with Dynamic Units & Roll Conversion)
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
@@ -477,16 +477,32 @@ with tab1:
                 units = row['Unit_Count']
                 cat_type = row['Type'] # This is 'Coils', 'Fab Straps', etc.
                 
-                # Dynamic Unit Labeling
-                if cat_type == "Coils" or cat_type == "Rolls":
+                # Dynamic Unit Labeling & Conversion Logic
+                if cat_type == "Rolls":
                     unit_text = "FT"
+                    # Convert 750.5 FT into ~7.5 Rolls for the sub-label
+                    roll_est = ft / 100
+                    sub_label = f"~{roll_est:.1f} Rolls"
+                elif cat_type == "Coils":
+                    unit_text = "FT"
+                    sub_label = f"{int(units)} Coils"
                 elif cat_type == "Fab Straps":
                     unit_text = "Bundles"
+                    sub_label = "Stocked"
                 elif cat_type == "Elbows":
                     unit_text = "Pcs"
+                    sub_label = "Stocked"
                 else:
                     unit_text = "Units"
+                    sub_label = ""
 
+                # Display the Metric Card
+                st.metric(
+                    label=mat, 
+                    value=f"{ft} {unit_text}" if unit_text == "FT" else f"{int(ft)} {unit_text}",
+                    delta=sub_label,
+                    delta_color="normal" if "Rolls" in sub_label else "off"
+                )
                 # Threshold/Health Logic
                 limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type == "Fab Straps" else 1000.0)
                 
