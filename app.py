@@ -633,8 +633,8 @@ with tab3:
             with col2:
                 size = st.number_input("Size (1-60)", min_value=1, max_value=60, value=1)
             material = f"{angle} Elbow - Size {size}"
-            unit_label = "Pcs"
-            default_qty = 1.0
+            qty_val = 1.0  # Each Elbow ID represents 1 piece
+            unit_label = "Pieces"
 
         elif cat_choice == "Fab Straps":
             col1, col2 = st.columns(2)
@@ -643,8 +643,8 @@ with tab3:
             with col2:
                 size = st.number_input("Size (1-50)", min_value=1, max_value=50, value=1)
             material = f"Fab Strap {gauge} - Size {size}"
-            unit_label = "Bundles (1 bundle = 15 straps)"
-            default_qty = 1.0 # Set to 1.0 because you count by bundle
+            qty_val = 1.0  # Each ID represents 1 bundle
+            unit_label = "Bundles"
 
         elif cat_choice == "Mineral Wool":
             col1, col2 = st.columns(2)
@@ -653,30 +653,25 @@ with tab3:
             with col2:
                 thick = st.text_input("Thickness", placeholder="e.g. 1.5-inch")
             material = f"Min Wool: {p_size} x {thick}"
+            qty_val = 1.0 # Each ID represents 1 section
             unit_label = "Sections"
-            default_qty = 1.0
 
         elif cat_choice == "Other":
             category_name = st.text_input("New Category Name", placeholder="e.g. Insulation")
             material = st.text_input("Material Description", placeholder="e.g. Fiberglass Roll")
-            unit_label = "Qty/Footage"
-            default_qty = 1.0
+            qty_val = st.number_input("Qty/Footage per item", min_value=0.1, value=1.0)
+            unit_label = "Units"
         
-        else: # Coils and Rolls
+        else: # Coils and Rolls (Keep the footage input for these)
             material = st.selectbox("Material Type", COIL_MATERIALS if cat_choice == "Coils" else ROLL_MATERIALS)
+            qty_val = st.number_input("Footage per Item", min_value=0.1, value=3000.0 if cat_choice == "Coils" else 100.0)
             unit_label = "Footage"
-            default_qty = 3000.0 if cat_choice == "Coils" else 100.0
 
         st.markdown("---")
         
-        # --- COMMON FIELDS ---
-        col_qty, col_cnt = st.columns(2)
-        with col_qty:
-            # For Fab Straps, this will represent the number of bundles per ID
-            qty_val = st.number_input(f"{unit_label} per Item", min_value=0.1, value=float(default_qty))
-        with col_cnt:
-            item_count = st.number_input("Number of physical units/items", min_value=1, value=1)
-
+        # --- SIMPLIFIED COMMON FIELDS ---
+        # For Straps/Elbows, this is now the ONLY number they enter.
+        item_count = st.number_input(f"How many {unit_label} are you receiving?", min_value=1, value=1, step=1)
         # Location Selector (Rack vs Floor)
         st.markdown("#### Location Selector")
         loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True, key="loc_radio")
