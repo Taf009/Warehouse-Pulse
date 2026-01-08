@@ -671,38 +671,39 @@ with tab2:
                             st.rerun()                            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
-    st.markdown("Use this tab for **direct sales** (Rolls/Coils) or **picking stock items** (Straps/Elbows/Wool).")
+
+    # 1. Filter Data based on Category Selection
+    pick_cat = st.selectbox("What are you picking?", ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"], key="pick_cat_sales")
+    
+    # This filters your inventory so we only look at the category chosen above
+    filtered_df = df[df['Category'] == pick_cat]
 
     with st.form("dedicated_pick_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
         with col1:
-            # Step 1: Filter by Category
-            pick_cat = st.selectbox("What are you picking?", ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"], key="pick_cat_select")
-            
-            # Step 2: Show only items available in that category
-            cat_data = df[df['Category'] == pick_cat]
-            if not cat_data.empty:
-                mat_options = sorted(cat_data['Material'].unique())
-                selected_mat = st.selectbox("Select Size/Material", mat_options)
-            else:
-                st.warning("Out of stock in this category.")
+            if filtered_df.empty:
+                st.warning(f"⚠️ No items currently in stock for {pick_cat}")
                 selected_mat = None
+            else:
+                # 2. INTELLIGENT DROPDOWN: Only shows materials existing in this category
+                mat_options = sorted(filtered_df['Material'].unique())
+                selected_mat = st.selectbox("Select Size / Material", mat_options)
 
         with col2:
             if selected_mat:
-                # Step 3: Handle the 'lol' Roll Sales (Serialized) vs Straps (Bulk)
+                # 3. Handling Serialized (Rolls/Coils) vs Bulk (Straps/Elbows)
                 if pick_cat in ["Rolls", "Coils"]:
-                    # Show specific IDs for the selected roll/coil
-                    ids = cat_data[cat_data['Material'] == selected_mat]['Item_ID'].tolist()
-                    pick_id = st.selectbox("Select Serial # to Sell", ids)
-                    pick_qty = 1 # Selling the whole roll
-                    st.info(f"Selling full unit: {pick_id}")
+                    # Narrow down to specific IDs for that specific size
+                    specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
+                    pick_id = st.selectbox("Select Serial # to Sell", specific_ids)
+                    pick_qty = 1 
                 else:
-                    # Just pick a quantity for bulk items
+                    # Bulk items (Elbows, Straps) don't need IDs
                     pick_id = "BULK"
-                    pick_qty = st.number_input("How many (Bundles/Pcs)?", min_value=1, step=1)
+                    pick_qty = st.number_input("Quantity (Pcs/Bundles)", min_value=1, step=1)
 
+        # ... (rest of your form: Customer Name, Operator, Submit Button) ...
         st.divider()
         # Step 4: Record who and where
         c1, c2 = st.columns(2)
