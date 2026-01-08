@@ -356,65 +356,89 @@ def send_production_pdf(pdf_buffer, order_number, client_name):
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Dashboard", "Production Log", "Warehouse Management", "Daily Summary", "Audit Trail"])
 
 with tab1:
-    st.subheader("📊 Material Pulse - Live Inventory Levels")
+    # 1. Dashboard Navigation
+    # Dynamically get all categories present in your data (Coil, Roll, Mineral Wool, etc.)
+    if not df.empty:
+        available_categories = sorted(df['Category'].unique().tolist())
+        # Add an "All Materials" option at the start
+        view_options = ["All Materials"] + available_categories
+        
+        selected_view = st.radio(
+            "Select Dashboard View", 
+            view_options, 
+            horizontal=True,
+            help="Switch between Coils, Rolls, or other material categories"
+        )
+        
+        # Filter data based on selection
+        if selected_view == "All Materials":
+            display_df = df
+            st.subheader("📊 Global Material Pulse")
+        else:
+            display_df = df[df['Category'] == selected_view]
+            st.subheader(f"📊 {selected_view} Inventory Pulse")
 
     if df.empty:
-        st.info("Inventory is empty. Add items in Warehouse Management to see the pulse.")
+        st.info("No data available. Add inventory in the Warehouse tab.")
     else:
-        # 1. Calculate the Pulse (Total footage per material)
-        # We filter for only active stock to keep the numbers clean
-        pulse_df = df.groupby(['Material', 'Category']).agg({
+        # 2. DATA AGGREGATION (Filtered)
+        summary_df = display_df.groupby(['Material', 'Category']).agg({
             'Footage': 'sum',
             'Item_ID': 'count'
         }).reset_index()
-        pulse_df.columns = ['Material', 'Type', 'Total Footage', 'Roll/Coil Count']
+        summary_df.columns = ['Material', 'Type', 'Total_Footage', 'Unit_Count']
 
-        # 2. Key Metrics Row (Total Stock)
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Coil Stock", f"{df[df['Category']=='Coil']['Footage'].sum():,.0f} ft")
-        col2.metric("Total Roll Stock", f"{df[df['Category']=='Roll']['Footage'].sum():,.0f} ft")
-        col3.metric("Unique Materials", len(pulse_df['Material'].unique()))
+        # 3. TOP-LEVEL METRICS (Calculated based on current view)
+        m1, m2, m3 = st.columns(3)
+        current_total_ft = display_df['Footage'].sum()
+        current_unit_count = len(display_df)
+        unique_mats = len(summary_df)
+        
+        m1.metric("Selected Footage", f"{current_total_ft:,.1f} ft")
+        m2.metric("Items in View", current_unit_count)
+        m3.metric("Material Types", unique_mats)
 
         st.divider()
 
-        # 3. The Pulse Display
-        st.markdown("### ⚡ Live Stock Levels by Material")
-        
-        # Create columns for a grid-like dashboard
-        cols = st.columns(2) 
-        for idx, row in pulse_df.iterrows():
-            with cols[idx % 2]: # Alternates between the two columns
-                mat_name = row['Material']
-                total_ft = row['Total Footage']
-                count = row['Roll/Coil Count']
+        # 4. THE PULSE GRID
+        cols = st.columns(2)
+        for idx, row in summary_df.iterrows():
+            with cols[idx % 2]:
+                mat = row['Material']
+                ft = row['Total_Footage']
+                units = row['Unit_Count']
                 
-                # Get threshold for this material
-                threshold = LOW_STOCK_THRESHOLDS.get(mat_name, 1000.0)
+                # Fetch threshold (defaults to 1000 if not found)
+                limit = LOW_STOCK_THRESHOLDS.get(mat, 1000.0)
                 
-                # Determine health color
-                if total_ft < threshold:
-                    color = "red"
-                    status = "🚨 REORDER NOW"
-                elif total_ft < (threshold * 1.5):
-                    color = "orange"
-                    status = "⚠️ LOW STOCK"
+                # Health Logic
+                if ft < limit:
+                    status_color, status_text = "#FF4B4B", "🚨 REORDER REQUIRED"
+                elif ft < (limit * 1.5):
+                    status_color, status_text = "#FFA500", "⚠️ MONITOR CLOSELY"
                 else:
-                    color = "green"
-                    status = "✅ HEALTHY"
-                
-                # Custom HTML card for each material
+                    status_color, status_text = "#00C853", "✅ STOCK HEALTHY"
+
                 st.markdown(f"""
-                <div style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; margin-bottom: 10px; border-left: 10px solid {color};">
-                    <h4 style="margin:0;">{mat_name}</h4>
-                    <p style="margin:0; font-size: 0.9em; color: gray;">{row['Type']} | {count} units in stock</p>
-                    <h2 style="margin:10px 0; color: {color};">{total_ft:,.1f} <span style="font-size: 0.5em;">ft</span></h2>
-                    <p style="margin:0; font-weight: bold;">{status} <span style="font-weight: normal; color: gray;">(Limit: {threshold}ft)</span></p>
+                <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
+                            border-left: 12px solid {status_color}; margin-bottom: 15px;">
+                    <p style="color: #666; font-size: 12px; margin: 0; font-weight: bold;">{row['Type'].upper()}</p>
+                    <h3 style="margin: 5px 0;">{mat}</h3>
+                    <h1 style="margin: 10px 0; color: {status_color};">{ft:,.1f} <span style="font-size: 18px;">FT</span></h1>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="font-weight: bold; color: {status_color};">{status_text}</span>
+                        <span style="color: #888; font-size: 12px;">{units} units</span>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-        # 4. Hidden Detail View
-        with st.expander("🔍 View Individual Item IDs (Serial Numbers)"):
-            st.dataframe(df[['Item_ID', 'Material', 'Footage', 'Location', 'Category']], use_container_width=True)
+        # 5. INDIVIDUAL ITEM TABLE (Filtered)
+        with st.expander(f"🔍 View {selected_view} Serial Numbers"):
+            st.dataframe(
+                display_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location']].sort_values('Material'), 
+                use_container_width=True, 
+                hide_index=True
+            )
 with tab2:
     st.subheader("Production Log - Multi-Size Orders")
     
