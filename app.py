@@ -439,7 +439,7 @@ with tab1:
 with tab2:
     st.subheader("Production Log - Multi-Size Orders")
 
-        # Simple filter — show all items with footage (temporary to get it working)
+    # Show all items with footage (temporary fix until Category is filled)
     available_items = df[df['Footage'] > 0]
 
     if available_items.empty:
@@ -450,49 +450,56 @@ with tab2:
             st.session_state.coil_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
         if 'roll_lines' not in st.session_state:
             st.session_state.roll_lines = [{"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []}]
-        st.markdown("#### Production Lines")
-        for i in range(len(st.session_state.production_lines)):
-            line = st.session_state.production_lines[i]
+
+        # --- COILS SECTION ---
+        st.markdown("### Coils Production")
+        for i in range(len(st.session_state.coil_lines)):
+            line = st.session_state.coil_lines[i]
             with st.container():
                 col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
                 with col1:
-                    line["display_size"] = st.selectbox(f"Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"size_{i}")
+                    line["display_size"] = st.selectbox(f"Coil Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"coil_size_{i}")
                 with col2:
-                    line["pieces"] = st.number_input(f"Pieces {i+1}", min_value=1, value=line["pieces"], key=f"pieces_{i}")
+                    line["pieces"] = st.number_input(f"Coil Pieces {i+1}", min_value=0, value=line["pieces"], key=f"coil_pieces_{i}")
                 with col3:
-                    line["waste"] = st.number_input(f"Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"waste_{i}")
+                    line["waste"] = st.number_input(f"Coil Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"coil_waste_{i}")
                 with col4:
-                    if st.button("Remove Line", key=f"remove_line_{i}"):
-                        st.session_state.production_lines.pop(i)
+                    if st.button("Remove", key=f"remove_coil_{i}"):
+                        st.session_state.coil_lines.pop(i)
                         st.rerun()
 
                 item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
                                 for _, row in available_items.iterrows()]
-                line["items"] = st.multiselect(f"Items for size {i+1}", item_options, default=line["items"], key=f"items_{i}")
+                line["items"] = st.multiselect(f"Coils for size {i+1}", item_options, default=line["items"], key=f"coil_items_{i}")
 
-        if st.button("➕ Add Another Size Line"):
-            st.session_state.production_lines.append({"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
+        if st.button("➕ Add Coil Size Line"):
+            st.session_state.coil_lines.append({"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
             st.rerun()
+
         # --- ROLLS SECTION ---
         st.markdown("### Rolls Production")
-        if available_rolls.empty:
-            st.info("No rolls available")
-        else:
-            for i in range(len(st.session_state.roll_lines)):
-                line = st.session_state.roll_lines[i]
-                with st.container():
-                    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-                    with col1:
-                        line["display_size"] = st.selectbox(f"Roll Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"roll_size_{i}")
-                    with col2:
-                        line["pieces"] = st.number_input(f"Roll Pieces {i+1}", min_value=0, value=line["pieces"], key=f"roll_pieces_{i}")
-                    with col3:
-                        line["waste"] = st.number_input(f"Roll Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"roll_waste_{i}")
-                    with col4:
-                        if st.button("Remove", key=f"remove_roll_{i}"):
-                            st.session_state.roll_lines.pop(i)
-                            st.rerun()
+        for i in range(len(st.session_state.roll_lines)):
+            line = st.session_state.roll_lines[i]
+            with st.container():
+                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                with col1:
+                    line["display_size"] = st.selectbox(f"Roll Size {i+1}", list(SIZE_DISPLAY.keys()), index=list(SIZE_DISPLAY.keys()).index(line["display_size"]), key=f"roll_size_{i}")
+                with col2:
+                    line["pieces"] = st.number_input(f"Roll Pieces {i+1}", min_value=0, value=line["pieces"], key=f"roll_pieces_{i}")
+                with col3:
+                    line["waste"] = st.number_input(f"Roll Waste ft {i+1}", min_value=0.0, value=line["waste"], key=f"roll_waste_{i}")
+                with col4:
+                    if st.button("Remove", key=f"remove_roll_{i}"):
+                        st.session_state.roll_lines.pop(i)
+                        st.rerun()
 
+                item_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
+                                for _, row in available_items.iterrows()]
+                line["items"] = st.multiselect(f"Rolls for size {i+1}", item_options, default=line["items"], key=f"roll_items_{i}")
+
+        if st.button("➕ Add Roll Size Line"):
+            st.session_state.roll_lines.append({"display_size": "#2", "pieces": 1, "waste": 0.0, "items": []})
+            st.rerun()
                     roll_options = [f"{row['Item_ID']} - {row['Material']} ({row['Footage']:.1f} ft @ {row['Location']})" 
                                     for _, row in available_rolls.iterrows()]
                     line["items"] = st.multiselect(f"Rolls for size {i+1}", roll_options, default=line["items"], key=f"roll_items_{i}")
