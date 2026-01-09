@@ -227,21 +227,38 @@ if st.sidebar.button("Log Out"):
 
 operator_name = st.session_state.username
 
-# --- LOAD INVENTORY ---
+# --- LOAD & CLEAN INVENTORY ---
 if 'df' not in st.session_state:
     try:
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_url(st.secrets["SHEET_URL"])
         inv_ws = sh.worksheet("Inventory")
         records = inv_ws.get_all_records()
+        
         if records:
-            st.session_state.df = pd.DataFrame(records)
+            temp_df = pd.DataFrame(records)
+            
+            # --- DATA CLEANING SECTION ---
+            # 1. Remove accidental spaces
+            temp_df['Category'] = temp_df['Category'].str.strip() 
+            
+            # 2. Force all variations to SINGULAR (Standardizes the split)
+            temp_df['Category'] = temp_df['Category'].replace({
+                'Coils': 'Coil', 
+                'Rolls': 'Roll',
+                'Fab Straps': 'Fab Strap', 
+                'Elbows': 'Elbow'
+            })
+            
+            st.session_state.df = temp_df
         else:
             st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status", "Category"])
+            
     except Exception as e:
         st.error(f"Could not connect to Google Sheet: {e}")
         st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status", "Category"])
 
+# Define the global df for use in the tabs
 df = st.session_state.df
 
 # --- SAVE FUNCTION (PROTECTED VERSION) ---
