@@ -924,10 +924,12 @@ with tab5:
 
     # API Configuration
     GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyB9ZfZ0bjfj-PwcYM1XmT9OBDVEnVsQ3Vk")
-    genai.configure(api_key=GEMINI_KEY)
     
-    # Using the full model path to avoid 404 errors
-    model = genai.GenerativeModel('models/gemini-1.5-flash')
+    # Force stable configuration to avoid v1beta 404 errors
+    genai.configure(api_key=GEMINI_KEY, transport='rest')
+    
+    # Use the stable version string
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
     if not df.empty:
         # --- 1. GAUGE ---
@@ -951,58 +953,51 @@ with tab5:
 
         # --- 2. COLORED CHARTS ---
         col1, col2 = st.columns(2)
-        
         with col1:
             st.markdown("##### Stock Distribution")
-            fig_pie = px.pie(
-                df, 
-                names='Category', 
-                values='Footage', 
-                hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Bold
-            )
+            fig_pie = px.pie(df, names='Category', values='Footage', hole=0.4,
+                             color_discrete_sequence=px.colors.qualitative.Bold)
             st.plotly_chart(fig_pie, use_container_width=True)
 
         with col2:
             st.markdown("##### Top 10 Materials")
             mat_sum = df.groupby(['Material', 'Category'])['Footage'].sum().nlargest(10).reset_index()
-            fig_bar = px.bar(
-                mat_sum, 
-                x='Footage', 
-                y='Material', 
-                orientation='h',
-                color='Category',
-                color_discrete_sequence=px.colors.qualitative.Bold
-            )
+            fig_bar = px.bar(mat_sum, x='Footage', y='Material', orientation='h',
+                             color='Category', color_discrete_sequence=px.colors.qualitative.Bold)
             st.plotly_chart(fig_bar, use_container_width=True)
 
         st.divider()
 
         # --- 3. AI ASSISTANT ---
         st.markdown("### 🤖 MJP Pulse AI Assistant")
-        user_q = st.text_input("Ask about stock levels, reorders, or trends:")
+        user_q = st.text_input("Ask about stock levels, reorders, or trends:", key="ai_input_box")
 
         if user_q:
             with st.spinner("🤖 AI is analyzing live data..."):
-                # Simplified context to save tokens and improve accuracy
                 ctx = df[['Material', 'Footage', 'Category']].to_string()
-                prompt = f"""
-                You are the MJP Pulse AI. 
-                RULES: RPR=200ft/roll, Standard=100ft/roll.
-                INVENTORY DATA:
-                {ctx}
+                prompt = f"Data:\n{ctx}\nRules: RPR=200ft, Std=100ft.\nQuestion: {user_q}"
                 
-                QUESTION: {user_q}
-                """
                 try:
+                    # Explicitly use generate_content
                     response = model.generate_content(prompt)
-                    st.info(response.text)
-                    st.download_button("📥 Download AI Report", response.text, file_name="MJP_Report.txt")
+                    
+                    if response.text:
+                        st.info(response.text)
+                        st.download_button("📥 Download AI Report", response.text, file_name="MJP_Report.txt")
+                    else:
+                        st.warning("AI returned an empty response. Try rephrasing.")
+                        
                 except Exception as e:
-                    # Specific help if the error persists
                     st.error(f"AI Error: {e}")
+                    # If 404 persists, try a different model as a backup
                     if "404" in str(e):
-                        st.warning("The model name was not recognized. Try changing it to 'gemini-pro' or 'gemini-1.5-flash-latest'.")
+                        st.info("Attempting connection with backup model...")
+                        try:
+                            backup_model = genai.GenerativeModel('gemini-pro')
+                            response = backup_model.generate_content(prompt)
+                            st.info(response.text)
+                        except:
+                            st.error("Connection failed. Please verify your API key is active in Google AI Studio.")
     else:
         st.info("No data available.")
         
