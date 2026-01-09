@@ -922,71 +922,78 @@ import plotly.graph_objects as go
 with tab5:
     st.subheader("📈 Inventory Analytics & AI Assistant")
 
-    if not df.empty:
-        # --- 1. STOCK HEALTH GAUGE ---
-        total_ft = df['Footage'].sum()
-        target_capacity = 50000.0  # You can adjust this 'Ideal' warehouse capacity
-        health_pct = min((total_ft / target_capacity) * 100, 100)
+    # 1. API Configuration (Using your provided key)
+    # This tries to use secrets first, then falls back to the key you provided
+    GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyB9ZfZ0bjfj-PwcYM1XmT9OBDVEnVsQ3Vk")
+    genai.configure(api_key=GEMINI_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
+    if not df.empty:
+        # --- SECTION 1: STOCK HEALTH GAUGE ---
+        total_ft = df['Footage'].sum()
+        target_capacity = 50000.0  
+        
         fig_gauge = go.Figure(go.Indicator(
             mode = "gauge+number",
             value = total_ft,
             domain = {'x': [0, 1], 'y': [0, 1]},
-            title = {'text': "Total Warehouse Footage", 'font': {'size': 24}},
+            title = {'text': "Total Warehouse Footage", 'font': {'size': 20}},
             gauge = {
-                'axis': {'range': [None, target_capacity], 'tickwidth': 1},
+                'axis': {'range': [None, target_capacity]},
                 'bar': {'color': "#1E3A8A"},
                 'steps': [
-                    {'range': [0, 15000], 'color': "#FFCDD2"},  # Red zone
-                    {'range': [15000, 35000], 'color': "#FFF9C4"},  # Yellow zone
-                    {'range': [35000, 50000], 'color': "#C8E6C9"}   # Green zone
-                ],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 10000}
+                    {'range': [0, 15000], 'color': "#FFCDD2"},
+                    {'range': [15000, 35000], 'color': "#FFF9C4"},
+                    {'range': [35000, 50000], 'color': "#C8E6C9"}
+                ]
             }
         ))
         st.plotly_chart(fig_gauge, use_container_width=True)
 
-        # --- 2. CATEGORY & MATERIAL BREAKDOWN ---
+        # --- SECTION 2: VISUAL BREAKDOWN ---
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("##### Stock by Category")
-            fig_pie = px.pie(df, names='Category', values='Footage', hole=0.4,
-                             color_discrete_sequence=px.colors.qualitative.Safe)
+            st.markdown("##### Stock Distribution")
+            fig_pie = px.pie(df, names='Category', values='Footage', hole=0.4)
             st.plotly_chart(fig_pie, use_container_width=True)
 
         with col2:
-            st.markdown("##### Top 10 Materials by Footage")
+            st.markdown("##### Top 10 Materials")
             mat_sum = df.groupby('Material')['Footage'].sum().nlargest(10).reset_index()
-            fig_bar = px.bar(mat_sum, x='Footage', y='Material', orientation='h',
-                             color='Footage', color_continuous_scale='GnBu')
+            fig_bar = px.bar(mat_sum, x='Footage', y='Material', orientation='h')
             st.plotly_chart(fig_bar, use_container_width=True)
 
         st.divider()
 
-        # --- 3. AI ASSISTANT ---
+        # --- SECTION 3: AI ASSISTANT ---
         st.markdown("### 🤖 MJP Pulse AI Assistant")
-        if "GEMINI_API_KEY" not in st.secrets:
-            st.warning("⚠️ AI Analysis is currently unavailable. API Key missing.")
-        else:
-            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            model = genai.GenerativeModel('gemini-1.5-flash')
+        user_q = st.text_input("Ask about stock levels, reorders, or trends:", 
+                              placeholder="e.g. 'Summarize my stock. What needs reordering?'")
 
-            user_q = st.text_input("Ask about stock levels, reorders, or trends:")
-            if user_q:
-                with st.spinner("🤖 Consulting the data..."):
-                    ctx = df[['Material', 'Footage', 'Category']].to_string()
-                    prompt = f"Data: {ctx}\nRules: RPR=200ft, Std=100ft.\nQuestion: {user_q}"
-                    try:
-                        resp = model.generate_content(prompt)
-                        st.info(resp.text)
-                        st.download_button("📥 Download AI Insights", resp.text, "MJP_AI_Analysis.txt")
-                    except Exception as e:
-                        st.error(f"AI Error: {e}")
+        if user_q:
+            with st.spinner("🤖 AI is analyzing live data..."):
+                # Clean context for the AI
+                ctx = df[['Material', 'Footage', 'Category']].to_string()
+                prompt = f"""
+                You are the MJP Pulse AI. 
+                RULES: RPR=200ft/roll, Standard=100ft/roll.
+                INVENTORY DATA:
+                {ctx}
+                
+                USER QUESTION: {user_q}
+                """
+                try:
+                    response = model.generate_content(prompt)
+                    ai_response = response.text
+                    st.info(ai_response)
+                    
+                    # Download analysis
+                    st.download_button("📥 Download AI Report", ai_response, file_name="MJP_Analysis.txt")
+                except Exception as e:
+                    st.error(f"AI Error: {e}")
+                    st.info("Tip: Check if your API key has expired or if billing is enabled on Google Cloud.")
     else:
-        st.info("No data available. Add items in the Manage tab to see insights.")
+        st.info("No data available. Please add items to the inventory first.")
         
 with tab6:
     st.subheader("📜 System Audit Log")
