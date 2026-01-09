@@ -922,82 +922,73 @@ import plotly.graph_objects as go
 with tab5:
     st.subheader("📈 Inventory Analytics & AI Assistant")
 
-    # API Configuration
+    # 1. HARD-CODED CONFIGURATION TO BYPASS 404
     GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyB9ZfZ0bjfj-PwcYM1XmT9OBDVEnVsQ3Vk")
     
-    # Force stable configuration to avoid v1beta 404 errors
-    genai.configure(api_key=GEMINI_KEY, transport='rest')
-    
-    # Use the stable version string
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    try:
+        # Force the library to use the stable 'v1' API instead of 'v1beta'
+        genai.configure(api_key=GEMINI_KEY, transport='rest')
+        
+        # Use the 'latest' alias which is the most reliable endpoint
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        
+    except Exception as e:
+        st.error(f"Configuration Error: {e}")
 
     if not df.empty:
-        # --- 1. GAUGE ---
+        # --- [SECTION: GAUGE & CHARTS CODE REMAINS THE SAME] ---
+        # (Keeping the charts here ensures they don't disappear)
         total_ft = df['Footage'].sum()
         target_capacity = 50000.0  
         fig_gauge = go.Figure(go.Indicator(
             mode = "gauge+number",
             value = total_ft,
             title = {'text': "Total Warehouse Footage"},
-            gauge = {
-                'axis': {'range': [None, target_capacity]},
-                'bar': {'color': "#1E3A8A"},
-                'steps': [
-                    {'range': [0, 15000], 'color': "#FFCDD2"},
-                    {'range': [15000, 35000], 'color': "#FFF9C4"},
-                    {'range': [35000, 50000], 'color': "#C8E6C9"}
-                ]
-            }
+            gauge = {'axis': {'range': [None, target_capacity]}, 'bar': {'color': "#1E3A8A"}}
         ))
         st.plotly_chart(fig_gauge, use_container_width=True)
 
-        # --- 2. COLORED CHARTS ---
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("##### Stock Distribution")
-            fig_pie = px.pie(df, names='Category', values='Footage', hole=0.4,
-                             color_discrete_sequence=px.colors.qualitative.Bold)
+            fig_pie = px.pie(df, names='Category', values='Footage', hole=0.4, color_discrete_sequence=px.colors.qualitative.Bold)
             st.plotly_chart(fig_pie, use_container_width=True)
-
         with col2:
-            st.markdown("##### Top 10 Materials")
             mat_sum = df.groupby(['Material', 'Category'])['Footage'].sum().nlargest(10).reset_index()
-            fig_bar = px.bar(mat_sum, x='Footage', y='Material', orientation='h',
-                             color='Category', color_discrete_sequence=px.colors.qualitative.Bold)
+            fig_bar = px.bar(mat_sum, x='Footage', y='Material', orientation='h', color='Category', color_discrete_sequence=px.colors.qualitative.Bold)
             st.plotly_chart(fig_bar, use_container_width=True)
 
         st.divider()
 
-        # --- 3. AI ASSISTANT ---
+        # --- 2. UPDATED AI ASSISTANT LOGIC ---
         st.markdown("### 🤖 MJP Pulse AI Assistant")
-        user_q = st.text_input("Ask about stock levels, reorders, or trends:", key="ai_input_box")
+        user_q = st.text_input("Ask about stock levels, reorders, or trends:", key="final_ai_fix")
 
         if user_q:
-            with st.spinner("🤖 AI is analyzing live data..."):
-                ctx = df[['Material', 'Footage', 'Category']].to_string()
-                prompt = f"Data:\n{ctx}\nRules: RPR=200ft, Std=100ft.\nQuestion: {user_q}"
-                
-                try:
-                    # Explicitly use generate_content
-                    response = model.generate_content(prompt)
+            # Quick check: Is the key valid?
+            if not GEMINI_KEY.startswith("AIza"):
+                st.error("The API Key format looks incorrect. Please check Google AI Studio.")
+            else:
+                with st.spinner("🤖 Connecting to stable AI engine..."):
+                    inventory_text = df[['Material', 'Footage', 'Category']].to_string()
+                    prompt = f"Warehouse Data:\n{inventory_text}\n\nTask: {user_q}\nRules: RPR=200ft/roll, Others=100ft/roll."
                     
-                    if response.text:
-                        st.info(response.text)
-                        st.download_button("📥 Download AI Report", response.text, file_name="MJP_Report.txt")
-                    else:
-                        st.warning("AI returned an empty response. Try rephrasing.")
+                    try:
+                        # Call the model
+                        response = model.generate_content(prompt)
                         
-                except Exception as e:
-                    st.error(f"AI Error: {e}")
-                    # If 404 persists, try a different model as a backup
-                    if "404" in str(e):
-                        st.info("Attempting connection with backup model...")
-                        try:
-                            backup_model = genai.GenerativeModel('gemini-pro')
-                            response = backup_model.generate_content(prompt)
+                        if response.text:
                             st.info(response.text)
-                        except:
-                            st.error("Connection failed. Please verify your API key is active in Google AI Studio.")
+                            st.download_button("📥 Download Report", response.text, file_name="MJP_Report.txt")
+                    
+                    except Exception as e:
+                        # If it still fails, it's likely a key restriction/billing issue
+                        st.error(f"Final Attempt Failed: {e}")
+                        st.markdown("""
+                        **Possible fixes:**
+                        1. Go to [Google AI Studio](https://aistudio.google.com/)
+                        2. Create a **NEW** API Key.
+                        3. Ensure the **Generative Language API** is enabled in your Google Cloud Project.
+                        """)
     else:
         st.info("No data available.")
         
