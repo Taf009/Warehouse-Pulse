@@ -914,107 +914,79 @@ if submitted:
             save_inventory()
             st.success(f"Item {move_id} moved to {new_move_loc}")
             st.rerun()
+            
+import google.generativeai as genai
 import plotly.express as px
+import plotly.graph_objects as go
 
 with tab5:
-    st.subheader("📊 Production Summary & Insights")
+    st.subheader("📈 Inventory Analytics & AI Assistant")
 
-    try:
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-        sh = gc.open_by_url(st.secrets["SHEET_URL"])
-        log_ws = sh.worksheet("Production_Log")
-        log_records = log_ws.get_all_records()
-        
-        if not log_records:
-            st.info("No production recorded yet — complete your first order to see stats!")
+    if not df.empty:
+        # --- 1. STOCK HEALTH GAUGE ---
+        total_ft = df['Footage'].sum()
+        target_capacity = 50000.0  # You can adjust this 'Ideal' warehouse capacity
+        health_pct = min((total_ft / target_capacity) * 100, 100)
+
+        fig_gauge = go.Figure(go.Indicator(
+            mode = "gauge+number",
+            value = total_ft,
+            domain = {'x': [0, 1], 'y': [0, 1]},
+            title = {'text': "Total Warehouse Footage", 'font': {'size': 24}},
+            gauge = {
+                'axis': {'range': [None, target_capacity], 'tickwidth': 1},
+                'bar': {'color': "#1E3A8A"},
+                'steps': [
+                    {'range': [0, 15000], 'color': "#FFCDD2"},  # Red zone
+                    {'range': [15000, 35000], 'color': "#FFF9C4"},  # Yellow zone
+                    {'range': [35000, 50000], 'color': "#C8E6C9"}   # Green zone
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': 10000}
+            }
+        ))
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
+        # --- 2. CATEGORY & MATERIAL BREAKDOWN ---
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("##### Stock by Category")
+            fig_pie = px.pie(df, names='Category', values='Footage', hole=0.4,
+                             color_discrete_sequence=px.colors.qualitative.Safe)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with col2:
+            st.markdown("##### Top 10 Materials by Footage")
+            mat_sum = df.groupby('Material')['Footage'].sum().nlargest(10).reset_index()
+            fig_bar = px.bar(mat_sum, x='Footage', y='Material', orientation='h',
+                             color='Footage', color_continuous_scale='GnBu')
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        st.divider()
+
+        # --- 3. AI ASSISTANT ---
+        st.markdown("### 🤖 MJP Pulse AI Assistant")
+        if "GEMINI_API_KEY" not in st.secrets:
+            st.warning("⚠️ AI Analysis is currently unavailable. API Key missing.")
         else:
-            log_df = pd.DataFrame(log_records)
-            log_df['Timestamp'] = pd.to_datetime(log_df['Timestamp'])
-            log_df['Date'] = log_df['Timestamp'].dt.date
-            
-            # Numeric conversion
-            num_cols = ['Total_Used_FT', 'Waste_FT', 'Pieces']
-            for col in num_cols:
-                log_df[col] = pd.to_numeric(log_df[col], errors='coerce').fillna(0)
+            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+            model = genai.GenerativeModel('gemini-1.5-flash')
 
-            # --- 1. TIME PERIOD SELECTOR ---
-            now = datetime.now()
-            period = st.selectbox("Select Time Period", ["Today", "Last 7 Days", "This Month", "Year to Date", "All Time"], key="summary_period")
-
-            if period == "Today":
-                filtered = log_df[log_df['Date'] == now.date()]
-            elif period == "Last 7 Days":
-                filtered = log_df[log_df['Timestamp'] >= now - pd.Timedelta(days=7)]
-            elif period == "This Month":
-                filtered = log_df[log_df['Timestamp'].dt.month == now.month]
-            elif period == "Year to Date":
-                filtered = log_df[log_df['Timestamp'] >= datetime(now.year, 1, 1)]
-            else:
-                filtered = log_df
-
-            if filtered.empty:
-                st.info(f"No production data found for {period}.")
-            else:
-                # --- 2. KPI METRICS ---
-                t_used = filtered['Total_Used_FT'].sum()
-                t_waste = filtered['Waste_FT'].sum()
-                t_pieces = filtered['Pieces'].sum()
-                efficiency = ((t_used - t_waste) / t_used * 100) if t_used > 0 else 0
-
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Total Used", f"{t_used:,.0f} ft")
-                m2.metric("Waste", f"{t_waste:,.0f} ft", delta=f"{(t_waste/t_used*100):.1f}%" if t_used > 0 else None, delta_color="inverse")
-                m3.metric("Pieces Produced", f"{int(t_pieces):,}")
-                m4.metric("Shop Efficiency", f"{efficiency:.1f}%")
-
-                st.divider()
-
-                # --- 3. CHARTS ZONE ---
-                col_left, col_right = st.columns(2)
-
-                with col_left:
-                    st.markdown("#### 🏆 Top 5 Clients (by Footage)")
-                    client_data = filtered.groupby('Client')['Total_Used_FT'].sum().sort_values(ascending=False).head(5).reset_index()
-                    fig_client = px.bar(client_data, x='Total_Used_FT', y='Client', orientation='h', 
-                                       text_auto='.2s', color='Total_Used_FT', color_continuous_scale='Viridis')
-                    fig_client.update_layout(showlegend=False, height=300, margin=dict(t=0, b=0, l=0, r=0))
-                    st.plotly_chart(fig_client, use_container_width=True)
-
-                with col_right:
-                    st.markdown("#### 📈 Material Usage vs Waste")
-                    # Prepare data for a pie chart or stacked bar
-                    usage_breakdown = pd.DataFrame({
-                        'Status': ['Net Used', 'Waste'],
-                        'Footage': [t_used - t_waste, t_waste]
-                    })
-                    fig_waste = px.pie(usage_breakdown, values='Footage', names='Status', hole=0.4,
-                                      color_discrete_map={'Net Used':'#00C853', 'Waste':'#FF4B4B'})
-                    fig_waste.update_layout(height=300, margin=dict(t=0, b=0, l=0, r=0))
-                    st.plotly_chart(fig_waste, use_container_width=True)
-
-                # --- 4. RPR EQUIVALENCY (The "Smarter" Insight) ---
-                st.markdown("#### 💡 Roll Consumption Equivalent")
-                # Group by material and apply your specific divisor logic
-                roll_summary = filtered.groupby('Material')['Total_Used_FT'].sum().reset_index()
-                
-                def get_rolls(row):
-                    divisor = 200 if "RPR" in row['Material'].upper() else 100
-                    return row['Total_Used_FT'] / divisor
-
-                roll_summary['Equivalent_Rolls'] = roll_summary.apply(get_rolls, axis=1)
-                
-                # Display as a clean table
-                st.dataframe(
-                    roll_summary.rename(columns={'Total_Used_FT': 'Total FT', 'Equivalent_Rolls': 'Est. Rolls Used'}),
-                    use_container_width=True, hide_index=True
-                )
-
-                # --- 5. DATA LOG ---
-                with st.expander("📄 View Detailed Production Log"):
-                    st.dataframe(filtered.sort_values('Timestamp', ascending=False), use_container_width=True)
-
-    except Exception as e:
-        st.error(f"Error loading Insights: {e}")
+            user_q = st.text_input("Ask about stock levels, reorders, or trends:")
+            if user_q:
+                with st.spinner("🤖 Consulting the data..."):
+                    ctx = df[['Material', 'Footage', 'Category']].to_string()
+                    prompt = f"Data: {ctx}\nRules: RPR=200ft, Std=100ft.\nQuestion: {user_q}"
+                    try:
+                        resp = model.generate_content(prompt)
+                        st.info(resp.text)
+                        st.download_button("📥 Download AI Insights", resp.text, "MJP_AI_Analysis.txt")
+                    except Exception as e:
+                        st.error(f"AI Error: {e}")
+    else:
+        st.info("No data available. Add items in the Manage tab to see insights.")
         
 with tab6:
     st.subheader("📜 System Audit Log")
