@@ -925,7 +925,9 @@ with tab5:
     # API Configuration
     GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyB9ZfZ0bjfj-PwcYM1XmT9OBDVEnVsQ3Vk")
     genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    # Using the full model path to avoid 404 errors
+    model = genai.GenerativeModel('models/gemini-1.5-flash')
 
     if not df.empty:
         # --- 1. GAUGE ---
@@ -952,7 +954,6 @@ with tab5:
         
         with col1:
             st.markdown("##### Stock Distribution")
-            # Using 'Qualitative' color palette to ensure big differences between slices
             fig_pie = px.pie(
                 df, 
                 names='Category', 
@@ -965,7 +966,6 @@ with tab5:
         with col2:
             st.markdown("##### Top 10 Materials")
             mat_sum = df.groupby(['Material', 'Category'])['Footage'].sum().nlargest(10).reset_index()
-            # Adding 'color="Category"' ensures Fab Straps look different from Coils
             fig_bar = px.bar(
                 mat_sum, 
                 x='Footage', 
@@ -984,14 +984,25 @@ with tab5:
 
         if user_q:
             with st.spinner("🤖 AI is analyzing live data..."):
+                # Simplified context to save tokens and improve accuracy
                 ctx = df[['Material', 'Footage', 'Category']].to_string()
-                prompt = f"Data:\n{ctx}\nRules: RPR=200ft, Std=100ft.\nQuestion: {user_q}"
+                prompt = f"""
+                You are the MJP Pulse AI. 
+                RULES: RPR=200ft/roll, Standard=100ft/roll.
+                INVENTORY DATA:
+                {ctx}
+                
+                QUESTION: {user_q}
+                """
                 try:
                     response = model.generate_content(prompt)
                     st.info(response.text)
                     st.download_button("📥 Download AI Report", response.text, file_name="MJP_Report.txt")
                 except Exception as e:
+                    # Specific help if the error persists
                     st.error(f"AI Error: {e}")
+                    if "404" in str(e):
+                        st.warning("The model name was not recognized. Try changing it to 'gemini-pro' or 'gemini-1.5-flash-latest'.")
     else:
         st.info("No data available.")
         
