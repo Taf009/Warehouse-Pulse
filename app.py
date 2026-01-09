@@ -922,22 +922,19 @@ import plotly.graph_objects as go
 with tab5:
     st.subheader("📈 Inventory Analytics & AI Assistant")
 
-    # 1. API Configuration (Using your provided key)
-    # This tries to use secrets first, then falls back to the key you provided
+    # API Configuration
     GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyB9ZfZ0bjfj-PwcYM1XmT9OBDVEnVsQ3Vk")
     genai.configure(api_key=GEMINI_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     if not df.empty:
-        # --- SECTION 1: STOCK HEALTH GAUGE ---
+        # --- 1. GAUGE ---
         total_ft = df['Footage'].sum()
         target_capacity = 50000.0  
-        
         fig_gauge = go.Figure(go.Indicator(
             mode = "gauge+number",
             value = total_ft,
-            domain = {'x': [0, 1], 'y': [0, 1]},
-            title = {'text': "Total Warehouse Footage", 'font': {'size': 20}},
+            title = {'text': "Total Warehouse Footage"},
             gauge = {
                 'axis': {'range': [None, target_capacity]},
                 'bar': {'color': "#1E3A8A"},
@@ -950,50 +947,53 @@ with tab5:
         ))
         st.plotly_chart(fig_gauge, use_container_width=True)
 
-        # --- SECTION 2: VISUAL BREAKDOWN ---
+        # --- 2. COLORED CHARTS ---
         col1, col2 = st.columns(2)
+        
         with col1:
             st.markdown("##### Stock Distribution")
-            fig_pie = px.pie(df, names='Category', values='Footage', hole=0.4)
+            # Using 'Qualitative' color palette to ensure big differences between slices
+            fig_pie = px.pie(
+                df, 
+                names='Category', 
+                values='Footage', 
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Bold
+            )
             st.plotly_chart(fig_pie, use_container_width=True)
 
         with col2:
             st.markdown("##### Top 10 Materials")
-            mat_sum = df.groupby('Material')['Footage'].sum().nlargest(10).reset_index()
-            fig_bar = px.bar(mat_sum, x='Footage', y='Material', orientation='h')
+            mat_sum = df.groupby(['Material', 'Category'])['Footage'].sum().nlargest(10).reset_index()
+            # Adding 'color="Category"' ensures Fab Straps look different from Coils
+            fig_bar = px.bar(
+                mat_sum, 
+                x='Footage', 
+                y='Material', 
+                orientation='h',
+                color='Category',
+                color_discrete_sequence=px.colors.qualitative.Bold
+            )
             st.plotly_chart(fig_bar, use_container_width=True)
 
         st.divider()
 
-        # --- SECTION 3: AI ASSISTANT ---
+        # --- 3. AI ASSISTANT ---
         st.markdown("### 🤖 MJP Pulse AI Assistant")
-        user_q = st.text_input("Ask about stock levels, reorders, or trends:", 
-                              placeholder="e.g. 'Summarize my stock. What needs reordering?'")
+        user_q = st.text_input("Ask about stock levels, reorders, or trends:")
 
         if user_q:
             with st.spinner("🤖 AI is analyzing live data..."):
-                # Clean context for the AI
                 ctx = df[['Material', 'Footage', 'Category']].to_string()
-                prompt = f"""
-                You are the MJP Pulse AI. 
-                RULES: RPR=200ft/roll, Standard=100ft/roll.
-                INVENTORY DATA:
-                {ctx}
-                
-                USER QUESTION: {user_q}
-                """
+                prompt = f"Data:\n{ctx}\nRules: RPR=200ft, Std=100ft.\nQuestion: {user_q}"
                 try:
                     response = model.generate_content(prompt)
-                    ai_response = response.text
-                    st.info(ai_response)
-                    
-                    # Download analysis
-                    st.download_button("📥 Download AI Report", ai_response, file_name="MJP_Analysis.txt")
+                    st.info(response.text)
+                    st.download_button("📥 Download AI Report", response.text, file_name="MJP_Report.txt")
                 except Exception as e:
                     st.error(f"AI Error: {e}")
-                    st.info("Tip: Check if your API key has expired or if billing is enabled on Google Cloud.")
     else:
-        st.info("No data available. Please add items to the inventory first.")
+        st.info("No data available.")
         
 with tab6:
     st.subheader("📜 System Audit Log")
