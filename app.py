@@ -923,7 +923,7 @@ with tab5:
     st.subheader("📈 Inventory Analytics & AI Assistant")
 
     # 1. HARD-CODED CONFIGURATION TO BYPASS 404
-    GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyB9ZfZ0bjfj-PwcYM1XmT9OBDVEnVsQ3Vk")
+    GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "----")
     
     try:
         # Force the library to use the stable 'v1' API instead of 'v1beta'
