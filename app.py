@@ -14,8 +14,15 @@ from supabase import create_client, Client
 
 # --- DATABASE CONNECTION ---
 # This pulls the credentials you just saved in the "Secrets" section
-@st.cache_resource # cache_resource is for database connections
+# --- 2. DATABASE CONNECTION (SMART VERSION) ---
+@st.cache_resource 
 def init_connection():
+    # Check if keys exist before trying to use them
+    if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
+        st.error("🚨 Missing Supabase Credentials in Streamlit Secrets!")
+        st.info("Ensure you have SUPABASE_URL and SUPABASE_KEY defined in your App Settings -> Secrets.")
+        st.stop() # Stops the app here so it doesn't show the Traceback error
+    
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
