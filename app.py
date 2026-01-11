@@ -12,6 +12,16 @@ import io
 from email.mime.application import MIMEApplication
 from supabase import create_client, Client
 
+# --- DATABASE CONNECTION ---
+# This pulls the credentials you just saved in the "Secrets" section
+@st.cache_resource # cache_resource is for database connections
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
+
 # MUST BE THE FIRST ST COMMAND
 st.set_page_config(
     page_title="MJP Pulse Inventory",
@@ -129,6 +139,12 @@ with st.sidebar:
         st.image("logo.png", use_container_width=True)
     except:
         st.markdown("<h1 style='text-align: center;'>⚡ MJP</h1>", unsafe_allow_html=True)
+    try:
+        # Try a tiny query just to check the pulse
+        supabase.table("inventory").select("count", count="exact").limit(1).execute()
+        st.success("🛰️ Database: Online")
+    except Exception:
+        st.error("🛰️ Database: Offline")
     
     st.divider()
     
@@ -167,7 +183,7 @@ st.markdown("""
     # Global Actions
     if st.button("🔄 Sync Cloud Data", use_container_width=True):
         st.cache_data.clear()
-        st.toast("Database Synced!")
+        st.toast("Pulling fresh data from Supabase...")
         st.rerun()
     
     st.divider()
