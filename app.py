@@ -181,10 +181,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
     # Global Actions
-    if st.button("🔄 Sync Cloud Data", use_container_width=True):
-        st.cache_data.clear()
-        st.toast("Pulling fresh data from Supabase...")
-        st.rerun()
+if st.button("🔄 Sync Cloud Data", use_container_width=True):
+    st.cache_data.clear()
+    st.toast("Pulling fresh data from Supabase...")
+    st.rerun()
     
     st.divider()
     # Your Tab/Navigation code usually follows here...
