@@ -865,17 +865,17 @@ col_mat = c_map.get('material', 'Material')
 
 # 2. MAIN CATEGORY SELECTION
 pick_cat = st.selectbox("What are you picking?", 
-    ["Fab Strap", "Roll", "Elbow", "Mineral Wool", "Coil", "Banding", "Wing Seal"], 
+    ["Fab Straps", "Roll", "Elbows", "Mineral Wool", "Coil", "Banding", "Wing Seal"], 
     key="pick_cat_sales"
 )
 
 # 3. CONTEXTUAL LOGIC FOR DEEP FILTERS
 filters = []
 
-if pick_cat == "Fab Strap":
+if pick_cat == "Fab Straps":
     filters.append(st.radio("Thickness", ["015", "020"], horizontal=True))
 
-elif pick_cat == "Elbow":
+elif pick_cat == "Elbows":
     filters.append(st.radio("Angle", ["45", "90"], horizontal=True, format_func=lambda x: f"{x}°"))
 
 elif pick_cat in ["Roll", "Coil"]:
