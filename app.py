@@ -907,12 +907,12 @@ with st.form("dedicated_pick_form", clear_on_submit=True):
     submitted = st.form_submit_button("🚀 Confirm Removal", use_container_width=True)
     st.divider()
         
-        c1, c2 = st.columns(2)
-        customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
-        # Fallback to 'Admin' if session state username isn't set yet
-        picker_name = c2.text_input("Authorized By", value=st.session_state.get("username", "Admin"))
+    c1, c2 = st.columns(2)
+    customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
+    # Fallback to 'Admin' if session state username isn't set yet
+    picker_name = c2.text_input("Authorized By", value=st.session_state.get("username", "Admin"))
 
-        submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True)
+    submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True)
 
     # --- 2. THE HIGH-SPEED PROCESSING ---
     if submit_pick and selected_mat:
