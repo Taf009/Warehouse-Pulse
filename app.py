@@ -9,11 +9,15 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 import io
-
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+from supabase import create_client, Client
+
+# MUST BE THE FIRST ST COMMAND
+st.set_page_config(
+    page_title="MJP Pulse Inventory",
+    page_icon="⚡", # You can use an emoji or a URL to your logo image
+    layout="wide"
+)
 
 def send_email_to_admin(client, order_no, pdf_bytes):
     # --- CONFIGURATION ---
@@ -75,32 +79,79 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
-# --- PAGE CONFIG ---
-# Setup page layout
-st.set_page_config(page_title="MJP Pulse", layout="wide")
+# --- 1. PAGE CONFIG (Must be at the very top) ---
+st.set_page_config(
+    page_title="MJP Pulse Inventory",
+    page_icon="⚡", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Custom CSS for the Title
+# --- 2. PWA & PROFESSIONAL STYLING ---
 st.markdown("""
     <style>
-    .title-text {
-        font-family: 'Helvetica Neue', sans-serif;
-        font-weight: 800;
-        color: #1E3A8A; /* Professional Dark Blue */
-        margin-top: -10px;
-    }
+        /* PWA Meta Tags (Injected into Header) */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
+        
+        /* Professional Title Styling */
+        .main-title {
+            font-family: 'Inter', sans-serif;
+            font-weight: 800;
+            color: #1E3A8A;
+            font-size: 42px;
+            margin-bottom: 0px;
+        }
+        .sub-title {
+            font-family: 'Inter', sans-serif;
+            color: #64748B;
+            font-size: 16px;
+            margin-top: -15px;
+            margin-bottom: 20px;
+        }
+        /* Sidebar Polish */
+        [data-testid="stSidebar"] {
+            background-color: #f8fafc;
+            border-right: 1px solid #e2e8f0;
+        }
     </style>
+    
+    <head>
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <title>MJP Pulse</title>
+    </head>
 """, unsafe_allow_html=True)
 
-# Branding Header
-head_col1, head_col2 = st.columns([1, 5])
-
-with head_col1:
+# --- 3. SIDEBAR BRANDING ---
+with st.sidebar:
+    # Logo Logic
     try:
-        # This will only run if logo.png exists in your GitHub folder
-        st.image("logo.png", width=120)
+        st.image("logo.png", use_container_width=True)
     except:
-        # This prevents the app from crashing if the file is missing
-        st.markdown("## ⚡") 
+        st.markdown("<h1 style='text-align: center;'>⚡ MJP</h1>", unsafe_allow_html=True)
+    
+    st.divider()
+    
+    # User Status Card
+    st.markdown(f"""
+        <div style="background-color: white; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+            <p style="margin:0; color: #64748B; font-size: 12px; font-weight: bold; text-transform: uppercase;">Current Operator</p>
+            <p style="margin:0; color: #1E3A8A; font-size: 18px; font-weight: bold;">{st.session_state.get('username', 'Admin User')}</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Global Actions
+    if st.button("🔄 Sync Cloud Data", use_container_width=True):
+        st.cache_data.clear()
+        st.toast("Database Synced!")
+        st.rerun()
+    
+    st.divider()
+    # Your Tab/Navigation code usually follows here...
+
+# --- 4. MAIN PAGE HEADER ---
+st.markdown('<p class="main-title">MJP Pulse</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">Precision Inventory & Logistics Engine</p>', unsafe_allow_html=True) 
 
 with head_col2:
     st.markdown('<h1 class="title-text">MJP PULSE</h1>', unsafe_allow_html=True)
@@ -428,6 +479,27 @@ def send_production_pdf(pdf_buffer, order_number, client_name):
     except Exception as e:
         st.error(f"Email failed: {e}")
         return False
+        
+def update_stock(item_id, new_footage, user_name, action_type):
+    try:
+        # Update the Inventory table
+        supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
+        
+        # Insert into the Audit Log table
+        log_entry = {
+            "Item_ID": item_id,
+            "Action": action_type,
+            "User": user_name,
+            "Timestamp": datetime.now().isoformat()
+        }
+        supabase.table("audit_logs").insert(log_entry).execute()
+        
+        # CRITICAL: Clear cache so the app pulls the new numbers immediately
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Failed to update database: {e}")
+        return False
 
 # --- TABS ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
@@ -698,11 +770,13 @@ with tab2:
                             st.rerun()                            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
+    st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
 
     # 1. Filter Data based on Category Selection
-    pick_cat = st.selectbox("What are you picking?", ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"], key="pick_cat_sales")
+    # Note: We use singular names here to match our new database cleaning logic
+    pick_cat = st.selectbox("What are you picking?", ["Fab Strap", "Roll", "Elbow", "Mineral Wool", "Coil"], key="pick_cat_sales")
     
-    # This filters your inventory so we only look at the category chosen above
+    # Filter the cached dataframe
     filtered_df = df[df['Category'] == pick_cat]
 
     with st.form("dedicated_pick_form", clear_on_submit=True):
@@ -713,200 +787,215 @@ with tab3:
                 st.warning(f"⚠️ No items currently in stock for {pick_cat}")
                 selected_mat = None
             else:
-                # 2. INTELLIGENT DROPDOWN: Only shows materials existing in this category
                 mat_options = sorted(filtered_df['Material'].unique())
                 selected_mat = st.selectbox("Select Size / Material", mat_options)
 
         with col2:
             if selected_mat:
-                # 3. Handling Serialized (Rolls/Coils) vs Bulk (Straps/Elbows)
-                if pick_cat in ["Rolls", "Coils"]:
-                    # Narrow down to specific IDs for that specific size
+                # Logic for Serialized items (Rolls/Coils) vs Bulk items
+                if pick_cat in ["Roll", "Coil"]:
                     specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
                     pick_id = st.selectbox("Select Serial # to Sell", specific_ids)
-                    pick_qty = 1 
+                    pick_qty = 0 # For serialized, we set footage to 0
                 else:
-                    # Bulk items (Elbows, Straps) don't need IDs
-                    pick_id = "BULK"
-                    pick_qty = st.number_input("Quantity (Pcs/Bundles)", min_value=1, step=1)
+                    # Bulk items use the Material name as ID for the database update
+                    pick_id = "BULK" 
+                    pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
 
-        # ... (rest of your form: Customer Name, Operator, Submit Button) ...
         st.divider()
-        # Step 4: Record who and where
+        
         c1, c2 = st.columns(2)
         customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
-        picker_name = c2.text_input("Authorized By", value=st.session_state.username)
+        # Fallback to 'Admin' if session state username isn't set yet
+        picker_name = c2.text_input("Authorized By", value=st.session_state.get("username", "Admin"))
 
         submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True)
 
-    # --- PROCESSING THE PICK ---
+    # --- 2. THE HIGH-SPEED PROCESSING ---
     if submit_pick and selected_mat:
         if not customer:
-            st.error("Please enter a Customer or Job Name.")
+            st.error("⚠️ Please enter a Customer or Job Name before confirming.")
         else:
-            if pick_cat in ["Rolls", "Coils"]:
-                # Mark specific Serial ID as gone (0 footage)
-                df.loc[df['Item_ID'] == pick_id, 'Footage'] = 0
-                st.success(f"Sold {pick_cat} {pick_id} to {customer}")
+            success = False
+            
+            # CASE A: Serialized (Rolls/Coils) -> Set Footage to 0
+            if pick_cat in ["Roll", "Coil"]:
+                with st.spinner("Updating Cloud Database..."):
+                    success = update_stock(
+                        item_id=pick_id, 
+                        new_footage=0, 
+                        user_name=picker_name, 
+                        action_type=f"Sold {pick_cat} to {customer}"
+                    )
+            
+            # CASE B: Bulk Items (Elbows, Straps) -> Subtract Quantity
             else:
-                # Subtract quantity from the bulk material row
+                # Find current stock for this specific bulk item
                 mask = (df['Category'] == pick_cat) & (df['Material'] == selected_mat)
                 current_stock = df.loc[mask, 'Footage'].values[0]
+                bulk_item_id = df.loc[mask, 'Item_ID'].values[0] # Get the unique ID
                 
                 if current_stock >= pick_qty:
-                    df.loc[mask, 'Footage'] -= pick_qty
-                    st.success(f"Removed {pick_qty} of {selected_mat} for {customer}")
+                    new_total = current_stock - pick_qty
+                    with st.spinner("Processing Bulk Removal..."):
+                        success = update_stock(
+                            item_id=bulk_item_id, 
+                            new_footage=new_total, 
+                            user_name=picker_name, 
+                            action_type=f"Removed {pick_qty} for {customer}"
+                        )
                 else:
-                    st.error(f"Not enough stock! Current balance: {current_stock}")
+                    st.error(f"❌ Not enough stock! Current balance: {current_stock}")
 
-            # Save to Google Sheets and Log Action
-            save_inventory()
-            log_action("PICKING", f"Removed {pick_qty} {selected_mat} for {customer}")
-            st.rerun()
-
+            # FINAL FEEDBACK
+            if success:
+                st.toast(f"Stock Updated for {customer}!", icon="✅")
+                st.balloons()
+                # Forces the app to re-pull the data from Supabase so the change is visible everywhere
+                st.rerun()
 with tab4:
     st.subheader("📦 Smart Inventory Receiver")
     
     # 1. High-Level Category Selection
-    cat_choice = st.radio(
+    # Using the standard singular names we set up for the database
+    cat_mapping = {
+        "Coils": "Coil", "Rolls": "Roll", "Elbows": "Elbow", 
+        "Fab Straps": "Fab Strap", "Mineral Wool": "Mineral Wool", "Other": "Other"
+    }
+    
+    raw_cat = st.radio(
         "What are you receiving?", 
-        ["Coils", "Rolls", "Elbows", "Fab Straps", "Mineral Wool", "Other"],
+        list(cat_mapping.keys()),
         horizontal=True
     )
+    cat_choice = cat_mapping[raw_cat]
 
     with st.form("smart_receive_form", clear_on_submit=True):
-        # --- DYNAMIC MATERIAL BUILDER ---
-        if cat_choice == "Elbows":
+        # --- DYNAMIC MATERIAL BUILDER (Your Original Logic) ---
+        if cat_choice == "Elbow":
             col1, col2 = st.columns(2)
-            with col1:
-                angle = st.selectbox("Angle", ["45°", "90°"])
-            with col2:
-                size = st.number_input("Size (1-60)", min_value=1, max_value=60, value=1)
+            angle = col1.selectbox("Angle", ["45°", "90°"])
+            size = col2.number_input("Size (1-60)", min_value=1, max_value=60, value=1)
             material = f"{angle} Elbow - Size {size}"
-            qty_val = 1.0  # Each Elbow ID represents 1 piece
+            qty_val = 1.0 
             unit_label = "Pieces"
 
-        elif cat_choice == "Fab Straps":
+        elif cat_choice == "Fab Strap":
             col1, col2 = st.columns(2)
-            with col1:
-                gauge = st.selectbox("Gauge", [".015", ".020"])
-            with col2:
-              # We change this to a selectbox or text input to use the # symbol
-               size_num = st.number_input("Size Number", min_value=1, max_value=50, value=1)
-    
-            # This creates the name: "Fab Strap .015 - #10"
+            gauge = col1.selectbox("Gauge", [".015", ".020"])
+            size_num = col2.number_input("Size Number", min_value=1, max_value=50, value=1)
             material = f"Fab Strap {gauge} - #{size_num}"
             qty_val = 1.0  
             unit_label = "Bundles"
+
         elif cat_choice == "Mineral Wool":
             col1, col2 = st.columns(2)
-            with col1:
-                p_size = st.text_input("Pipe Size", placeholder="e.g. 2-inch")
-            with col2:
-                thick = st.text_input("Thickness", placeholder="e.g. 1.5-inch")
+            p_size = col1.text_input("Pipe Size", placeholder="e.g. 2-inch")
+            thick = col2.text_input("Thickness", placeholder="e.g. 1.5-inch")
             material = f"Min Wool: {p_size} x {thick}"
-            qty_val = 1.0 # Each ID represents 1 section
+            qty_val = 1.0
             unit_label = "Sections"
 
         elif cat_choice == "Other":
-            category_name = st.text_input("New Category Name", placeholder="e.g. Insulation")
+            cat_choice = st.text_input("New Category Name", placeholder="e.g. Insulation")
             material = st.text_input("Material Description", placeholder="e.g. Fiberglass Roll")
             qty_val = st.number_input("Qty/Footage per item", min_value=0.1, value=1.0)
             unit_label = "Units"
         
-        else: # Coils and Rolls (Keep the footage input for these)
-            material = st.selectbox("Material Type", COIL_MATERIALS if cat_choice == "Coils" else ROLL_MATERIALS)
-            qty_val = st.number_input("Footage per Item", min_value=0.1, value=3000.0 if cat_choice == "Coils" else 100.0)
+        else: # Coils and Rolls
+            # Ensure COIL_MATERIALS and ROLL_MATERIALS lists are defined at the top of your script
+            material = st.selectbox("Material Type", COIL_MATERIALS if cat_choice == "Coil" else ROLL_MATERIALS)
+            qty_val = st.number_input("Footage per Item", min_value=0.1, value=3000.0 if cat_choice == "Coil" else 100.0)
             unit_label = "Footage"
 
         st.markdown("---")
         
-        # --- SIMPLIFIED COMMON FIELDS ---
-        # For Straps/Elbows, this is now the ONLY number they enter.
+        # --- LOCATION & QUANTITY ---
         item_count = st.number_input(f"How many {unit_label} are you receiving?", min_value=1, value=1, step=1)
-        # Location Selector (Rack vs Floor)
+        
         st.markdown("#### Location Selector")
-        loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True, key="loc_radio")
+        loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
         if loc_type == "Rack System":
             l1, l2, l3 = st.columns(3)
-            with l1: bay = st.number_input("Bay", min_value=1, value=1)
-            with l2: sec = st.selectbox("Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-            with l3: lvl = st.number_input("Level", min_value=1, value=1)
+            bay = l1.number_input("Bay", min_value=1, value=1)
+            sec = l2.selectbox("Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+            lvl = l3.number_input("Level", min_value=1, value=1)
             gen_loc = f"{bay}{sec}{lvl}"
         else:
-            floor_zone = st.text_input("Floor Zone Name", value="FLOOR")
-            gen_loc = floor_zone.strip().upper()
+            gen_loc = st.text_input("Floor Zone Name", value="FLOOR").strip().upper()
 
         st.info(f"📍 **Assigned Location:** {gen_loc}")
 
         # ID Generation
         prefix = cat_choice.upper()[:4]
         starting_id = st.text_input("Starting ID", value=f"{prefix}-1001")
-        operator = st.text_input("Receiving Operator")
+        operator = st.text_input("Receiving Operator", value=st.session_state.get("username", ""))
 
-        submitted = st.form_submit_button("📥 Add to Inventory")
+        submitted = st.form_submit_button("📥 Add to Cloud Inventory", use_container_width=True)
 
-    # --- UPDATED SAVE LOGIC FOR TAB 3 ---
-if submitted:
-    if not operator:
-        st.error("Operator name is required.")
-    else:
-        # Check if it's a bulk item (not a Coil or Roll)
-        is_bulk = cat_choice not in ["Coils", "Rolls"]
-        
-        if is_bulk:
-            # Look for an existing row with the same Material name
-            mask = (df['Material'] == material) & (df['Category'] == cat_choice)
-            
-            if mask.any():
-                # Item exists! Just add the new quantity to the old quantity
-                df.loc[mask, 'Footage'] += item_count
-                st.success(f"Added {item_count} {unit_label} to existing {material} stock.")
-            else:
-                # New item type! Create one single row for it
-                new_entry = {
-                    "Item_ID": f"{cat_choice.upper()}-BULK", 
-                    "Material": material,
-                    "Footage": item_count,
-                    "Location": gen_loc,
-                    "Status": "Active",
-                    "Category": cat_choice
-                }
-                st.session_state.df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-                st.success(f"Created new bulk entry for {material}.")
-        
+    # --- UPDATED SAVE LOGIC (SUPABASE) ---
+    if submitted:
+        if not operator:
+            st.error("Operator name is required.")
         else:
-            # Keep the old Unique ID logic for Coils and Rolls
-            try:
-                parts = starting_id.strip().upper().split("-")
-                base = "-".join(parts[:-1])
-                start_num = int(parts[-1])
-                new_entries = []
-                for i in range(item_count):
-                    new_id = f"{base}-{start_num + i}"
-                    new_entries.append({
-                        "Item_ID": new_id, "Material": material, "Footage": qty_val,
-                        "Location": gen_loc, "Status": "Active", "Category": cat_choice
-                    })
-                st.session_state.df = pd.concat([df, pd.DataFrame(new_entries)], ignore_index=True)
-            except:
-                st.error("Coils/Rolls still require a unique ID (e.g., COIL-101)")
+            with st.spinner("Syncing with Cloud..."):
+                is_bulk = cat_choice not in ["Coil", "Roll"]
+                
+                if is_bulk:
+                    # Look for existing material in current df
+                    mask = (df['Material'] == material) & (df['Category'] == cat_choice)
+                    
+                    if mask.any():
+                        # UPDATE EXISTING BULK
+                        old_qty = df.loc[mask, 'Footage'].values[0]
+                        new_qty = old_qty + item_count
+                        bulk_id = df.loc[mask, 'Item_ID'].values[0]
+                        update_stock(bulk_id, new_qty, operator, f"Added {item_count} stock")
+                    else:
+                        # CREATE NEW BULK ROW
+                        new_id = f"{cat_choice.upper()}-BULK"
+                        new_data = {"Item_ID": new_id, "Material": material, "Footage": item_count, 
+                                    "Location": gen_loc, "Status": "Active", "Category": cat_choice}
+                        supabase.table("inventory").insert(new_data).execute()
+                        update_stock(new_id, item_count, operator, "Created Bulk Item")
+                
+                else:
+                    # SERIALIZED (COILS/ROLLS) - Add multiple unique rows
+                    try:
+                        parts = starting_id.strip().upper().split("-")
+                        base = "-".join(parts[:-1])
+                        start_num = int(parts[-1])
+                        
+                        new_rows = []
+                        for i in range(item_count):
+                            unique_id = f"{base}-{start_num + i}"
+                            new_rows.append({
+                                "Item_ID": unique_id, "Material": material, "Footage": qty_val,
+                                "Location": gen_loc, "Status": "Active", "Category": cat_choice
+                            })
+                        
+                        supabase.table("inventory").insert(new_rows).execute()
+                        st.cache_data.clear()
+                    except:
+                        st.error("ID format error. Use ID-101 format.")
 
-        save_inventory()
-        st.rerun()
+                st.success("Database Updated!")
+                st.rerun()
+
     st.divider()
     
-    # --- MOVE ITEM SECTION ---
+    # --- MOVE ITEM SECTION (SUPABASE) ---
     st.markdown("### 🚚 Move Item")
-    if not df.empty:
-        move_id = st.selectbox("Select Item ID to Move", df['Item_ID'].unique())
-        new_move_loc = st.text_input("New Location (Rack or Floor)")
-        if st.button("Confirm Move"):
-            df.loc[df['Item_ID'] == move_id, 'Location'] = new_move_loc.strip().upper()
-            save_inventory()
-            st.success(f"Item {move_id} moved to {new_move_loc}")
-            st.rerun()
-            
+    col_m1, col_m2 = st.columns([2, 1])
+    move_id = col_m1.selectbox("Select Item ID to Move", df['Item_ID'].unique())
+    new_move_loc = col_m2.text_input("New Location")
+    
+    if st.button("Confirm Move", use_container_width=True):
+        if move_id and new_move_loc:
+            supabase.table("inventory").update({"Location": new_move_loc.strip().upper()}).eq("Item_ID", move_id).execute()
+            st.cache_data.clear()
+            st.toast(f"Moved {move_id} to {new_move_loc}")
+            st.rerun()            
 import google.generativeai as genai
 import plotly.express as px
 import plotly.graph_objects as go
