@@ -35,25 +35,23 @@ supabase = init_connection()
 # --- 3. UPDATED DATA LOADER ---
 @st.cache_data(ttl=300)
 def load_all_tables():
-    # If the bridge isn't built, don't even try to fetch
     if supabase is None:
         return pd.DataFrame(), pd.DataFrame()
     
     try:
-        # Explicitly fetching from the 'inventory' table you mentioned
-        inv_response = supabase.table("inventory").select("*").execute()
-        df_inv = pd.DataFrame(inv_response.data)
+        # Fetching from the table named 'inventory'
+        inv_res = supabase.table("inventory").select("*").execute()
+        df_inv = pd.DataFrame(inv_res.data)
         
-        # Explicitly fetching from 'audit_log' as you mentioned
-        audit_response = supabase.table("audit_log").select("*").execute()
-        df_audit = pd.DataFrame(audit_response.data)
+        # Fetching from the table named 'audit_log' (NO 'S')
+        audit_res = supabase.table("audit_log").select("*").execute()
+        df_audit = pd.DataFrame(audit_res.data)
         
         return df_inv, df_audit
     except Exception as e:
-        # If this happens, we want to know why!
-        st.sidebar.error(f"Connection Error: {e}")
+        # This will catch the error and tell us the table name causing it
+        st.error(f"Error loading tables: {e}")
         return pd.DataFrame(), pd.DataFrame()
-
 # MUST BE THE FIRST ST COMMAND
 st.set_page_config(
     page_title="MJP Pulse Inventory",
