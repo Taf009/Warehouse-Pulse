@@ -667,18 +667,30 @@ with tab1:
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
 
-    # 1. Filter available metal stock
-    available_coils = df[(df['Category'] == "Coil") & (df['Footage'] > 0)]
-    available_rolls = df[(df['Category'] == "Roll") & (df['Footage'] > 0)]
+    # --- TAB 3: PRODUCTION LOG (UPDATED FOR KEYERROR FIX) ---
+st.subheader("📋 Production Log - Multi-Size Orders")
 
-    if available_coils.empty and available_rolls.empty:
-        st.info("No source metal available. Add Coils or Rolls in Warehouse Management.")
-    else:
-        # 2. Initialize session state for line items
-        if 'coil_lines' not in st.session_state:
-            st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
-        if 'roll_lines' not in st.session_state:
-            st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+# 1. Guard Rail: Check if data exists and has columns
+if df.empty:
+    st.warning("⚠️ No data found in the 'inventory' table. Please add items in the Warehouse tab.")
+    st.stop()
+
+# 2. Case-Insensitive Column Check
+# This handles if your Supabase column is 'category' or 'Category'
+cols = {c.lower(): c for c in df.columns}
+category_col = cols.get('category')
+
+if not category_col:
+    st.error(f"🚨 Column 'Category' not found in database. Found: {list(df.columns)}")
+    st.stop()
+
+# 3. Safe Filtering
+available_coils = df[(df[category_col] == "Coil") & (df['Footage'] > 0)]
+available_rolls = df[(df[category_col] == "Roll") & (df['Footage'] > 0)]
+
+if available_coils.empty and available_rolls.empty:
+    st.info("No available stock for Coils or Rolls.")
+    st.stop()
 
         # --- COILS SECTION ---
         st.markdown("### 🌀 Coils Production")
