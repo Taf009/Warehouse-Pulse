@@ -691,13 +691,19 @@ with tab1:
         
 # --- TAB 2: PRODUCTION LOG ---
 with tab2:
+    # BUG FIX: Initialize session state variables if they don't exist yet
+    if "coil_lines" not in st.session_state:
+        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+    if "roll_lines" not in st.session_state:
+        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+
     st.subheader("📋 Production Log - Multi-Size Orders")
 
     if df.empty:
         st.warning("⚠️ No data found. Please add items in the Warehouse tab.")
         st.stop()
 
-    # 1. Master Finish Toggle (Masters Coils & Rolls)
+    # 1. Master Finish Toggle
     finish_filter = st.radio("Select Material Finish", ["Smooth", "Stucco"], horizontal=True)
 
     # 2. Dynamic Column Identification
@@ -706,7 +712,7 @@ with tab2:
     col_mat = c_map.get('material', 'Material')
     col_foot = c_map.get('footage', 'Footage')
 
-    # 3. Safe Stock Filtering
+    # 3. Filtering Stock
     available_coils = df[
         (df[c_map.get('category', 'Category')].astype(str).str.lower() == "coil") & 
         (df[col_mat].astype(str).str.contains(finish_filter, case=False)) &
@@ -740,7 +746,7 @@ with tab2:
                     st.session_state.coil_lines.pop(i)
                     st.rerun()
             
-            # STICKY LOGIC: Carry material forward if this line is new
+            # STICKY LOGIC: Auto-populate from previous line if current is empty
             default_coil = line["items"]
             if not default_coil and i > 0:
                 prev_coil = st.session_state.coil_lines[i-1]["items"]
@@ -749,7 +755,6 @@ with tab2:
             line["items"] = st.multiselect(f"Source Material {i+1}", coil_options, default=default_coil, key=f"c_sel_{i}")
 
     if st.button("➕ Add Coil Size Line"):
-        # Carry selection to the new line automatically
         last_items = st.session_state.coil_lines[-1]["items"] if st.session_state.coil_lines else []
         st.session_state.coil_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": last_items})
         st.rerun()
@@ -774,7 +779,7 @@ with tab2:
                     st.session_state.roll_lines.pop(i)
                     st.rerun()
             
-            # STICKY LOGIC for Rolls
+            # STICKY LOGIC
             default_roll = line["items"]
             if not default_roll and i > 0:
                 prev_roll = st.session_state.roll_lines[i-1]["items"]
@@ -797,7 +802,7 @@ with tab2:
         with f2: order_number = st.text_input("Internal Order #")
         with f3: operator_name = st.text_input("Operator Name")
 
-        st.info("💡 Admin Note: A fillable 'Production Number' panel will be added to the PDF for manual entry.")
+        st.success("🎨 PDF will include a light green highlighted summary and an Admin Sign-off panel.")
 
         st.markdown("#### 📦 Box Usage")
         box_types = ["Small Metal Box", "Big Metal Box", "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"]
@@ -807,58 +812,54 @@ with tab2:
 
         if submitted:
             if not client_name or not order_number or not operator_name:
-                st.error("Client, Order #, and Operator are required.")
+                st.error("Missing required fields.")
             else:
                 production_details = []
-                totals_by_material = {} # Aggregation dictionary
+                totals_by_material = {} 
 
-                # Process all lines (Coils & Rolls)
-                for cat, lines, extra_val in [("Coil", st.session_state.coil_lines, coil_extra), 
-                                             ("Roll", st.session_state.roll_lines, roll_extra)]:
+                # Combine all entries
+                all_data = [("Coil", st.session_state.coil_lines, coil_extra), 
+                            ("Roll", st.session_state.roll_lines, roll_extra)]
+
+                for cat, lines, extra_val in all_data:
                     for line in lines:
                         if line["pieces"] > 0 and line["items"]:
+                            # Math for Footage
                             base_inches = SIZE_MAP.get(line["display_size"].replace("#", "Size "), 0)
-                            line_ft_calc = (line["pieces"] * (base_inches + extra_val) / 12)
-                            line_total = line_ft_calc + line["waste"]
+                            calc_ft = (line["pieces"] * (base_inches + extra_val) / 12)
+                            line_total = calc_ft + line["waste"]
                             
                             target_id = line["items"][0].split(" - ")[0]
                             mat_info = line["items"][0].split(" - ")[1].split(" (")[0]
                             
-                            # Update local database
+                            # Update local DB
                             df.loc[df[col_id] == target_id, col_foot] -= line_total
                             
                             production_details.append({
-                                "material": mat_info,
-                                "display_size": line["display_size"],
-                                "pieces": line["pieces"],
-                                "waste": line["waste"],
-                                "total_used": line_total,
-                                "item_id": target_id
+                                "material": mat_info, "display_size": line["display_size"],
+                                "pieces": line["pieces"], "waste": line["waste"],
+                                "total_used": line_total, "item_id": target_id
                             })
 
-                            # AGGREGATION LOGIC
+                            # Summarize by Material type
                             if mat_info not in totals_by_material:
                                 totals_by_material[mat_info] = {"footage": 0.0, "waste": 0.0}
                             totals_by_material[mat_info]["footage"] += line_total
                             totals_by_material[mat_info]["waste"] += line["waste"]
 
                 if not production_details:
-                    st.error("No production data entered.")
+                    st.error("No production entries found.")
                 else:
-                    # Final Processing
                     save_inventory()
-                    save_production_log(order_number, client_name, operator_name, production_details, box_usage)
-                    
-                    # Passing 'totals_by_material' to your PDF generator
+                    # PDF generation with our new summary dictionary
                     pdf_buffer = generate_production_pdf(
                         order_number, client_name, operator_name, 
                         production_details, box_usage, totals_by_material
                     )
                     
                     if send_production_pdf(pdf_buffer, order_number, client_name):
-                        st.success(f"Order {order_number} Processed and Emailed!")
+                        st.success("PDF Dispatched to Admin!")
                         st.balloons()
-                        # Reset
                         st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
                         st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
                         st.rerun()                            
