@@ -688,7 +688,7 @@ with tab1:
             )
     else:
         st.info("No data available. Add inventory in the Warehouse tab.")
-# --- TAB 3: PRODUCTION LOG ---
+# --- TAB 2: PRODUCTION LOG ---
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
 
@@ -855,39 +855,56 @@ with tab2:
                         st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
                         st.rerun()                            
 with tab3:
-    st.subheader("🛒 Stock Picking & Sales")
-    st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
+    st.subheader("🛒 Sales & Picking")
+    st.caption("Perform instant stock removals. Updates will sync across all devices immediately.")
 
-    # 1. Filter Data based on Category Selection
-    # Note: We use singular names here to match our new database cleaning logic
-    pick_cat = st.selectbox("What are you picking?", ["Fab Strap", "Roll", "Elbow", "Mineral Wool", "Coil"], key="pick_cat_sales")
+# 1. IDENTIFY COLUMNS (Handles 'category' vs 'Category')
+c_map = {c.lower(): c for c in df.columns}
+col_cat = c_map.get('category', 'Category')
+col_mat = c_map.get('material', 'Material')
+col_id = c_map.get('item_id', 'Item_ID')
+col_foot = c_map.get('footage', 'Footage')
+
+# 2. SELECTION UI
+pick_cat = st.selectbox("What are you picking?", ["Fab Strap", "Roll", "Elbow", "Mineral Wool", "Coil"], key="pick_cat_sales")
+
+# 3. FILTER DATA (Case-Insensitive)
+# This matches "Coil" from your UI to "coil" or "COIL" in your database
+filtered_df = df[df[col_cat].astype(str).str.lower() == pick_cat.lower()]
+
+with st.form("dedicated_pick_form", clear_on_submit=True):
+    col1, col2 = st.columns(2)
     
-    # Filter the cached dataframe
-    filtered_df = df[df['Category'] == pick_cat]
+    with col1:
+        if filtered_df.empty:
+            st.warning(f"⚠️ No items currently in stock for {pick_cat}")
+            selected_mat = None
+        else:
+            # Get unique materials available
+            mat_options = sorted(filtered_df[col_mat].unique())
+            selected_mat = st.selectbox("Select Size / Material", mat_options)
 
-    with st.form("dedicated_pick_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if filtered_df.empty:
-                st.warning(f"⚠️ No items currently in stock for {pick_cat}")
-                selected_mat = None
+    with col2:
+        if selected_mat:
+            # Filter specifically for the selected material
+            mat_data = filtered_df[filtered_df[col_mat] == selected_mat]
+            
+            # Logic for Serialized items (Rolls/Coils) vs Bulk items
+            if pick_cat in ["Roll", "Coil"]:
+                # Show Serial #s/IDs and current footage for clarity
+                specific_ids = [
+                    f"{r[col_id]} ({r[col_foot]:.1f} ft)" for _, r in mat_data.iterrows()
+                ]
+                pick_selection = st.selectbox("Select Serial # to Sell", specific_ids)
+                # Extract just the ID from the selection string
+                pick_id = pick_selection.split(" (")[0]
+                pick_qty = 0 # Serialized items are usually removed entirely
             else:
-                mat_options = sorted(filtered_df['Material'].unique())
-                selected_mat = st.selectbox("Select Size / Material", mat_options)
-
-        with col2:
-            if selected_mat:
-                # Logic for Serialized items (Rolls/Coils) vs Bulk items
-                if pick_cat in ["Roll", "Coil"]:
-                    specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
-                    pick_id = st.selectbox("Select Serial # to Sell", specific_ids)
-                    pick_qty = 0 # For serialized, we set footage to 0
-                else:
-                    # Bulk items use the Material name as ID for the database update
-                    pick_id = "BULK" 
-                    pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
-
+                # Bulk items
+                pick_id = "BULK" 
+                pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
+    
+    submitted = st.form_submit_button("🚀 Confirm Removal", use_container_width=True)
         st.divider()
         
         c1, c2 = st.columns(2)
