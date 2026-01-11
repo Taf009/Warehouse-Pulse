@@ -15,24 +15,44 @@ from supabase import create_client, Client
 # --- DATABASE CONNECTION ---
 # This pulls the credentials you just saved in the "Secrets" section
 # --- 2. DATABASE CONNECTION (SMART VERSION) ---
+# --- 2. DATABASE CONNECTION (TOP LEVEL) ---
 @st.cache_resource 
 def init_connection():
-    # 1. Check top-level
-    url = st.secrets.get("SUPABASE_URL")
-    key = st.secrets.get("SUPABASE_KEY")
+    try:
+        # Check if secrets exist
+        if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
+            return None
+        
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except:
+        return None
 
-    # 2. Check inside a [supabase] header if top-level failed
-    if not url or not key:
-        sub_sec = st.secrets.get("supabase", {})
-        url = sub_sec.get("URL")
-        key = sub_sec.get("KEY")
+# THIS LINE MUST BE OUTSIDE ANY FUNCTION
+supabase = init_connection()
 
-    if not url or not key:
-        st.error("🚨 Credentials still missing!")
-        st.write("Current detected keys:", list(st.secrets.keys()))
-        st.stop()
+# --- 3. UPDATED DATA LOADER ---
+@st.cache_data(ttl=300)
+def load_all_tables():
+    # If the bridge isn't built, don't even try to fetch
+    if supabase is None:
+        return pd.DataFrame(), pd.DataFrame()
     
-    return create_client(url, key)
+    try:
+        # Explicitly fetching from the 'inventory' table you mentioned
+        inv_response = supabase.table("inventory").select("*").execute()
+        df_inv = pd.DataFrame(inv_response.data)
+        
+        # Explicitly fetching from 'audit_log' as you mentioned
+        audit_response = supabase.table("audit_log").select("*").execute()
+        df_audit = pd.DataFrame(audit_response.data)
+        
+        return df_inv, df_audit
+    except Exception as e:
+        # If this happens, we want to know why!
+        st.sidebar.error(f"Connection Error: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
 # MUST BE THE FIRST ST COMMAND
 st.set_page_config(
