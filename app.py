@@ -699,7 +699,7 @@ with tab2:
     # 2. MATERIAL FINISH FILTER
     finish_filter = st.radio("Select Material Finish", ["Smooth", "Stucco"], horizontal=True)
 
-    # 3. OPTIONS PREPARATION (View only, no database subtraction)
+    # 3. OPTIONS PREPARATION
     c_map = {c.lower(): c for c in df.columns}
     col_id = c_map.get('item_id', 'Item_ID')
     col_mat = c_map.get('material', 'Material')
@@ -771,6 +771,7 @@ with tab2:
         with f2: order_number = st.text_input("Internal Order #")
         with f3: operator_name = st.text_input("Operator Name")
 
+        # KEEPING BOX USAGE AS REQUESTED
         st.markdown("#### 📦 Box Usage")
         box_types = ["Small Metal Box", "Big Metal Box", "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"]
         b_col1, b_col2 = st.columns(2)
@@ -783,7 +784,6 @@ with tab2:
                 production_details = []
                 totals_by_material = {}
 
-                # Loop through and build summaries
                 all_sections = [("Coil", st.session_state.coil_lines, coil_extra), ("Roll", st.session_state.roll_lines, roll_extra)]
 
                 for cat, lines, extra in all_sections:
@@ -792,7 +792,6 @@ with tab2:
                             sz_key = line["display_size"].replace("#", "Size ")
                             calc_ft = (line["pieces"] * (SIZE_MAP.get(sz_key, 0) + extra) / 12) + line["waste"]
                             mat_name = line["items"][0].split(" - ")[1].split(" (")[0]
-                            
                             production_details.append({"mat": mat_name, "sz": line["display_size"], "pcs": line["pieces"], "wst": line["waste"], "tot": calc_ft})
                             
                             if mat_name not in totals_by_material:
@@ -800,10 +799,8 @@ with tab2:
                             totals_by_material[mat_name]["ft"] += calc_ft
                             totals_by_material[mat_name]["wst"] += line["waste"]
 
-                # PDF GENERATION (Includes Box Usage)
                 pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, production_details, box_usage, totals_by_material)
                 
-                # DISPATCH (Email)
                 if send_production_pdf(pdf_buffer, order_number, client_name):
                     st.success("✅ PDF Sent to Admin!")
                     st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
