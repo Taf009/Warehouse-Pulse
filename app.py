@@ -866,7 +866,7 @@ col_id = c_map.get('item_id', 'Item_ID')
 col_foot = c_map.get('footage', 'Footage')
 
 # 2. SELECTION UI
-pick_cat = st.selectbox("What are you picking?", ["Fab Strap", "Roll", "Elbow", "Mineral Wool", "Coil"], key="pick_cat_sales")
+pick_cat = st.selectbox("What are you picking?", ["Fab Straps", "Roll", "Elbows", "Mineral Wool", "Coil"], key="pick_cat_sales")
 
 # 3. FILTER DATA (Case-Insensitive)
 # This matches "Coil" from your UI to "coil" or "COIL" in your database
