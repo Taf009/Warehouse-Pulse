@@ -868,9 +868,19 @@ col_foot = c_map.get('footage', 'Footage')
 # 2. SELECTION UI
 pick_cat = st.selectbox("What are you picking?", ["Fab Straps", "Roll", "Elbows", "Mineral Wool", "Coil"], key="pick_cat_sales")
 
+# --- NEW: FAB STRAP THICKNESS TOGGLE ---
+thickness_filter = None
+if pick_cat == "Fab Straps":
+    thickness_filter = st.radio("Select Thickness", ["015", "020"], horizontal=True)
+
 # 3. FILTER DATA (Case-Insensitive)
 # This matches "Coil" from your UI to "coil" or "COIL" in your database
 filtered_df = df[df[col_cat].astype(str).str.lower() == pick_cat.lower()]
+
+# Apply Thickness Filter if it's a Fab Strap
+if thickness_filter and not filtered_df.empty:
+    # This assumes your Material or Item_ID contains '015' or '020'
+    filtered_df = filtered_df[filtered_df[col_mat].astype(str).str.contains(thickness_filter)]
 
 with st.form("dedicated_pick_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
