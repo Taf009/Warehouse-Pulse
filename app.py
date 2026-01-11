@@ -905,7 +905,7 @@ with st.form("dedicated_pick_form", clear_on_submit=True):
                 pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
     
     submitted = st.form_submit_button("🚀 Confirm Removal", use_container_width=True)
-        st.divider()
+    st.divider()
         
         c1, c2 = st.columns(2)
         customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
