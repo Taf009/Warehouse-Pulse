@@ -205,11 +205,8 @@ if st.button("🔄 Sync Cloud Data", use_container_width=True):
 st.markdown('<p class="main-title">MJP Pulse</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-title">Precision Inventory & Logistics Engine</p>', unsafe_allow_html=True) 
 
-with head_col2:
-    st.markdown('<h1 class="title-text">MJP PULSE</h1>', unsafe_allow_html=True)
-    st.markdown("#### *Production & Inventory Management System*")
-
 st.divider()
+
 # --- SIZE MAP ---
 SIZE_DISPLAY = {
     "1#": 12.0,
