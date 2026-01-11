@@ -729,15 +729,10 @@ with tab2:
                     st.session_state.coil_lines.pop(i)
                     st.rerun()
             
-            # STICKY MATERIAL LOGIC
-            default_val = line["items"]
-            if not default_val and i > 0:
-                default_val = [item for item in st.session_state.coil_lines[i-1]["items"] if item in coil_options]
-            line["items"] = st.multiselect(f"Source Material {i+1}", coil_options, default=default_val, key=f"c_sel_{i}")
+            line["items"] = st.multiselect(f"Source Material {i+1}", coil_options, default=line["items"], key=f"c_sel_{i}")
 
     if st.button("➕ Add Coil Size Line"):
-        last_items = st.session_state.coil_lines[-1]["items"] if st.session_state.coil_lines else []
-        st.session_state.coil_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": last_items})
+        st.session_state.coil_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
         st.rerun()
 
     st.divider()
@@ -760,15 +755,10 @@ with tab2:
                     st.session_state.roll_lines.pop(i)
                     st.rerun()
             
-            # STICKY MATERIAL LOGIC
-            default_val = line["items"]
-            if not default_val and i > 0:
-                default_val = [item for item in st.session_state.roll_lines[i-1]["items"] if item in roll_options]
-            line["items"] = st.multiselect(f"Source Material {i+1}", roll_options, default=default_val, key=f"r_sel_{i}")
+            line["items"] = st.multiselect(f"Source Material {i+1}", roll_options, default=line["items"], key=f"r_sel_{i}")
 
     if st.button("➕ Add Roll Size Line"):
-        last_items = st.session_state.roll_lines[-1]["items"] if st.session_state.roll_lines else []
-        st.session_state.roll_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": last_items})
+        st.session_state.roll_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
         st.rerun()
 
     st.divider()
@@ -793,7 +783,7 @@ with tab2:
                 production_details = []
                 totals_by_material = {}
 
-                # Loop through all data to build the PDF Summary
+                # Loop through and build summaries
                 all_sections = [("Coil", st.session_state.coil_lines, coil_extra), ("Roll", st.session_state.roll_lines, roll_extra)]
 
                 for cat, lines, extra in all_sections:
@@ -810,13 +800,12 @@ with tab2:
                             totals_by_material[mat_name]["ft"] += calc_ft
                             totals_by_material[mat_name]["wst"] += line["waste"]
 
-                # PDF GENERATION
+                # PDF GENERATION (Includes Box Usage)
                 pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, production_details, box_usage, totals_by_material)
                 
-                # DISPATCH (Using your Secrets-based email function)
+                # DISPATCH (Email)
                 if send_production_pdf(pdf_buffer, order_number, client_name):
                     st.success("✅ PDF Sent to Admin!")
-                    # Clear and Refresh
                     st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
                     st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
                     st.rerun()                            
