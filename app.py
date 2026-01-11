@@ -862,9 +862,9 @@ with tab2:
                     
                     st.success(f"✅ Production Log for Order {order_number} generated and sent!")
                     st.balloons()
-                        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
-                        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
-                        st.rerun()                            
+                    st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+                    st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+                    st.rerun()                            
 with tab3:
     st.subheader("🛒 Sales & Picking")
     st.caption("Perform instant stock removals. Updates will sync across all devices immediately.")
