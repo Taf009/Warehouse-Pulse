@@ -693,8 +693,8 @@ if available_coils.empty and available_rolls.empty:
     st.stop()
 
         # --- COILS SECTION ---
-        st.markdown("### 🌀 Coils Production")
-        coil_extra = st.number_input("Coil Extra Inch Allowance (per piece)", min_value=0.0, value=0.5, step=0.1, key="c_allowance_bar")
+st.markdown("### 🌀 Coils Production")
+ coil_extra = st.number_input("Coil Extra Inch Allowance (per piece)", min_value=0.0, value=0.5, step=0.1, key="c_allowance_bar")
         
         coil_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
 
