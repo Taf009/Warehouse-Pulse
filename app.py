@@ -227,38 +227,36 @@ if st.sidebar.button("Log Out"):
 
 operator_name = st.session_state.username
 
-# --- LOAD & CLEAN INVENTORY ---
-if 'df' not in st.session_state:
+# --- 1. THE DATA ENGINE (REPLACE YOUR OLD GOOGLE CONNECTION WITH THIS) ---
+@st.cache_data(ttl=300) # This tells the tablet: "Keep this in memory for 5 minutes"
+def load_and_clean_data():
     try:
+        # Connect to Google
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_url(st.secrets["SHEET_URL"])
-        inv_ws = sh.worksheet("Inventory")
-        records = inv_ws.get_all_records()
+        records = sh.worksheet("Inventory").get_all_records()
         
-        if records:
-            temp_df = pd.DataFrame(records)
-            
-            # --- DATA CLEANING SECTION ---
-            # 1. Remove accidental spaces
-            temp_df['Category'] = temp_df['Category'].str.strip() 
-            
-            # 2. Force all variations to SINGULAR (Standardizes the split)
-            temp_df['Category'] = temp_df['Category'].replace({
-                'Coils': 'Coil', 
-                'Rolls': 'Roll',
-                'Fab Straps': 'Fab Strap', 
-                'Elbows': 'Elbow'
-            })
-            
-            st.session_state.df = temp_df
-        else:
-            st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status", "Category"])
-            
+        # Turn into a Table (DataFrame)
+        temp_df = pd.DataFrame(records)
+        
+        # CLEANING: Force everything to singular names
+        temp_df['Category'] = temp_df['Category'].str.strip()
+        temp_df['Category'] = temp_df['Category'].replace({
+            'Coils': 'Coil', 
+            'Rolls': 'Roll', 
+            'Fab Straps': 'Fab Strap', 
+            'Elbows': 'Elbow'
+        })
+        return temp_df
     except Exception as e:
-        st.error(f"Could not connect to Google Sheet: {e}")
-        st.session_state.df = pd.DataFrame(columns=["Item_ID", "Material", "Footage", "Location", "Status", "Category"])
+        st.error(f"Spreadsheet connection failed: {e}")
+        return pd.DataFrame()
 
-# Define the global df for use in the tabs
+# --- 2. THE SESSION MANAGER ---
+# This ensures the data stays consistent across all tabs
+if 'df' not in st.session_state:
+    st.session_state.df = load_and_clean_data()
+
 df = st.session_state.df
 
 # --- SAVE FUNCTION (PROTECTED VERSION) ---
