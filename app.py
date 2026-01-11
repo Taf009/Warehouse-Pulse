@@ -140,6 +140,30 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
 
+# --- OFFLINE NOTIFICATION SYSTEM ---
+st.markdown("""
+    <script>
+        const updateOnlineStatus = () => {
+            const condition = navigator.onLine ? "online" : "offline";
+            if (condition === "offline") {
+                // Show a clean red alert at the top of the screen
+                const div = document.createElement("div");
+                div.id = "offline-warning";
+                div.style = "position: fixed; top: 0; left: 0; width: 100%; background: #ef4444; color: white; text-align: center; padding: 10px; z-index: 9999; font-family: sans-serif; font-weight: bold;";
+                div.innerHTML = "⚠️ Wi-Fi Connection Lost. Please check your signal to save changes.";
+                document.body.appendChild(div);
+            } else {
+                // Remove the alert if back online
+                const warning = document.getElementById("offline-warning");
+                if (warning) warning.remove();
+            }
+        };
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+    </script>
+""", unsafe_allow_html=True)
+
     # Global Actions
     if st.button("🔄 Sync Cloud Data", use_container_width=True):
         st.cache_data.clear()
