@@ -17,17 +17,22 @@ from supabase import create_client, Client
 # --- 2. DATABASE CONNECTION (SMART VERSION) ---
 @st.cache_resource 
 def init_connection():
-    # Check if keys exist before trying to use them
-    if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
-        st.error("🚨 Missing Supabase Credentials in Streamlit Secrets!")
-        st.info("Ensure you have SUPABASE_URL and SUPABASE_KEY defined in your App Settings -> Secrets.")
-        st.stop() # Stops the app here so it doesn't show the Traceback error
-    
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    # 1. Check top-level
+    url = st.secrets.get("SUPABASE_URL")
+    key = st.secrets.get("SUPABASE_KEY")
 
-supabase = init_connection()
+    # 2. Check inside a [supabase] header if top-level failed
+    if not url or not key:
+        sub_sec = st.secrets.get("supabase", {})
+        url = sub_sec.get("URL")
+        key = sub_sec.get("KEY")
+
+    if not url or not key:
+        st.error("🚨 Credentials still missing!")
+        st.write("Current detected keys:", list(st.secrets.keys()))
+        st.stop()
+    
+    return create_client(url, key)
 
 # MUST BE THE FIRST ST COMMAND
 st.set_page_config(
