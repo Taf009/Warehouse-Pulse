@@ -6,3 +6,4 @@ google-auth
 fpdf2
 plotly
 google-generativeai
+supabase
