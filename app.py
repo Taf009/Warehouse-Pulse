@@ -354,10 +354,16 @@ def load_all_tables():
         df_inv = pd.DataFrame(inv_response.data)
         
         # 2. Fetch Audit Logs
-        audit_response = supabase.table("audit_logs").select("*").execute()
+        audit_response = supabase.table("audit_log").select("*").execute()
         df_audit = pd.DataFrame(audit_response.data)
         
-        # Add any other tables here...
+        # 3. Fetch log data
+        log_response = supabase.table("log_data").select("*").execute()
+        df_log = pd.DataFrame(log_response.data)
+
+        # 4 Fetch Production log
+        prod_response = supabase.table("production_log").select("*").execute()
+        df_prod = pd.DataFrame(prod_response.data)
         
         return df_inv, df_audit
     except Exception as e:
