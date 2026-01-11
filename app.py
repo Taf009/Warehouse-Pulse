@@ -228,36 +228,30 @@ if st.sidebar.button("Log Out"):
 operator_name = st.session_state.username
 
 # --- 1. THE DATA ENGINE (REPLACE YOUR OLD GOOGLE CONNECTION WITH THIS) ---
-@st.cache_data(ttl=300) # This tells the tablet: "Keep this in memory for 5 minutes"
-def load_and_clean_data():
+@st.cache_data(ttl=300)
+def load_all_tables():
     try:
-        # Connect to Google
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-        sh = gc.open_by_url(st.secrets["SHEET_URL"])
-        records = sh.worksheet("Inventory").get_all_records()
+        # 1. Fetch Inventory
+        inv_response = supabase.table("inventory").select("*").execute()
+        df_inv = pd.DataFrame(inv_response.data)
         
-        # Turn into a Table (DataFrame)
-        temp_df = pd.DataFrame(records)
+        # 2. Fetch Audit Logs
+        audit_response = supabase.table("audit_logs").select("*").execute()
+        df_audit = pd.DataFrame(audit_response.data)
         
-        # CLEANING: Force everything to singular names
-        temp_df['Category'] = temp_df['Category'].str.strip()
-        temp_df['Category'] = temp_df['Category'].replace({
-            'Coils': 'Coil', 
-            'Rolls': 'Roll', 
-            'Fab Straps': 'Fab Strap', 
-            'Elbows': 'Elbow'
-        })
-        return temp_df
+        # Add any other tables here...
+        
+        return df_inv, df_audit
     except Exception as e:
-        st.error(f"Spreadsheet connection failed: {e}")
-        return pd.DataFrame()
+        st.error(f"Error loading tables: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
-# --- 2. THE SESSION MANAGER ---
-# This ensures the data stays consistent across all tabs
-if 'df' not in st.session_state:
-    st.session_state.df = load_and_clean_data()
+# Initialize both
+if 'df' not in st.session_state or 'df_audit' not in st.session_state:
+    st.session_state.df, st.session_state.df_audit = load_all_tables()
 
 df = st.session_state.df
+df_audit = st.session_state.df_audit
 
 # --- SAVE FUNCTION (PROTECTED VERSION) ---
 def save_inventory():
