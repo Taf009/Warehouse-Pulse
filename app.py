@@ -665,7 +665,7 @@ with tab1:
     else:
         st.info("No data available. Add inventory in the Warehouse tab.")
 # --- TAB 3: PRODUCTION LOG ---
-with tabs[2]:
+with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
 
     # 1. Guard Rail: Check if data exists
