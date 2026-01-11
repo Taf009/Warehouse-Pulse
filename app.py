@@ -731,11 +731,8 @@ with tabs2:
         st.info(f"No {finish_filter} Coils found in stock.")
     else:
         for i, line in enumerate(st.session_state.coil_lines):
-            # ... (Rest of your coil loop remains the same)
             # Just ensure the multiselect uses the new 'coil_options'
-            
-    for i, line in enumerate(st.session_state.coil_lines):
-        with st.container():
+            with st.container():
             c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
             with c1:
                 line["display_size"] = st.selectbox(f"Coil Size {i+1}", list(SIZE_DISPLAY.keys()), key=f"c_sz_{i}")
