@@ -736,7 +736,7 @@ with tabs2:
             
          for i, line in enumerate(st.session_state.coil_lines):
             with st.container():
-            c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
+                c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
             with c1:
                 line["display_size"] = st.selectbox(f"Coil Size {i+1}", list(SIZE_DISPLAY.keys()), key=f"c_sz_{i}")
             with c2:
