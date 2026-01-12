@@ -792,8 +792,8 @@ with tab2:
 
         submitted = st.form_submit_button("🚀 Complete Order & Send PDF", use_container_width=True)
 
-        if submitted:
-    if not all([client_name, order_number, operator_name]):
+    if submitted:
+       if not all([client_name, order_number, operator_name]):
         st.error("Client Name, Order #, and Operator are required.")
         st.stop()
 
