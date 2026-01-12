@@ -1040,7 +1040,7 @@ with tab2:
             type="primary"
         )
 
-    if submitted:
+if submitted:
     if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
         st.error("Client Name, Order Number, and Operator Name are required.")
     else:
