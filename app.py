@@ -858,71 +858,52 @@ with tab3:
     st.subheader("🛒 Sales & Picking")
     st.caption("Perform instant stock removals. Updates will sync across all devices immediately.")
 
-# 1. IDENTIFY COLUMNS
+# 1. IDENTIFY COLUMNS (Handles 'category' vs 'Category')
 c_map = {c.lower(): c for c in df.columns}
 col_cat = c_map.get('category', 'Category')
 col_mat = c_map.get('material', 'Material')
+col_id = c_map.get('item_id', 'Item_ID')
+col_foot = c_map.get('footage', 'Footage')
 
-# 2. MAIN CATEGORY SELECTION
-pick_cat = st.selectbox("What are you picking?", 
-    ["Fab Strap", "Roll", "Elbow", "Mineral Wool", "Coil", "Banding", "Wing Seal"], 
-    key="pick_cat_sales"
-)
+# 2. SELECTION UI
+pick_cat = st.selectbox("What are you picking?", ["Fab Straps", "Roll", "Elbows", "Mineral Wool", "Coil"], key="pick_cat_sales")
 
-# 3. CONTEXTUAL LOGIC FOR DEEP FILTERS
-filters = []
-
-if pick_cat == "Fab Strap":
-    filters.append(st.radio("Thickness", ["015", "020"], horizontal=True))
-
-elif pick_cat == "Elbow":
-    filters.append(st.radio("Angle", ["45", "90"], horizontal=True, format_func=lambda x: f"{x}°"))
-
-elif pick_cat in ["Roll", "Coil"]:
-    filters.append(st.radio("Finish", ["Smooth", "Stucco"], horizontal=True))
-
-elif pick_cat == "Banding":
-    # Level 1: Oscillation
-    osc = st.radio("Type", ["Oscillated", "Non-Oscillated"], horizontal=True)
-    filters.append(osc)
-    # Level 2: Width
-    filters.append(st.radio("Width", ["1/2 inch", "3/4 inch"], horizontal=True))
-    # Level 3: Thickness
-    filters.append(st.radio("Thickness", ["015", "020"], horizontal=True))
-    # Level 4: Core (Only for Oscillated)
-    if osc == "Oscillated":
-        filters.append(st.radio("Core Type", ["Metal Core", "Non-Metal Core"], horizontal=True))
-
-elif pick_cat == "Wing Seal":
-    # Level 1: Style
-    style = st.radio("Style", ["Open", "Closed"], horizontal=True)
-    filters.append(style)
-    if style == "Open":
-        # Level 2: Thickness
-        filters.append(st.radio("Thickness", ["024", "028"], horizontal=True))
-        # Level 3: Groove
-        groove = st.radio("Groove", ["With Groove", "No Groove"], horizontal=True)
-        filters.append(groove)
-        # Level 4: Joint Position (Only for Grooved)
-        if groove == "With Groove":
-            filters.append(st.radio("Joint Position", ["Top Joint", "Bottom Joint"], horizontal=True))
-
-# 4. FILTER DATA BASED ON ALL ACTIVE FILTERS
+# 3. FILTER DATA (Case-Insensitive)
+# This matches "Coil" from your UI to "coil" or "COIL" in your database
 filtered_df = df[df[col_cat].astype(str).str.lower() == pick_cat.lower()]
 
-for f in filters:
-    if f and not filtered_df.empty:
-        # We use a case-insensitive search through the Material string
-        filtered_df = filtered_df[filtered_df[col_mat].astype(str).str.contains(f, case=False)]
-
-# 5. FINAL SELECTION FORM
 with st.form("dedicated_pick_form", clear_on_submit=True):
-    if filtered_df.empty:
-        st.warning(f"⚠️ No stock found matching those specifications.")
-    else:
-        selected_mat = st.selectbox("Confirm Specific Item", sorted(filtered_df[col_mat].unique()))
-        pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
-        
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if filtered_df.empty:
+            st.warning(f"⚠️ No items currently in stock for {pick_cat}")
+            selected_mat = None
+        else:
+            # Get unique materials available
+            mat_options = sorted(filtered_df[col_mat].unique())
+            selected_mat = st.selectbox("Select Size / Material", mat_options)
+
+    with col2:
+        if selected_mat:
+            # Filter specifically for the selected material
+            mat_data = filtered_df[filtered_df[col_mat] == selected_mat]
+            
+            # Logic for Serialized items (Rolls/Coils) vs Bulk items
+            if pick_cat in ["Roll", "Coil"]:
+                # Show Serial #s/IDs and current footage for clarity
+                specific_ids = [
+                    f"{r[col_id]} ({r[col_foot]:.1f} ft)" for _, r in mat_data.iterrows()
+                ]
+                pick_selection = st.selectbox("Select Serial # to Sell", specific_ids)
+                # Extract just the ID from the selection string
+                pick_id = pick_selection.split(" (")[0]
+                pick_qty = 0 # Serialized items are usually removed entirely
+            else:
+                # Bulk items
+                pick_id = "BULK" 
+                pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
+    
     submitted = st.form_submit_button("🚀 Confirm Removal", use_container_width=True)
     st.divider()
         
