@@ -722,8 +722,8 @@ with tab2:
     ]
     # --- INITIALIZATION ---
     if "coil_lines" not in st.session_state:
-    # Initialize with one empty row/dictionary if you want one to show by default
-     st.session_state.coil_lines = [{"display_size": "Select", "pieces": 0, "waste": 0.0}]
+    # Ensure "items": [] is present here
+    st.session_state.coil_lines = [{"display_size": "Select", "pieces": 0, "waste": 0.0, "items": []}]
 
     # --- COILS SECTION ---
     st.markdown(f"### 🌀 {finish_filter} Coils Production")
@@ -756,9 +756,10 @@ with tab2:
             valid_coil_defaults = [item for item in line["items"] if item in coil_options]
             line["items"] = st.multiselect(f"Source Coils {i+1}", coil_options, default=valid_coil_defaults, key=f"c_sel_{i}")
 
-    if st.button("➕ Add Coil Size Line"):
-        st.session_state.coil_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
-        st.rerun()
+    if st.button("➕ Add Coil Line"):
+    # Add "items": [] to the new row as well
+    st.session_state.coil_lines.append({"display_size": "Select", "pieces": 0, "waste": 0.0, "items": []})
+    st.rerun()
 
     st.divider()
 
