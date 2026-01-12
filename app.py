@@ -768,21 +768,25 @@ with tab2:
                     st.rerun()
 
             # Custom inches checkbox + input
-            line["use_custom"] = st.checkbox(
-                "Use custom inches instead of standard size",
-                value=line.get("use_custom", False),
-                key=f"c_custom_chk_{i}"
-            )
+line["use_custom"] = st.checkbox(
+    "Use custom inches instead of standard size",
+    value=line.get("use_custom", False),
+    key=f"c_custom_chk_{i}"
+)
 
-            if line["use_custom"]:
-                line["custom_inches"] = st.number_input(
-                    "Custom length per piece (inches)",
-                    min_value=0.1, value=line.get("custom_inches", 12.0), step=0.25,
-                    key=f"c_custom_in_{i}"
-                )
-            else:
-                line["custom_inches"] = 0.0  # not used
+# Always ensure a safe default value >= min_value
+custom_value = max(0.1, line.get("custom_inches", 12.0))   # force >= 0.1
 
+if line["use_custom"]:
+    line["custom_inches"] = st.number_input(
+        "Custom length per piece (inches)",
+        min_value=0.1,
+        value=custom_value,           # now guaranteed >= 0.1
+        step=0.25,
+        key=f"c_custom_in_{i}"
+    )
+else:
+    line["custom_inches"] = 0.0  # reset when not used
             # Source selection with auto-populate
             current_defaults = [opt for opt in line["items"] if opt in coil_options]
             if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
