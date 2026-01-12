@@ -354,16 +354,10 @@ def load_all_tables():
         df_inv = pd.DataFrame(inv_response.data)
         
         # 2. Fetch Audit Logs
-        audit_response = supabase.table("audit_log").select("*").execute()
+        audit_response = supabase.table("audit_logs").select("*").execute()
         df_audit = pd.DataFrame(audit_response.data)
         
-        # 3. Fetch log data
-        log_response = supabase.table("log_data").select("*").execute()
-        df_log = pd.DataFrame(log_response.data)
-
-        # 4 Fetch Production log
-        prod_response = supabase.table("production_log").select("*").execute()
-        df_prod = pd.DataFrame(prod_response.data)
+        # Add any other tables here...
         
         return df_inv, df_audit
     except Exception as e:
@@ -688,7 +682,7 @@ with tab1:
             )
     else:
         st.info("No data available. Add inventory in the Warehouse tab.")
-# --- TAB 2: PRODUCTION LOG ---
+# --- TAB 3: PRODUCTION LOG ---
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
 
@@ -855,64 +849,47 @@ with tab2:
                         st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
                         st.rerun()                            
 with tab3:
-    st.subheader("🛒 Sales & Picking")
-    st.caption("Perform instant stock removals. Updates will sync across all devices immediately.")
+    st.subheader("🛒 Stock Picking & Sales")
+    st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
 
-# 1. IDENTIFY COLUMNS (Handles 'category' vs 'Category')
-c_map = {c.lower(): c for c in df.columns}
-col_cat = c_map.get('category', 'Category')
-col_mat = c_map.get('material', 'Material')
-col_id = c_map.get('item_id', 'Item_ID')
-col_foot = c_map.get('footage', 'Footage')
-
-# 2. SELECTION UI
-pick_cat = st.selectbox("What are you picking?", ["Fab Straps", "Roll", "Elbows", "Mineral Wool", "Coil"], key="pick_cat_sales")
-
-# 3. FILTER DATA (Case-Insensitive)
-# This matches "Coil" from your UI to "coil" or "COIL" in your database
-filtered_df = df[df[col_cat].astype(str).str.lower() == pick_cat.lower()]
-
-with st.form("dedicated_pick_form", clear_on_submit=True):
-    col1, col2 = st.columns(2)
+    # 1. Filter Data based on Category Selection
+    # Note: We use singular names here to match our new database cleaning logic
+    pick_cat = st.selectbox("What are you picking?", ["Fab Strap", "Roll", "Elbow", "Mineral Wool", "Coil"], key="pick_cat_sales")
     
-    with col1:
-        if filtered_df.empty:
-            st.warning(f"⚠️ No items currently in stock for {pick_cat}")
-            selected_mat = None
-        else:
-            # Get unique materials available
-            mat_options = sorted(filtered_df[col_mat].unique())
-            selected_mat = st.selectbox("Select Size / Material", mat_options)
+    # Filter the cached dataframe
+    filtered_df = df[df['Category'] == pick_cat]
 
-    with col2:
-        if selected_mat:
-            # Filter specifically for the selected material
-            mat_data = filtered_df[filtered_df[col_mat] == selected_mat]
-            
-            # Logic for Serialized items (Rolls/Coils) vs Bulk items
-            if pick_cat in ["Roll", "Coil"]:
-                # Show Serial #s/IDs and current footage for clarity
-                specific_ids = [
-                    f"{r[col_id]} ({r[col_foot]:.1f} ft)" for _, r in mat_data.iterrows()
-                ]
-                pick_selection = st.selectbox("Select Serial # to Sell", specific_ids)
-                # Extract just the ID from the selection string
-                pick_id = pick_selection.split(" (")[0]
-                pick_qty = 0 # Serialized items are usually removed entirely
-            else:
-                # Bulk items
-                pick_id = "BULK" 
-                pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
-    
-    submitted = st.form_submit_button("🚀 Confirm Removal", use_container_width=True)
-    st.divider()
+    with st.form("dedicated_pick_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
         
-    c1, c2 = st.columns(2)
-    customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
-    # Fallback to 'Admin' if session state username isn't set yet
-    picker_name = c2.text_input("Authorized By", value=st.session_state.get("username", "Admin"))
+        with col1:
+            if filtered_df.empty:
+                st.warning(f"⚠️ No items currently in stock for {pick_cat}")
+                selected_mat = None
+            else:
+                mat_options = sorted(filtered_df['Material'].unique())
+                selected_mat = st.selectbox("Select Size / Material", mat_options)
 
-    submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True)
+        with col2:
+            if selected_mat:
+                # Logic for Serialized items (Rolls/Coils) vs Bulk items
+                if pick_cat in ["Roll", "Coil"]:
+                    specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
+                    pick_id = st.selectbox("Select Serial # to Sell", specific_ids)
+                    pick_qty = 0 # For serialized, we set footage to 0
+                else:
+                    # Bulk items use the Material name as ID for the database update
+                    pick_id = "BULK" 
+                    pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
+
+        st.divider()
+        
+        c1, c2 = st.columns(2)
+        customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
+        # Fallback to 'Admin' if session state username isn't set yet
+        picker_name = c2.text_input("Authorized By", value=st.session_state.get("username", "Admin"))
+
+        submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True)
 
     # --- 2. THE HIGH-SPEED PROCESSING ---
     if submit_pick and selected_mat:
