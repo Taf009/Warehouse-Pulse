@@ -1,4 +1,4 @@
-import streamlit as st
+ import streamlit as st
 import pandas as pd
 import gspread
 from datetime import datetime
@@ -720,6 +720,11 @@ with tab2:
         (df[col_mat].astype(str).str.contains(finish_filter, case=False)) &
         (df['Footage'] > 0)
     ]
+    # --- INITIALIZATION ---
+    if "coil_lines" not in st.session_state:
+    # Initialize with one empty row/dictionary if you want one to show by default
+    # Or just [] if you want it to start empty
+    st.session_state.coil_lines = [{"display_size": "Select", "pieces": 0, "waste": 0.0}]
 
     # --- COILS SECTION ---
     st.markdown(f"### 🌀 {finish_filter} Coils Production")
