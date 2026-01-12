@@ -760,9 +760,9 @@ with tab2:
             })
             st.rerun()
 
-    last_coil_selected = None
+        last_coil_selected = None
     for i, line in enumerate(st.session_state.coil_lines):
-        # Show if active OR it's the only/first one (prevents empty section after adding)
+        # Show if active OR it's the only/first one
         if is_active_line(line) or len(st.session_state.coil_lines) == 1:
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns([3, 1.2, 1.2, 0.4])
@@ -794,7 +794,33 @@ with tab2:
                 )
 
                 current_custom = line.get("custom_inches")
-                safe_value = 12.0 if current_custom is None else                            
+                safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
+
+                if line["use_custom"]:
+                    line["custom_inches"] = st.number_input(
+                        "Custom length per piece (inches)",
+                        min_value=0.1,
+                        value=safe_custom_value,
+                        step=0.25,
+                        key=f"c_custom_in_{i}"
+                    )
+                else:
+                    line["custom_inches"] = 0.0
+
+                # Auto-populate source
+                current_defaults = [opt for opt in line["items"] if opt in coil_options]
+                if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
+                    current_defaults = [last_coil_selected]
+
+                line["items"] = st.multiselect(
+                    "Select source coil(s)",
+                    options=coil_options,
+                    default=current_defaults,
+                    key=f"c_source_{i}"
+                )
+
+                if line["items"]:
+                    last_coil_selected = line["items"][0]                            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
