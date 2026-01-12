@@ -734,7 +734,7 @@ with tabs2:
             # ... (Rest of your coil loop remains the same)
             # Just ensure the multiselect uses the new 'coil_options'
             
-    for i, line in enumerate(st.session_state.coil_lines):
+        for i, line in enumerate(st.session_state.coil_lines):
             with st.container():
             c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
             with c1:
