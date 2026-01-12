@@ -709,12 +709,28 @@ with tab2:
     if "roll_lines" not in st.session_state:
         st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
 
-    # Available stock (only positive footage)
-    available_coils = df[(df[category_col] == "Coil") & (df['Footage'] > 0)]
-    available_rolls = df[(df[category_col] == "Roll") & (df['Footage'] > 0)]
+    # ── NEW: Material type toggle ──────────────────────────────────────────────────
+    st.markdown("### 🔧 Material Type Filter")
+    material_type = st.radio(
+        "Select texture for sources (applies to both Coils & Rolls)",
+        options=["Smooth", "Stucco"],
+        horizontal=True,
+        key="material_texture_toggle"
+    )
+
+    # Filter available stock based on material type
+    def filter_materials(df_subset):
+        if material_type == "Smooth":
+            return df_subset[df_subset['Material'].str.contains("Smooth", case=False) & ~df_subset['Material'].str.contains("Stucco", case=False)]
+        elif material_type == "Stucco":
+            return df_subset[df_subset['Material'].str.contains("Stucco", case=False)]
+        return df_subset  # fallback
+
+    available_coils = filter_materials(df[(df[category_col] == "Coil") & (df['Footage'] > 0)])
+    available_rolls = filter_materials(df[(df[category_col] == "Roll") & (df['Footage'] > 0)])
 
     if available_coils.empty and available_rolls.empty:
-        st.info("No available stock for production (Coils or Rolls).")
+        st.info("No available stock matching the selected texture.")
         st.stop()
 
     coil_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
@@ -728,6 +744,8 @@ with tab2:
         key="coil_extra_allowance"
     )
 
+    # NEW: Track the last selected coil for auto-populate
+    last_coil_selected = None
     for i, line in enumerate(st.session_state.coil_lines):
         with st.container(border=True):
             c1, c2, c3, c4 = st.columns([3, 1.2, 1.2, 0.4])
@@ -751,12 +769,21 @@ with tab2:
                     st.session_state.coil_lines.pop(i)
                     st.rerun()
 
+            # Auto-populate logic: If no items yet and we have a last selected, pre-select it
+            current_defaults = [opt for opt in line["items"] if opt in coil_options]
+            if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
+                current_defaults = [last_coil_selected]
+
             line["items"] = st.multiselect(
                 "Select source coil(s)",
                 options=coil_options,
-                default=[opt for opt in line["items"] if opt in coil_options],
+                default=current_defaults,
                 key=f"c_source_{i}"
             )
+
+            # Update last selected if something is chosen
+            if line["items"]:
+                last_coil_selected = line["items"][0]
 
     if st.button("➕ Add another coil size", use_container_width=True):
         st.session_state.coil_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
@@ -772,6 +799,8 @@ with tab2:
         key="roll_extra_allowance"
     )
 
+    # NEW: Track the last selected roll for auto-populate
+    last_roll_selected = None
     for i, line in enumerate(st.session_state.roll_lines):
         with st.container(border=True):
             r1, r2, r3, r4 = st.columns([3, 1.2, 1.2, 0.4])
@@ -795,12 +824,21 @@ with tab2:
                     st.session_state.roll_lines.pop(i)
                     st.rerun()
 
+            # Auto-populate logic: If no items yet and we have a last selected, pre-select it
+            current_defaults = [opt for opt in line["items"] if opt in roll_options]
+            if not current_defaults and last_roll_selected and last_roll_selected in roll_options:
+                current_defaults = [last_roll_selected]
+
             line["items"] = st.multiselect(
                 "Select source roll(s)",
                 options=roll_options,
-                default=[opt for opt in line["items"] if opt in roll_options],
+                default=current_defaults,
                 key=f"r_source_{i}"
             )
+
+            # Update last selected if something is chosen
+            if line["items"]:
+                last_roll_selected = line["items"][0]
 
     if st.button("➕ Add another roll size", use_container_width=True):
         st.session_state.roll_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
@@ -895,8 +933,12 @@ with tab2:
         with col2:
             order_number = st.text_input("Internal Order #", key="prod_order")
         with col3:
-            operator_name = st.text_input("Operator Name", value=st.session_state.get('username', ''), 
-                                        disabled=True, key="prod_operator")
+            # NEW: Operator name as editable text input (pre-filled but overrideable)
+            operator_name = st.text_input(
+                "Operator Name", 
+                value=st.session_state.get('username', ''), 
+                key="prod_operator"
+            )
 
         st.markdown("#### 📦 Box Usage")
         box_types = [
@@ -910,8 +952,8 @@ with tab2:
         submitted = st.form_submit_button("🚀 Complete Order & Deduct Stock", use_container_width=True, type="primary")
 
     if submitted:
-        if not all([client_name.strip(), order_number.strip()]):
-            st.error("Client Name and Order Number are required.")
+        if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
+            st.error("Client Name, Order Number, and Operator Name are required.")
         else:
             feedback = []
             pdf_details = []
