@@ -568,49 +568,6 @@ class PDF(FPDF):
         self.cell(0, 10, 'Production Order Complete', 0, 1, 'C')
         self.ln(10)
 
-def generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, extra_inch):
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_font('Arial', '', 12)
-    
-    pdf.cell(0, 10, f"Internal Order Number: {order_number}", 0, 1)
-    pdf.cell(0, 10, f"Client: {client_name}", 0, 1)
-    pdf.cell(0, 10, f"Completed by: {operator_name}", 0, 1)
-    pdf.cell(0, 10, f"Extra Inch Allowance: {extra_inch} inch per piece", 0, 1)
-    pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1)
-    pdf.ln(10)
-    
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, "Production Lines", 0, 1)
-    pdf.set_font('Arial', '', 12)
-    total_used = 0
-    for line in deduction_details:
-        pdf.cell(0, 10, f"Material: {line['material']}", 0, 1)
-        pdf.cell(0, 10, f"Size: {line['display_size']} | Pieces: {line['pieces']} | Waste: {line['waste']:.1f} ft", 0, 1)
-        pdf.cell(0, 10, f"Items Used: {line['items']}", 0, 1)
-        pdf.cell(0, 10, f"Footage Used: {line['total_used']:.2f} ft", 0, 1)
-        total_used += line['total_used']
-        pdf.ln(5)
-    
-    pdf.ln(10)
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, "Box Usage", 0, 1)
-    pdf.set_font('Arial', '', 12)
-    used_boxes = [f"{k}: {v}" for k, v in box_usage.items() if v > 0]
-    if used_boxes:
-        pdf.multi_cell(0, 10, "\n".join(used_boxes))
-    else:
-        pdf.cell(0, 10, "No boxes used", 0, 1)
-    
-    pdf.ln(10)
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, f"Total Footage Used: {total_used:.2f} ft", 0, 1)
-    
-    buffer = io.BytesIO()
-    pdf.output(buffer)
-    buffer.seek(0)
-    return buffer
-
 # --- EMAIL FUNCTION ---
 def send_production_pdf(pdf_buffer, order_number, client_name):
     try:
