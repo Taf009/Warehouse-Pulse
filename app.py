@@ -743,7 +743,7 @@ with tab2:
     coil_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
     roll_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_rolls.iterrows()]
 
-    # ── COILS SECTION ───────────────────────────────────────────────────────────────
+        # ── COILS SECTION ───────────────────────────────────────────────────────────────
     st.markdown("### 🌀 Coils Production")
     coil_extra = st.number_input(
         "Extra Inch Allowance per piece (Coils)",
@@ -751,85 +751,89 @@ with tab2:
         key="coil_extra_allowance"
     )
 
-    # If no lines yet, show starter button
+    # Force at least one line if empty (makes adding more reliable)
     if not st.session_state.coil_lines:
-        if st.button("➕ Start adding coil sizes", use_container_width=True):
-            st.session_state.coil_lines.append({
-                "display_size": "#2", "pieces": 0, "waste": 0.0,
-                "items": [], "use_custom": False, "custom_inches": 12.0
-            })
-            st.rerun()
+        st.session_state.coil_lines = [{
+            "display_size": "#2", 
+            "pieces": 0, 
+            "waste": 0.0,
+            "items": [], 
+            "use_custom": False, 
+            "custom_inches": 12.0
+        }]
+        st.rerun()  # Immediate refresh to show the first line
 
     last_coil_selected = None
     for i, line in enumerate(st.session_state.coil_lines):
-        # Show if active OR it's the only/first one
-        if is_active_line(line) or len(st.session_state.coil_lines) == 1:
-            with st.container(border=True):
-                c1, c2, c3, c4 = st.columns([3, 1.2, 1.2, 0.4])
-                with c1:
-                    line["display_size"] = st.selectbox(
-                        "Size", list(SIZE_DISPLAY.keys()),
-                        key=f"c_size_{i}"
-                    )
-                with c2:
-                    line["pieces"] = st.number_input(
-                        "Pieces", min_value=0, step=1,
-                        key=f"c_pcs_{i}"
-                    )
-                with c3:
-                    line["waste"] = st.number_input(
-                        "Waste (ft)", min_value=0.0, step=0.5,
-                        key=f"c_waste_{i}"
-                    )
-                with c4:
-                    if st.button("🗑", key=f"del_coil_{i}", help="Remove this line"):
-                        st.session_state.coil_lines.pop(i)
-                        st.rerun()
-
-                # Custom inches - safe handling
-                line["use_custom"] = st.checkbox(
-                    "Use custom inches instead of standard size",
-                    value=line.get("use_custom", False),
-                    key=f"c_custom_chk_{i}"
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([3, 1.2, 1.2, 0.4])
+            with c1:
+                line["display_size"] = st.selectbox(
+                    "Size", list(SIZE_DISPLAY.keys()),
+                    key=f"c_size_{i}"
                 )
-
-                current_custom = line.get("custom_inches")
-                safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
-
-                if line["use_custom"]:
-                    line["custom_inches"] = st.number_input(
-                        "Custom length per piece (inches)",
-                        min_value=0.1,
-                        value=safe_custom_value,
-                        step=0.25,
-                        key=f"c_custom_in_{i}"
-                    )
-                else:
-                    line["custom_inches"] = 0.0
-
-                # Auto-populate source
-                current_defaults = [opt for opt in line["items"] if opt in coil_options]
-                if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
-                    current_defaults = [last_coil_selected]
-
-                line["items"] = st.multiselect(
-                    "Select source coil(s)",
-                    options=coil_options,
-                    default=current_defaults,
-                    key=f"c_source_{i}"
+            with c2:
+                line["pieces"] = st.number_input(
+                    "Pieces", min_value=0, step=1,
+                    key=f"c_pcs_{i}"
                 )
+            with c3:
+                line["waste"] = st.number_input(
+                    "Waste (ft)", min_value=0.0, step=0.5,
+                    key=f"c_waste_{i}"
+                )
+            with c4:
+                if st.button("🗑", key=f"del_coil_{i}", help="Remove this line"):
+                    st.session_state.coil_lines.pop(i)
+                    st.rerun()
 
-                if line["items"]:
-                    last_coil_selected = line["items"][0]
+            # Custom inches - safe handling
+            line["use_custom"] = st.checkbox(
+                "Use custom inches instead of standard size",
+                value=line.get("use_custom", False),
+                key=f"c_custom_chk_{i}"
+            )
 
-    # Always visible add button
+            current_custom = line.get("custom_inches")
+            safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
+
+            if line["use_custom"]:
+                line["custom_inches"] = st.number_input(
+                    "Custom length per piece (inches)",
+                    min_value=0.1,
+                    value=safe_custom_value,
+                    step=0.25,
+                    key=f"c_custom_in_{i}"
+                )
+            else:
+                line["custom_inches"] = 0.0
+
+            # Auto-populate source from previous line
+            current_defaults = [opt for opt in line["items"] if opt in coil_options]
+            if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
+                current_defaults = [last_coil_selected]
+
+            line["items"] = st.multiselect(
+                "Select source coil(s)",
+                options=coil_options,
+                default=current_defaults,
+                key=f"c_source_{i}"
+            )
+
+            if line["items"]:
+                last_coil_selected = line["items"][0]
+
+    # Always visible add button - this should now work reliably
     if st.button("➕ Add another coil size", use_container_width=True):
         st.session_state.coil_lines.append({
-            "display_size": "#2", "pieces": 0, "waste": 0.0,
-            "items": [], "use_custom": False, "custom_inches": 12.0
+            "display_size": "#2", 
+            "pieces": 0, 
+            "waste": 0.0,
+            "items": [], 
+            "use_custom": False, 
+            "custom_inches": 12.0
         })
-        st.rerun()
-
+        st.rerun()  # Critical: forces refresh to show the new line
     st.divider()
 
     # ── ROLLS SECTION ───────────────────────────────────────────────────────────────
