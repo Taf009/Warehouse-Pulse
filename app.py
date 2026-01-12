@@ -723,7 +723,7 @@ with tab2:
     # --- INITIALIZATION ---
     if "coil_lines" not in st.session_state:
     # Ensure "items": [] is present here
-    st.session_state.coil_lines = [{"display_size": "Select", "pieces": 0, "waste": 0.0, "items": []}]
+     st.session_state.coil_lines = [{"display_size": "Select", "pieces": 0, "waste": 0.0, "items": []}]
 
     # --- COILS SECTION ---
     st.markdown(f"### 🌀 {finish_filter} Coils Production")
