@@ -767,26 +767,28 @@ with tab2:
                     st.session_state.coil_lines.pop(i)
                     st.rerun()
 
-            # Custom inches checkbox + input
-line["use_custom"] = st.checkbox(
-    "Use custom inches instead of standard size",
-    value=line.get("use_custom", False),
-    key=f"c_custom_chk_{i}"
-)
+            # Custom inches handling - SAFE version
+            line["use_custom"] = st.checkbox(
+                "Use custom inches instead of standard size",
+                value=line.get("use_custom", False),
+                key=f"c_custom_chk_{i}"
+            )
 
-# Always ensure a safe default value >= min_value
-custom_value = max(0.1, line.get("custom_inches", 12.0))   # force >= 0.1
+            # Always ensure value is >= min_value
+            current_custom = line.get("custom_inches")
+            safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
 
-if line["use_custom"]:
-    line["custom_inches"] = st.number_input(
-        "Custom length per piece (inches)",
-        min_value=0.1,
-        value=custom_value,           # now guaranteed >= 0.1
-        step=0.25,
-        key=f"c_custom_in_{i}"
-    )
-else:
-    line["custom_inches"] = 0.0  # reset when not used
+            if line["use_custom"]:
+                line["custom_inches"] = st.number_input(
+                    "Custom length per piece (inches)",
+                    min_value=0.1,
+                    value=safe_custom_value,
+                    step=0.25,
+                    key=f"c_custom_in_{i}"
+                )
+            else:
+                line["custom_inches"] = 0.0
+
             # Source selection with auto-populate
             current_defaults = [opt for opt in line["items"] if opt in coil_options]
             if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
@@ -840,17 +842,22 @@ else:
                     st.session_state.roll_lines.pop(i)
                     st.rerun()
 
-            # Custom inches checkbox + input
+            # Custom inches handling - SAFE version
             line["use_custom"] = st.checkbox(
                 "Use custom inches instead of standard size",
                 value=line.get("use_custom", False),
                 key=f"r_custom_chk_{i}"
             )
 
+            current_custom = line.get("custom_inches")
+            safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
+
             if line["use_custom"]:
                 line["custom_inches"] = st.number_input(
                     "Custom length per piece (inches)",
-                    min_value=0.1, value=line.get("custom_inches", 12.0), step=0.25,
+                    min_value=0.1,
+                    value=safe_custom_value,
+                    step=0.25,
                     key=f"r_custom_in_{i}"
                 )
             else:
@@ -1017,6 +1024,7 @@ else:
                 for msg in feedback:
                     st.info(msg)
 
+                # Reset form lines
                 st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": [], "use_custom": False, "custom_inches": 12.0}]
                 st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": [], "use_custom": False, "custom_inches": 12.0}]
 
