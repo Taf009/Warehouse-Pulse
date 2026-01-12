@@ -11,6 +11,91 @@ from email import encoders
 import io
 from email.mime.application import MIMEApplication
 from supabase import create_client, Client
+from fpdf import FPDF
+import io
+from datetime import datetime
+
+class PDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 16)
+        self.cell(0, 10, 'Production Order', 0, 1, 'C')
+        self.ln(5)
+
+def generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage):
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font('Arial', '', 12)
+
+    # Top information
+    pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1)
+
+    pdf.set_fill_color(200, 255, 200)  # Very light green
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, f"Client: {client_name}", fill=True, ln=1)
+    pdf.cell(0, 10, f"Internal Order #: {order_number}", fill=True, ln=1)
+    pdf.set_font('Arial', '', 12)
+    pdf.cell(0, 10, f"Operator: {operator_name}", 0, 1)
+    pdf.cell(0, 10, "Internal Production #: ____________________ (Admin to fill)", 0, 1)
+    pdf.ln(10)
+
+    # Table header
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(50, 10, "Size / Pieces", border=1)
+    pdf.cell(60, 10, "Material", border=1)
+    pdf.cell(35, 10, "Footage (ft)", border=1)
+    pdf.cell(35, 10, "Waste (ft)", border=1, ln=1)
+
+    # Table rows
+    pdf.set_font('Arial', '', 11)
+    for line in deduction_details:
+        size_pieces = f"{line['display_size']} / {line['pieces']} pcs"
+        pdf.cell(50, 10, size_pieces, border=1)
+        pdf.cell(60, 10, line['material'], border=1)
+        pdf.cell(35, 10, f"{line['total_used']:.2f}", border=1)
+        pdf.cell(35, 10, f"{line['waste']:.2f}", border=1, ln=1)
+
+    # Material totals
+    pdf.ln(10)
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, "Material Totals", ln=1)
+    pdf.set_font('Arial', '', 11)
+
+    from collections import defaultdict
+    totals = defaultdict(lambda: {"footage": 0.0, "waste": 0.0})
+    for line in deduction_details:
+        mat = line['material']
+        totals[mat]["footage"] += line['total_used']
+        totals[mat]["waste"] += line['waste']
+
+    pdf.set_fill_color(200, 255, 200)  # light green for totals
+    grand_footage = 0.0
+    grand_waste = 0.0
+    for mat, t in totals.items():
+        pdf.cell(0, 10, f"{mat}: {t['footage']:.2f} ft footage, {t['waste']:.2f} ft waste", fill=True, ln=1)
+        grand_footage += t['footage']
+        grand_waste += t['waste']
+
+    pdf.cell(0, 10, f"**Total Footage: {grand_footage:.2f} ft**", fill=True, ln=1)
+    pdf.cell(0, 10, f"**Total Waste: {grand_waste:.2f} ft**", fill=True, ln=1)
+
+    # Boxes used (outside the table)
+    pdf.ln(15)
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, "Boxes Used:", ln=1)
+    pdf.set_font('Arial', '', 11)
+    used_boxes = False
+    for box, count in box_usage.items():
+        if count > 0:
+            pdf.cell(0, 10, f"{box} – {count}", ln=1)
+            used_boxes = True
+    if not used_boxes:
+        pdf.cell(0, 10, "No boxes used", ln=1)
+
+    # Output to bytes buffer
+    buffer = io.BytesIO()
+    pdf.output(buffer)
+    buffer.seek(0)
+    return buffer
 
 # --- DATABASE CONNECTION ---
 # This pulls the credentials you just saved in the "Secrets" section
@@ -703,13 +788,13 @@ with tab2:
         st.error("Column 'Category' not found in inventory data.")
         st.stop()
 
-    # Initialize session state - start empty for cleanliness
+    # Initialize session state - start empty
     if "coil_lines" not in st.session_state:
         st.session_state.coil_lines = []
     if "roll_lines" not in st.session_state:
         st.session_state.roll_lines = []
 
-    # Helper to check if a line is "active" (worth showing)
+    # Helper: is this line worth showing?
     def is_active_line(line):
         return (
             line.get("pieces", 0) > 0 or
@@ -717,7 +802,7 @@ with tab2:
             line.get("use_custom", False)
         )
 
-    # Material type toggle
+    # Material type filter
     st.markdown("### 🔧 Material Type Filter")
     material_type = st.radio(
         "Select texture for sources (applies to both Coils & Rolls)",
@@ -728,7 +813,8 @@ with tab2:
 
     def filter_materials(df_subset):
         if material_type == "Smooth":
-            return df_subset[df_subset['Material'].str.contains("Smooth", case=False) & ~df_subset['Material'].str.contains("Stucco", case=False)]
+            return df_subset[df_subset['Material'].str.contains("Smooth", case=False) & 
+                            ~df_subset['Material'].str.contains("Stucco", case=False)]
         elif material_type == "Stucco":
             return df_subset[df_subset['Material'].str.contains("Stucco", case=False)]
         return df_subset
@@ -743,7 +829,7 @@ with tab2:
     coil_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
     roll_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_rolls.iterrows()]
 
-        # ── COILS SECTION ───────────────────────────────────────────────────────────────
+    # ── COILS SECTION ───────────────────────────────────────────────────────────────
     st.markdown("### 🌀 Coils Production")
     coil_extra = st.number_input(
         "Extra Inch Allowance per piece (Coils)",
@@ -751,7 +837,7 @@ with tab2:
         key="coil_extra_allowance"
     )
 
-    # Force at least one line if empty (makes adding more reliable)
+    # Force initial line if empty
     if not st.session_state.coil_lines:
         st.session_state.coil_lines = [{
             "display_size": "#2", 
@@ -761,7 +847,7 @@ with tab2:
             "use_custom": False, 
             "custom_inches": 12.0
         }]
-        st.rerun()  # Immediate refresh to show the first line
+        st.rerun()
 
     last_coil_selected = None
     for i, line in enumerate(st.session_state.coil_lines):
@@ -787,7 +873,6 @@ with tab2:
                     st.session_state.coil_lines.pop(i)
                     st.rerun()
 
-            # Custom inches - safe handling
             line["use_custom"] = st.checkbox(
                 "Use custom inches instead of standard size",
                 value=line.get("use_custom", False),
@@ -808,7 +893,6 @@ with tab2:
             else:
                 line["custom_inches"] = 0.0
 
-            # Auto-populate source from previous line
             current_defaults = [opt for opt in line["items"] if opt in coil_options]
             if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
                 current_defaults = [last_coil_selected]
@@ -823,7 +907,6 @@ with tab2:
             if line["items"]:
                 last_coil_selected = line["items"][0]
 
-    # Always visible add button - this should now work reliably
     if st.button("➕ Add another coil size", use_container_width=True):
         st.session_state.coil_lines.append({
             "display_size": "#2", 
@@ -833,7 +916,8 @@ with tab2:
             "use_custom": False, 
             "custom_inches": 12.0
         })
-        st.rerun()  # Critical: forces refresh to show the new line
+        st.rerun()
+
     st.divider()
 
     # ── ROLLS SECTION ───────────────────────────────────────────────────────────────
@@ -844,78 +928,84 @@ with tab2:
         key="roll_extra_allowance"
     )
 
-    # If no lines yet, show starter button
+    # Force initial line if empty
     if not st.session_state.roll_lines:
-        if st.button("➕ Start adding roll sizes", use_container_width=True):
-            st.session_state.roll_lines.append({
-                "display_size": "#2", "pieces": 0, "waste": 0.0,
-                "items": [], "use_custom": False, "custom_inches": 12.0
-            })
-            st.rerun()
+        st.session_state.roll_lines = [{
+            "display_size": "#2", 
+            "pieces": 0, 
+            "waste": 0.0,
+            "items": [], 
+            "use_custom": False, 
+            "custom_inches": 12.0
+        }]
+        st.rerun()
 
     last_roll_selected = None
     for i, line in enumerate(st.session_state.roll_lines):
-        if is_active_line(line) or len(st.session_state.roll_lines) == 1:
-            with st.container(border=True):
-                r1, r2, r3, r4 = st.columns([3, 1.2, 1.2, 0.4])
-                with r1:
-                    line["display_size"] = st.selectbox(
-                        "Size", list(SIZE_DISPLAY.keys()),
-                        key=f"r_size_{i}"
-                    )
-                with r2:
-                    line["pieces"] = st.number_input(
-                        "Pieces", min_value=0, step=1,
-                        key=f"r_pcs_{i}"
-                    )
-                with r3:
-                    line["waste"] = st.number_input(
-                        "Waste (ft)", min_value=0.0, step=0.5,
-                        key=f"r_waste_{i}"
-                    )
-                with r4:
-                    if st.button("🗑", key=f"del_roll_{i}", help="Remove this line"):
-                        st.session_state.roll_lines.pop(i)
-                        st.rerun()
-
-                line["use_custom"] = st.checkbox(
-                    "Use custom inches instead of standard size",
-                    value=line.get("use_custom", False),
-                    key=f"r_custom_chk_{i}"
+        with st.container(border=True):
+            r1, r2, r3, r4 = st.columns([3, 1.2, 1.2, 0.4])
+            with r1:
+                line["display_size"] = st.selectbox(
+                    "Size", list(SIZE_DISPLAY.keys()),
+                    key=f"r_size_{i}"
                 )
-
-                current_custom = line.get("custom_inches")
-                safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
-
-                if line["use_custom"]:
-                    line["custom_inches"] = st.number_input(
-                        "Custom length per piece (inches)",
-                        min_value=0.1,
-                        value=safe_custom_value,
-                        step=0.25,
-                        key=f"r_custom_in_{i}"
-                    )
-                else:
-                    line["custom_inches"] = 0.0
-
-                current_defaults = [opt for opt in line["items"] if opt in roll_options]
-                if not current_defaults and last_roll_selected and last_roll_selected in roll_options:
-                    current_defaults = [last_roll_selected]
-
-                line["items"] = st.multiselect(
-                    "Select source roll(s)",
-                    options=roll_options,
-                    default=current_defaults,
-                    key=f"r_source_{i}"
+            with r2:
+                line["pieces"] = st.number_input(
+                    "Pieces", min_value=0, step=1,
+                    key=f"r_pcs_{i}"
                 )
+            with r3:
+                line["waste"] = st.number_input(
+                    "Waste (ft)", min_value=0.0, step=0.5,
+                    key=f"r_waste_{i}"
+                )
+            with r4:
+                if st.button("🗑", key=f"del_roll_{i}", help="Remove this line"):
+                    st.session_state.roll_lines.pop(i)
+                    st.rerun()
 
-                if line["items"]:
-                    last_roll_selected = line["items"][0]
+            line["use_custom"] = st.checkbox(
+                "Use custom inches instead of standard size",
+                value=line.get("use_custom", False),
+                key=f"r_custom_chk_{i}"
+            )
+
+            current_custom = line.get("custom_inches")
+            safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
+
+            if line["use_custom"]:
+                line["custom_inches"] = st.number_input(
+                    "Custom length per piece (inches)",
+                    min_value=0.1,
+                    value=safe_custom_value,
+                    step=0.25,
+                    key=f"r_custom_in_{i}"
+                )
+            else:
+                line["custom_inches"] = 0.0
+
+            current_defaults = [opt for opt in line["items"] if opt in roll_options]
+            if not current_defaults and last_roll_selected and last_roll_selected in roll_options:
+                current_defaults = [last_roll_selected]
+
+            line["items"] = st.multiselect(
+                "Select source roll(s)",
+                options=roll_options,
+                default=current_defaults,
+                key=f"r_source_{i}"
+            )
+
+            if line["items"]:
+                last_roll_selected = line["items"][0]
 
     if st.button("➕ Add another roll size", use_container_width=True):
         st.session_state.roll_lines.append({
-            "display_size": "#2", "pieces": 0, "waste": 0.0,
-            "items": [], "use_custom": False, "custom_inches": 12.0
+            "display_size": "#2", 
+            "pieces": 0, 
+            "waste": 0.0,
+            "items": [], 
+            "use_custom": False, 
+            "custom_inches": 12.0
         })
         st.rerun()
 
@@ -931,8 +1021,8 @@ with tab2:
             order_number = st.text_input("Internal Order #", key="prod_order")
         with col3:
             operator_name = st.text_input(
-                "Operator Name", 
-                value=st.session_state.get('username', ''), 
+                "Operator Name",
+                value=st.session_state.get('username', ''),
                 key="prod_operator"
             )
 
@@ -941,66 +1031,84 @@ with tab2:
             "Small Metal Box", "Big Metal Box",
             "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"
         ]
-        box_usage = {box: st.number_input(box, min_value=0, step=1, key=f"box_{box.replace(' ','_')}") 
+        box_usage = {box: st.number_input(box, min_value=0, step=1, key=f"box_{box.replace(' ','_')}")
                      for box in box_types}
 
-        submitted = st.form_submit_button("🚀 Complete Order & Deduct Stock", use_container_width=True, type="primary")
+        submitted = st.form_submit_button(
+            "🚀 Complete Order & Deduct Stock",
+            use_container_width=True,
+            type="primary"
+        )
 
-    # ── SUBMISSION PROCESSING ───────────────────────────────────────────────────────
-    # (You can paste your existing processing logic here)
     if submitted:
-        if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
-            st.error("Client Name, Order Number, and Operator Name are required.")
-        else:
-            feedback = []
-            pdf_details = []
-            total_footage = 0.0
-            success = True
+    if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
+        st.error("Client Name, Order Number, and Operator Name are required.")
+    else:
+        feedback = []
+        deduction_details = []  # This will hold data for both logging & PDF
+        success = True
 
-            # Process Coils
-            for line in st.session_state.coil_lines:
+        # Process Coils
+        for line in st.session_state.coil_lines:
+            ok, ft = process_production_line(
+                line, coil_extra, "Coil",
+                order_number, client_name, operator_name,
+                feedback, deduction_details
+            )
+            if not ok:
+                success = False
+                break
+
+        # Process Rolls (only if coils succeeded)
+        if success:
+            for line in st.session_state.roll_lines:
                 ok, ft = process_production_line(
-                    line, coil_extra, "Coil",
+                    line, roll_extra, "Roll",
                     order_number, client_name, operator_name,
-                    feedback, pdf_details
+                    feedback, deduction_details
                 )
-                if ok:
-                    total_footage += ft
-                else:
+                if not ok:
                     success = False
                     break
 
-            # Process Rolls (only if coils succeeded)
-            if success:
-                for line in st.session_state.roll_lines:
-                    ok, ft = process_production_line(
-                        line, roll_extra, "Roll",
-                        order_number, client_name, operator_name,
-                        feedback, pdf_details
-                    )
-                    if ok:
-                        total_footage += ft
-                    else:
-                        success = False
-                        break
+        if success:
+            st.success(f"Order **{order_number}** completed successfully!")
+            for msg in feedback:
+                st.info(msg)
 
-            if success:
-                st.success(f"Order **{order_number}** completed successfully!")
-                for msg in feedback:
-                    st.info(msg)
+            # ── PDF GENERATION ───────────────────────────────────────────────────────
+            pdf_buffer = generate_production_pdf(
+                order_number=order_number,
+                client_name=client_name,
+                operator_name=operator_name,
+                deduction_details=deduction_details,
+                box_usage=box_usage
+            )
 
-                # Reset form lines (clean slate)
-                st.session_state.coil_lines = []
-                st.session_state.roll_lines = []
+            # ── SEND EMAIL WITH PDF ──────────────────────────────────────────────────
+            try:
+                # Use your existing email function (adjust params if needed)
+                # Assuming you have something like send_production_pdf(pdf_buffer, order_number, client_name)
+                if send_production_pdf(pdf_buffer, order_number, client_name):
+                    st.success("✅ PDF generated and emailed to admin!")
+                else:
+                    st.warning("PDF created, but email failed to send. Check secrets/SMTP settings.")
+            except Exception as e:
+                st.error(f"Email sending failed: {str(e)}")
+                # Still allow user to continue - PDF is generated
 
-                st.cache_data.clear()
-                st.rerun()
+            # Reset form completely
+            st.session_state.coil_lines = []
+            st.session_state.roll_lines = []
 
-            else:
-                st.error("Order failed — no changes were saved.")
-                for msg in feedback:
-                    if msg.startswith("✗"):
-                        st.error(msg)                            
+            st.cache_data.clear()
+            st.rerun()
+
+        else:
+            st.error("Order failed — no changes were saved.")
+            for msg in feedback:
+                if msg.startswith("✗"):
+                    st.error(msg)                            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
