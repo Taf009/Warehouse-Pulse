@@ -688,7 +688,7 @@ with tab1:
             )
     else:
         st.info("No data available. Add inventory in the Warehouse tab.")
-# --- TAB 3: PRODUCTION LOG ---
+# --- TAB 2: PRODUCTION LOG ---
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
 
@@ -793,67 +793,118 @@ with tab2:
         submitted = st.form_submit_button("🚀 Complete Order & Send PDF", use_container_width=True)
 
         if submitted:
-            if not client_name or not order_number or not operator_name:
-                st.error("Client, Order #, and Operator are required.")
-            else:
-                production_details = []
-                
-                # Process Coils logic
-                for line in st.session_state.coil_lines:
-                    if line["pieces"] > 0 and line["items"]:
-                        base_inches = SIZE_MAP.get(line["display_size"].replace("#", "Size "), 0)
-                        total_ft = (line["pieces"] * (base_inches + coil_extra) / 12) + line["waste"]
-                        
-                        target_id = line["items"][0].split(" - ")[0]
-                        material_info = line["items"][0].split(" - ")[1].split(" (")[0]
-                        
-                        # Deduct from local dataframe
-                        df.loc[df['Item_ID'] == target_id, 'Footage'] -= total_ft
-                        
-                        production_details.append({
-                            "material": material_info, 
-                            "display_size": line["display_size"],
-                            "pieces": line["pieces"],
-                            "waste": line["waste"],
-                            "total_used": total_ft,
-                            "items": target_id
-                        })
+    if not all([client_name, order_number, operator_name]):
+        st.error("Client Name, Order #, and Operator are required.")
+        st.stop()
 
-                # Process Rolls logic
-                for line in st.session_state.roll_lines:
-                    if line["pieces"] > 0 and line["items"]:
-                        base_inches = SIZE_MAP.get(line["display_size"].replace("#", "Size "), 0)
-                        total_ft = (line["pieces"] * (base_inches + roll_extra) / 12) + line["waste"]
-                        
-                        target_id = line["items"][0].split(" - ")[0]
-                        material_info = line["items"][0].split(" - ")[1].split(" (")[0]
-                        
-                        df.loc[df['Item_ID'] == target_id, 'Footage'] -= total_ft
-                        
-                        production_details.append({
-                            "material": material_info,
-                            "display_size": line["display_size"],
-                            "pieces": line["pieces"],
-                            "waste": line["waste"],
-                            "total_used": total_ft,
-                            "items": target_id
-                        })
+    feedback = []
+    pdf_details = []
+    total_footage_used = 0.0
+    all_success = True
 
-                if not production_details:
-                    st.error("No production data entered.")
-                else:
-                    save_inventory() # Syncs with Google Sheets
-                    save_production_log(order_number, client_name, operator_name, production_details, box_usage)
-                    
-                    pdf_buffer = generate_production_pdf(order_number, client_name, operator_name, production_details, box_usage, coil_extra)
-                    
-                    if send_production_pdf(pdf_buffer, order_number, client_name):
-                        st.success(f"Order {order_number} Processed and Emailed!")
-                        st.balloons()
-                        # Reset session lines
-                        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
-                        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
-                        st.rerun()                            
+    # Helper to process one production line (coils or rolls)
+    def process_line(line, extra_inches, material_type="Coil"):
+        nonlocal all_success, total_footage_used
+        
+        if line["pieces"] <= 0 or not line["items"]:
+            return
+
+        try:
+            # Single source for now
+            selected = line["items"][0]
+            parts = selected.split(" - ")
+            item_id = parts[0].strip()
+            material = parts[1].split(" (")[0].strip()
+
+            base_inches = SIZE_MAP.get(line["display_size"].replace("#", "Size "), 0)
+            if base_inches == 0:
+                raise ValueError(f"Invalid size: {line['display_size']}")
+
+            total_inches_per_pc = base_inches + extra_inches
+            ft_needed = (line["pieces"] * total_inches_per_pc / 12.0) + line["waste"]
+
+            # Fresh read from Supabase
+            res = supabase.table("inventory").select("Footage").eq("Item_ID", item_id).execute()
+            if not res.data or len(res.data) == 0:
+                raise ValueError(f"Item {item_id} not found in inventory")
+
+            current_ft = float(res.data[0]["Footage"])
+            if current_ft < ft_needed - 0.01:  # small floating-point tolerance
+                raise ValueError(f"Insufficient stock on {item_id}: need {ft_needed:.2f} ft, have {current_ft:.2f} ft")
+
+            new_footage = current_ft - ft_needed
+
+            # 1. Update inventory
+            supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
+
+            # 2. Log to production_log2
+            log_row = {
+                "order_number": order_number,
+                "client_name": client_name,
+                "operator_name": operator_name,
+                "material": material,
+                "size": line["display_size"],
+                "pieces": line["pieces"],
+                "waste_ft": round(line["waste"], 2),
+                "footage_used": round(ft_needed, 2),
+                "source_item_ids": item_id,               # can be "id1,id2" later
+                "extra_inches": extra_inches,
+                "box_usage": "pending"                    # we'll improve later
+            }
+            supabase.table("production_log2").insert(log_row).execute()
+
+            # Collect for PDF
+            pdf_details.append({
+                "type": material_type,
+                "material": material,
+                "display_size": line["display_size"],
+                "pieces": line["pieces"],
+                "waste": line["waste"],
+                "total_used": ft_needed,
+                "source": item_id
+            })
+
+            total_footage_used += ft_needed
+            feedback.append(f"✓ {material_type} {item_id} – deducted {ft_needed:.2f} ft")
+
+        except Exception as e:
+            all_success = False
+            feedback.append(f"✗ {material_type} line failed: {str(e)}")
+
+    # ── Process Coils ───────────────────────────────────────────────
+    for line in st.session_state.coil_lines:
+        process_line(line, coil_extra, "Coil")
+        if not all_success:
+            break
+
+    # ── Process Rolls ───────────────────────────────────────────────
+    if all_success:  # only continue if coils were ok
+        for line in st.session_state.roll_lines:
+            process_line(line, roll_extra, "Roll")
+            if not all_success:
+                break
+
+    # ── Final result handling ───────────────────────────────────────
+    if all_success:
+        st.success(f"Order **{order_number}** completed! Stock updated & logged.")
+        for msg in feedback:
+            st.info(msg)
+
+        # Reset form
+        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+
+        # Force inventory refresh
+        st.cache_data.clear()
+        st.rerun()  # optional - refreshes the whole page
+
+        # Next step: PDF + email will go here
+
+    else:
+        st.error("Order aborted — no changes saved (safety rollback).")
+        for msg in feedback:
+            if "✗" in msg:
+                st.error(msg)                            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
