@@ -688,59 +688,46 @@ with tab1:
             )
     else:
         st.info("No data available. Add inventory in the Warehouse tab.")
-        
 # --- TAB 2: PRODUCTION LOG ---
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
 
     # 1. Guard Rail: Check if data exists
     if df.empty:
-        st.warning("⚠️ No data found. Please add items in the Warehouse tab.")
+        st.warning("⚠️ No data found in the 'inventory' table. Please add items in the Warehouse tab.")
         st.stop()
 
-    # 2. Master Finish Toggle
-    # This filters the available stock for BOTH Coils and Rolls
-    finish_filter = st.radio("Select Material Finish", ["Smooth", "Stucco"], horizontal=True)
+    # 2. Case-Insensitive Column Check for 'Category'
+    cols_map = {c.lower(): c for c in df.columns}
+    category_col = cols_map.get('category')
 
-    # 3. Dynamic Column Identification
-    c_map = {c.lower(): c for c in df.columns}
-    col_cat = c_map.get('category', 'Category')
-    col_mat = c_map.get('material', 'Material')
+    if not category_col:
+        st.error(f"🚨 Column 'Category' not found in database. Found: {list(df.columns)}")
+        st.stop()
 
-    # 4. Safe Filtering with Finish Toggle
-    # We filter by Category AND ensure the Material name contains the selected finish
-    available_coils = df[
-        (df[col_cat].astype(str).str.lower() == "coil") & 
-        (df[col_mat].astype(str).str.contains(finish_filter, case=False)) &
-        (df['Footage'] > 0)
-    ]
-    
-    available_rolls = df[
-        (df[col_cat].astype(str).str.lower() == "roll") & 
-        (df[col_mat].astype(str).str.contains(finish_filter, case=False)) &
-        (df['Footage'] > 0)
-    ]
-    # --- INITIALIZATION ---
+    # 3. Initialize Session State for dynamic lines if they don't exist
     if "coil_lines" not in st.session_state:
-    # Ensure "items": [] is present here
-     st.session_state.coil_lines = [{"display_size": "Select", "pieces": 0, "waste": 0.0, "items": []}]
+        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+    if "roll_lines" not in st.session_state:
+        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []}]
+
+    # 4. Safe Filtering
+    available_coils = df[(df[category_col] == "Coil") & (df['Footage'] > 0)]
+    available_rolls = df[(df[category_col] == "Roll") & (df['Footage'] > 0)]
+
+    if available_coils.empty and available_rolls.empty:
+        st.info("No available stock for Coils or Rolls.")
+        st.stop()
 
     # --- COILS SECTION ---
-    st.markdown(f"### 🌀 {finish_filter} Coils Production")
-    coil_extra = st.number_input("Coil Extra Inch Allowance", min_value=0.0, value=0.5, step=0.1, key="p_c_extra")
+    st.markdown("### 🌀 Coils Production")
+    coil_extra = st.number_input("Coil Extra Inch Allowance (per piece)", min_value=0.0, value=0.5, step=0.1, key="c_allowance_bar")
     
-    coil_options = [f"{r['Item_ID']} - {r[col_mat]} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
+    coil_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
 
-    if not coil_options:
-        st.info(f"No {finish_filter} Coils found in stock.")
-    else:
-        for i, line in enumerate(st.session_state.coil_lines):
-            # ... (Rest of your coil loop remains the same)
-            # Just ensure the multiselect uses the new 'coil_options'
-            
-         for i, line in enumerate(st.session_state.coil_lines):
-            with st.container():
-                c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
+    for i, line in enumerate(st.session_state.coil_lines):
+        with st.container():
+            c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
             with c1:
                 line["display_size"] = st.selectbox(f"Coil Size {i+1}", list(SIZE_DISPLAY.keys()), key=f"c_sz_{i}")
             with c2:
@@ -756,10 +743,9 @@ with tab2:
             valid_coil_defaults = [item for item in line["items"] if item in coil_options]
             line["items"] = st.multiselect(f"Source Coils {i+1}", coil_options, default=valid_coil_defaults, key=f"c_sel_{i}")
 
-    if st.button("➕ Add Coil Line"):
-    # Add "items": [] to the new row as well
-    st.session_state.coil_lines.append({"display_size": "Select", "pieces": 0, "waste": 0.0, "items": []})
-    st.rerun()
+    if st.button("➕ Add Coil Size Line"):
+        st.session_state.coil_lines.append({"display_size": "#2", "pieces": 0, "waste": 0.0, "items": []})
+        st.rerun()
 
     st.divider()
 
