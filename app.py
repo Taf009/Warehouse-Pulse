@@ -78,17 +78,19 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.cell(0, 10, f"**Total Footage: {grand_footage:.2f} ft**", fill=True, ln=1)
     pdf.cell(0, 10, f"**Total Waste: {grand_waste:.2f} ft**", fill=True, ln=1)
 
-    # Boxes used (outside the table)
+        # Boxes used
     pdf.ln(15)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, "Boxes Used:", ln=1)
     pdf.set_font('Arial', '', 11)
-    used_boxes = False
+    used_any = False
     for box, count in box_usage.items():
         if count > 0:
-            pdf.cell(0, 10, f"{box} – {count}", ln=1)
-            used_boxes = True
-    if not used_boxes:
+            # Replace en-dash/em-dash with plain hyphen
+            safe_box = box.replace('–', '-').replace('—', '-')
+            pdf.cell(0, 10, f"{safe_box} - {count}", ln=1)
+            used_any = True
+    if not used_any:
         pdf.cell(0, 10, "No boxes used", ln=1)
 
     # Output to bytes buffer
