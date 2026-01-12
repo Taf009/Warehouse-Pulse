@@ -751,7 +751,7 @@ with tab2:
         key="coil_extra_allowance"
     )
 
-    # If no lines yet, show a starter button
+    # If no lines yet, show starter button
     if not st.session_state.coil_lines:
         if st.button("➕ Start adding coil sizes", use_container_width=True):
             st.session_state.coil_lines.append({
@@ -760,7 +760,7 @@ with tab2:
             })
             st.rerun()
 
-        last_coil_selected = None
+    last_coil_selected = None
     for i, line in enumerate(st.session_state.coil_lines):
         # Show if active OR it's the only/first one
         if is_active_line(line) or len(st.session_state.coil_lines) == 1:
@@ -820,7 +820,183 @@ with tab2:
                 )
 
                 if line["items"]:
-                    last_coil_selected = line["items"][0]                            
+                    last_coil_selected = line["items"][0]
+
+    # Always visible add button
+    if st.button("➕ Add another coil size", use_container_width=True):
+        st.session_state.coil_lines.append({
+            "display_size": "#2", "pieces": 0, "waste": 0.0,
+            "items": [], "use_custom": False, "custom_inches": 12.0
+        })
+        st.rerun()
+
+    st.divider()
+
+    # ── ROLLS SECTION ───────────────────────────────────────────────────────────────
+    st.markdown("### 🗞️ Rolls Production")
+    roll_extra = st.number_input(
+        "Extra Inch Allowance per piece (Rolls)",
+        min_value=0.0, value=0.5, step=0.1,
+        key="roll_extra_allowance"
+    )
+
+    # If no lines yet, show starter button
+    if not st.session_state.roll_lines:
+        if st.button("➕ Start adding roll sizes", use_container_width=True):
+            st.session_state.roll_lines.append({
+                "display_size": "#2", "pieces": 0, "waste": 0.0,
+                "items": [], "use_custom": False, "custom_inches": 12.0
+            })
+            st.rerun()
+
+    last_roll_selected = None
+    for i, line in enumerate(st.session_state.roll_lines):
+        if is_active_line(line) or len(st.session_state.roll_lines) == 1:
+            with st.container(border=True):
+                r1, r2, r3, r4 = st.columns([3, 1.2, 1.2, 0.4])
+                with r1:
+                    line["display_size"] = st.selectbox(
+                        "Size", list(SIZE_DISPLAY.keys()),
+                        key=f"r_size_{i}"
+                    )
+                with r2:
+                    line["pieces"] = st.number_input(
+                        "Pieces", min_value=0, step=1,
+                        key=f"r_pcs_{i}"
+                    )
+                with r3:
+                    line["waste"] = st.number_input(
+                        "Waste (ft)", min_value=0.0, step=0.5,
+                        key=f"r_waste_{i}"
+                    )
+                with r4:
+                    if st.button("🗑", key=f"del_roll_{i}", help="Remove this line"):
+                        st.session_state.roll_lines.pop(i)
+                        st.rerun()
+
+                line["use_custom"] = st.checkbox(
+                    "Use custom inches instead of standard size",
+                    value=line.get("use_custom", False),
+                    key=f"r_custom_chk_{i}"
+                )
+
+                current_custom = line.get("custom_inches")
+                safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
+
+                if line["use_custom"]:
+                    line["custom_inches"] = st.number_input(
+                        "Custom length per piece (inches)",
+                        min_value=0.1,
+                        value=safe_custom_value,
+                        step=0.25,
+                        key=f"r_custom_in_{i}"
+                    )
+                else:
+                    line["custom_inches"] = 0.0
+
+                current_defaults = [opt for opt in line["items"] if opt in roll_options]
+                if not current_defaults and last_roll_selected and last_roll_selected in roll_options:
+                    current_defaults = [last_roll_selected]
+
+                line["items"] = st.multiselect(
+                    "Select source roll(s)",
+                    options=roll_options,
+                    default=current_defaults,
+                    key=f"r_source_{i}"
+                )
+
+                if line["items"]:
+                    last_roll_selected = line["items"][0]
+
+    if st.button("➕ Add another roll size", use_container_width=True):
+        st.session_state.roll_lines.append({
+            "display_size": "#2", "pieces": 0, "waste": 0.0,
+            "items": [], "use_custom": False, "custom_inches": 12.0
+        })
+        st.rerun()
+
+    st.divider()
+
+    # ── SUBMISSION FORM ─────────────────────────────────────────────────────────────
+    with st.form("production_order_form", clear_on_submit=False):
+        st.markdown("#### 📑 Order Information")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            client_name = st.text_input("Client Name", key="prod_client")
+        with col2:
+            order_number = st.text_input("Internal Order #", key="prod_order")
+        with col3:
+            operator_name = st.text_input(
+                "Operator Name", 
+                value=st.session_state.get('username', ''), 
+                key="prod_operator"
+            )
+
+        st.markdown("#### 📦 Box Usage")
+        box_types = [
+            "Small Metal Box", "Big Metal Box",
+            "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"
+        ]
+        box_usage = {box: st.number_input(box, min_value=0, step=1, key=f"box_{box.replace(' ','_')}") 
+                     for box in box_types}
+
+        submitted = st.form_submit_button("🚀 Complete Order & Deduct Stock", use_container_width=True, type="primary")
+
+    # ── SUBMISSION PROCESSING ───────────────────────────────────────────────────────
+    # (You can paste your existing processing logic here)
+    if submitted:
+        if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
+            st.error("Client Name, Order Number, and Operator Name are required.")
+        else:
+            feedback = []
+            pdf_details = []
+            total_footage = 0.0
+            success = True
+
+            # Process Coils
+            for line in st.session_state.coil_lines:
+                ok, ft = process_production_line(
+                    line, coil_extra, "Coil",
+                    order_number, client_name, operator_name,
+                    feedback, pdf_details
+                )
+                if ok:
+                    total_footage += ft
+                else:
+                    success = False
+                    break
+
+            # Process Rolls (only if coils succeeded)
+            if success:
+                for line in st.session_state.roll_lines:
+                    ok, ft = process_production_line(
+                        line, roll_extra, "Roll",
+                        order_number, client_name, operator_name,
+                        feedback, pdf_details
+                    )
+                    if ok:
+                        total_footage += ft
+                    else:
+                        success = False
+                        break
+
+            if success:
+                st.success(f"Order **{order_number}** completed successfully!")
+                for msg in feedback:
+                    st.info(msg)
+
+                # Reset form lines (clean slate)
+                st.session_state.coil_lines = []
+                st.session_state.roll_lines = []
+
+                st.cache_data.clear()
+                st.rerun()
+
+            else:
+                st.error("Order failed — no changes were saved.")
+                for msg in feedback:
+                    if msg.startswith("✗"):
+                        st.error(msg)                            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
