@@ -18,11 +18,10 @@ from collections import defaultdict
 
 class PDF(FPDF):
     def header(self):
-        # Add logo (adjust path or use URL if hosted)
+        # Add logo (adjust path/size as needed)
         try:
-            self.image("logo.png", x=10, y=8, w=30)  # w = width in mm; adjust as needed
+            self.image("logo.png", x=10, y=8, w=30)
         except Exception:
-            # Fallback if logo file missing
             self.set_font('Arial', 'I', 10)
             self.cell(0, 10, "MJP Pulse Logo", 0, 1, 'L')
         
@@ -35,10 +34,10 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.add_page()
     pdf.set_font('Arial', '', 12)
 
-    # Top information section
+    # Top information
     pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1)
     
-    pdf.set_fill_color(200, 255, 200)  # Light green highlight
+    pdf.set_fill_color(200, 255, 200)  # Light green
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, f"Client: {client_name}", fill=True, ln=1)
     pdf.cell(0, 10, f"Internal Order #: {order_number}", fill=True, ln=1)
@@ -47,23 +46,23 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.cell(0, 10, "Internal Production #: ____________________ (Admin to fill)", 0, 1)
     pdf.ln(10)
 
-    # Table header - includes new Type / Source ID column
+    # Table header - only "Type" (Coil/Roll), no Item ID
     pdf.set_font('Arial', 'B', 11)
     pdf.cell(45, 10, "Size / Pieces", border=1)
-    pdf.cell(50, 10, "Type / Source ID", border=1)   # NEW COLUMN
-    pdf.cell(50, 10, "Material", border=1)
+    pdf.cell(40, 10, "Type", border=1)          # NEW: just "Coil" or "Roll"
+    pdf.cell(55, 10, "Material", border=1)
     pdf.cell(30, 10, "Footage (ft)", border=1)
     pdf.cell(30, 10, "Waste (ft)", border=1, ln=1)
 
-    # Table body
+    # Table rows
     pdf.set_font('Arial', '', 11)
     for line in deduction_details:
         size_pieces = f"{line['display_size']} / {line['pieces']} pcs"
-        type_source = f"{line.get('type', 'Unknown')} - {line.get('source', 'N/A')}"
+        line_type = line.get('type', 'Unknown')  # "Coil" or "Roll"
         
         pdf.cell(45, 10, size_pieces, border=1)
-        pdf.cell(50, 10, type_source, border=1)
-        pdf.cell(50, 10, line['material'], border=1)
+        pdf.cell(40, 10, line_type, border=1)
+        pdf.cell(55, 10, line['material'], border=1)
         pdf.cell(30, 10, f"{line['total_used']:.2f}", border=1)
         pdf.cell(30, 10, f"{line['waste']:.2f}", border=1, ln=1)
 
@@ -104,7 +103,6 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     if not used_any:
         pdf.cell(0, 10, "No boxes used", ln=1)
 
-    # Output to buffer
     buffer = io.BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
@@ -833,21 +831,13 @@ with tab2:
         st.error("Column 'Category' not found in inventory data.")
         st.stop()
 
-    # Initialize session state - start empty
+    # Initialize session state - start with one default line each
     if "coil_lines" not in st.session_state:
-        st.session_state.coil_lines = []
+        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": [], "use_custom": False, "custom_inches": 12.0}]
     if "roll_lines" not in st.session_state:
-        st.session_state.roll_lines = []
+        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": [], "use_custom": False, "custom_inches": 12.0}]
 
-    # Helper: is this line worth showing?
-    def is_active_line(line):
-        return (
-            line.get("pieces", 0) > 0 or
-            len(line.get("items", [])) > 0 or
-            line.get("use_custom", False)
-        )
-
-    # Material type filter
+    # Material type toggle
     st.markdown("### 🔧 Material Type Filter")
     material_type = st.radio(
         "Select texture for sources (applies to both Coils & Rolls)",
@@ -858,8 +848,7 @@ with tab2:
 
     def filter_materials(df_subset):
         if material_type == "Smooth":
-            return df_subset[df_subset['Material'].str.contains("Smooth", case=False) & 
-                            ~df_subset['Material'].str.contains("Stucco", case=False)]
+            return df_subset[df_subset['Material'].str.contains("Smooth", case=False) & ~df_subset['Material'].str.contains("Stucco", case=False)]
         elif material_type == "Stucco":
             return df_subset[df_subset['Material'].str.contains("Stucco", case=False)]
         return df_subset
@@ -881,18 +870,6 @@ with tab2:
         min_value=0.0, value=0.5, step=0.1,
         key="coil_extra_allowance"
     )
-
-    # Force initial line if empty
-    if not st.session_state.coil_lines:
-        st.session_state.coil_lines = [{
-            "display_size": "#2", 
-            "pieces": 0, 
-            "waste": 0.0,
-            "items": [], 
-            "use_custom": False, 
-            "custom_inches": 12.0
-        }]
-        st.rerun()
 
     last_coil_selected = None
     for i, line in enumerate(st.session_state.coil_lines):
@@ -954,12 +931,8 @@ with tab2:
 
     if st.button("➕ Add another coil size", use_container_width=True):
         st.session_state.coil_lines.append({
-            "display_size": "#2", 
-            "pieces": 0, 
-            "waste": 0.0,
-            "items": [], 
-            "use_custom": False, 
-            "custom_inches": 12.0
+            "display_size": "#2", "pieces": 0, "waste": 0.0,
+            "items": [], "use_custom": False, "custom_inches": 12.0
         })
         st.rerun()
 
@@ -972,18 +945,6 @@ with tab2:
         min_value=0.0, value=0.5, step=0.1,
         key="roll_extra_allowance"
     )
-
-    # Force initial line if empty
-    if not st.session_state.roll_lines:
-        st.session_state.roll_lines = [{
-            "display_size": "#2", 
-            "pieces": 0, 
-            "waste": 0.0,
-            "items": [], 
-            "use_custom": False, 
-            "custom_inches": 12.0
-        }]
-        st.rerun()
 
     last_roll_selected = None
     for i, line in enumerate(st.session_state.roll_lines):
@@ -1045,12 +1006,8 @@ with tab2:
 
     if st.button("➕ Add another roll size", use_container_width=True):
         st.session_state.roll_lines.append({
-            "display_size": "#2", 
-            "pieces": 0, 
-            "waste": 0.0,
-            "items": [], 
-            "use_custom": False, 
-            "custom_inches": 12.0
+            "display_size": "#2", "pieces": 0, "waste": 0.0,
+            "items": [], "use_custom": False, "custom_inches": 12.0
         })
         st.rerun()
 
@@ -1079,36 +1036,20 @@ with tab2:
         box_usage = {box: st.number_input(box, min_value=0, step=1, key=f"box_{box.replace(' ','_')}")
                      for box in box_types}
 
-        submitted = st.form_submit_button(
-            "🚀 Complete Order & Deduct Stock",
-            use_container_width=True,
-            type="primary"
-        )
+        submitted = st.form_submit_button("🚀 Complete Order & Deduct Stock", use_container_width=True, type="primary")
 
-if submitted:
-    if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
-        st.error("Client Name, Order Number, and Operator Name are required.")
-    else:
-        feedback = []
-        deduction_details = []  # This will hold data for both logging & PDF
-        success = True
+    if submitted:
+        if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
+            st.error("Client Name, Order Number, and Operator Name are required.")
+        else:
+            feedback = []
+            deduction_details = []
+            success = True
 
-        # Process Coils
-        for line in st.session_state.coil_lines:
-            ok, ft = process_production_line(
-                line, coil_extra, "Coil",
-                order_number, client_name, operator_name,
-                feedback, deduction_details
-            )
-            if not ok:
-                success = False
-                break
-
-        # Process Rolls (only if coils succeeded)
-        if success:
-            for line in st.session_state.roll_lines:
+            # Process Coils
+            for line in st.session_state.coil_lines:
                 ok, ft = process_production_line(
-                    line, roll_extra, "Roll",
+                    line, coil_extra, "Coil",
                     order_number, client_name, operator_name,
                     feedback, deduction_details
                 )
@@ -1116,44 +1057,57 @@ if submitted:
                     success = False
                     break
 
-        if success:
-            st.success(f"Order **{order_number}** completed successfully!")
-            for msg in feedback:
-                st.info(msg)
+            # Process Rolls
+            if success:
+                for line in st.session_state.roll_lines:
+                    ok, ft = process_production_line(
+                        line, roll_extra, "Roll",
+                        order_number, client_name, operator_name,
+                        feedback, deduction_details
+                    )
+                    if not ok:
+                        success = False
+                        break
 
-            # ── PDF GENERATION ───────────────────────────────────────────────────────
-            pdf_buffer = generate_production_pdf(
-                order_number=order_number,
-                client_name=client_name,
-                operator_name=operator_name,
-                deduction_details=deduction_details,
-                box_usage=box_usage
-            )
+            if success:
+                st.success(f"Order **{order_number}** completed successfully! 🎉")
+                for msg in feedback:
+                    st.info(msg)
 
-            # ── SEND EMAIL WITH PDF ──────────────────────────────────────────────────
-            try:
-                # Use your existing email function (adjust params if needed)
-                # Assuming you have something like send_production_pdf(pdf_buffer, order_number, client_name)
+                # Generate PDF
+                pdf_buffer = generate_production_pdf(
+                    order_number=order_number,
+                    client_name=client_name,
+                    operator_name=operator_name,
+                    deduction_details=deduction_details,
+                    box_usage=box_usage
+                )
+
+                # Send email
                 if send_production_pdf(pdf_buffer, order_number, client_name):
-                    st.success("✅ PDF generated and emailed to admin!")
+                    st.balloons()
+                    st.success("PDF generated and emailed to admin! Form cleared.")
                 else:
-                    st.warning("PDF created, but email failed to send. Check secrets/SMTP settings.")
-            except Exception as e:
-                st.error(f"Email sending failed: {str(e)}")
-                # Still allow user to continue - PDF is generated
+                    st.warning("PDF generated, but email failed. Form cleared anyway.")
 
-            # Reset form completely
-            st.session_state.coil_lines = []
-            st.session_state.roll_lines = []
+                # Clear everything
+                st.session_state.coil_lines = []
+                st.session_state.roll_lines = []
+                st.session_state.prod_client = ""
+                st.session_state.prod_order = ""
+                st.session_state.prod_operator = st.session_state.get('username', '')
 
-            st.cache_data.clear()
-            st.rerun()
+                for box in box_types:
+                    st.session_state[f"box_{box.replace(' ','_')}"] = 0
 
-        else:
-            st.error("Order failed — no changes were saved.")
-            for msg in feedback:
-                if msg.startswith("✗"):
-                    st.error(msg)                            
+                st.cache_data.clear()
+                st.rerun()
+
+            else:
+                st.error("Order failed — no changes were saved.")
+                for msg in feedback:
+                    if msg.startswith("✗"):
+                        st.error(msg)                            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
