@@ -154,30 +154,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Normalize category names - handle plurals/singular/case variations
-def normalize_category(cat):
-    if pd.isna(cat):
-        return "Unknown"
-    cat = str(cat).strip().lower()
-    if "coil" in cat:
-        return "Coil"
-    if "roll" in cat:
-        return "Roll"
-    if "fab strap" in cat or "fabstraps" in cat:
-        return "Fab Strap"
-    if "elbow" in cat:
-        return "Elbow"
-    # Add more patterns as you discover them
-    return cat.capitalize()  # fallback to title case
-
-# Apply normalization
-if 'Category' in df.columns:
-    df['Category_normalized'] = df['Category'].apply(normalize_category)
-    # Use the normalized column everywhere instead of original
-    category_col = 'Category_normalized'
-else:
-    st.warning("No 'Category' column found - normalization skipped")
-
 def send_email_to_admin(client, order_no, pdf_bytes):
     # --- CONFIGURATION ---
     SENDER_EMAIL = "internal.mjp@gmail.com"
