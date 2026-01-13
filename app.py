@@ -472,6 +472,30 @@ if 'df' not in st.session_state or 'df_audit' not in st.session_state:
 df = st.session_state.df
 df_audit = st.session_state.df_audit
 
+# Normalize category names - handle plurals/singular/case variations
+def normalize_category(cat):
+    if pd.isna(cat):
+        return "Unknown"
+    cat = str(cat).strip().lower()
+    if "coil" in cat:
+        return "Coil"
+    if "roll" in cat:
+        return "Roll"
+    if "fab strap" in cat or "fabstraps" in cat:
+        return "Fab Strap"
+    if "elbow" in cat:
+        return "Elbow"
+    # Add more patterns as needed (e.g. "fab strap" vs "fab straps")
+    return cat.capitalize()  # fallback
+
+# Apply normalization
+if 'Category' in df.columns:
+    df['Category_normalized'] = df['Category'].apply(normalize_category)
+    category_col = 'Category_normalized'  # Use this normalized column everywhere
+else:
+    st.warning("No 'Category' column found - normalization skipped")
+    category_col = 'Category'  # fallback
+
 # --- SAVE FUNCTION (PROTECTED VERSION) ---
 def save_inventory():
     try:
