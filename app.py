@@ -1033,10 +1033,18 @@ with tab2:
             "Small Metal Box", "Big Metal Box",
             "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"
         ]
-        box_usage = {box: st.number_input(box, min_value=0, step=1, key=f"box_{box.replace(' ','_')}")
-                     for box in box_types}
+        box_usage = {}
+        for box in box_types:
+            box_usage[box] = st.number_input(
+                box, min_value=0, step=1,
+                key=f"box_{box.replace(' ', '_')}"
+            )
 
-        submitted = st.form_submit_button("🚀 Complete Order & Deduct Stock", use_container_width=True, type="primary")
+        submitted = st.form_submit_button(
+            "🚀 Complete Order & Deduct Stock",
+            use_container_width=True,
+            type="primary"
+        )
 
     if submitted:
         if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
@@ -1090,7 +1098,7 @@ with tab2:
                 else:
                     st.warning("PDF generated, but email failed. Form cleared anyway.")
 
-                # Clear everything
+                # Clear form completely
                 st.session_state.coil_lines = []
                 st.session_state.roll_lines = []
                 st.session_state.prod_client = ""
@@ -1098,7 +1106,7 @@ with tab2:
                 st.session_state.prod_operator = st.session_state.get('username', '')
 
                 for box in box_types:
-                    st.session_state[f"box_{box.replace(' ','_')}"] = 0
+                    st.session_state[f"box_{box.replace(' ', '_')}"] = 0
 
                 st.cache_data.clear()
                 st.rerun()
