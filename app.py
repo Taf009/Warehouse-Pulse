@@ -622,28 +622,21 @@ def update_stock(item_id, new_footage, user_name, action_type):
 def process_production_line(
     line,
     extra_inches: float,
-    material_type: str,          # "Coil" or "Roll"
+    material_type: str,  # "Coil" or "Roll"
     order_number: str,
     client_name: str,
     operator_name: str,
     feedback: list,
     deduction_details: list
 ) -> tuple[bool, float]:
-    """
-    Processes one line: deducts stock, logs to Supabase, collects data for PDF.
-    Returns (success: bool, footage_used: float)
-    Appends to deduction_details for PDF if successful.
-    """
     if line["pieces"] <= 0 or not line["items"]:
         return True, 0.0
 
     try:
-        # Get first source item (single source for now)
         selected = line["items"][0]
         item_id = selected.split(" - ")[0].strip()
         material = selected.split(" - ")[1].split(" (")[0].strip()
 
-        # Determine base length
         if line.get("use_custom", False) and line.get("custom_inches", 0) > 0:
             base_inches = line["custom_inches"]
             display_size = f"Custom {base_inches:.2f}\""
@@ -657,23 +650,18 @@ def process_production_line(
         total_inches = base_inches + extra_inches
         ft_needed = (line["pieces"] * total_inches / 12.0) + line["waste"]
 
-        # Fresh read from Supabase
         res = supabase.table("inventory").select("Footage").eq("Item_ID", item_id).execute()
         if not res.data:
-            raise ValueError(f"Item {item_id} not found in inventory")
+            raise ValueError(f"Item {item_id} not found")
 
         current_ft = float(res.data[0]["Footage"])
-        if current_ft < ft_needed - 0.01:  # small tolerance
-            raise ValueError(
-                f"Insufficient stock ({material_type}): need {ft_needed:.2f} ft, have {current_ft:.2f} ft"
-            )
+        if current_ft < ft_needed - 0.01:
+            raise ValueError(f"Insufficient stock ({material_type}): need {ft_needed:.2f} ft, have {current_ft:.2f} ft")
 
         new_footage = current_ft - ft_needed
 
-        # 1. Update inventory
         supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
 
-        # 2. Log to production_log2
         log_entry = {
             "order_number": order_number,
             "client_name": client_name,
@@ -685,26 +673,27 @@ def process_production_line(
             "footage_used": round(ft_needed, 2),
             "source_item_ids": item_id,
             "extra_inches": extra_inches,
-            "box_usage": "pending"  # You can improve this later
+            "type": material_type,  # NEW: "Coil" or "Roll"
+            "box_usage": "pending"
         }
         supabase.table("production_log2").insert(log_entry).execute()
 
-        # 3. Collect for PDF & feedback
         deduction_details.append({
             "display_size": display_size,
             "pieces": line["pieces"],
             "material": material,
             "total_used": ft_needed,
-            "waste": line["waste"]
+            "waste": line["waste"],
+            "source": item_id,  # NEW: for admin tracking in PDF if needed
+            "type": material_type  # NEW: for admin to know Coil/Roll
         })
 
-        feedback.append(f"✓ {material_type} {item_id} – deducted {ft_needed:.2f} ft")
+        feedback.append(f"✓ {material_type} {item_id} deducted {ft_needed:.2f} ft")
         return True, ft_needed
 
     except Exception as e:
         feedback.append(f"✗ {material_type} line failed: {str(e)}")
         return False, 0.0
-
 # --- TABS ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
 
