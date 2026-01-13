@@ -11,22 +11,14 @@ from email import encoders
 import io
 from email.mime.application import MIMEApplication
 from supabase import create_client, Client
+from fpdf import FPDF
+import io
+from datetime import datetime
 from collections import defaultdict
 
-# --- LOW STOCK THRESHOLDS
-LOW_STOCK_THRESHOLDS = {
-    ".016 Smooth Aluminum": 6000.0,
-    ".020 Stucco Aluminum": 6000.0,
-    ".020 Smooth Aluminum": 3500.0,
-    ".016 Stucco Aluminum": 2500.0,
-    ".010 Stainless Steel Polythene": 2500.0,
-    # Add roll thresholds if different
-}
-
-# --- PDF CLASS & FUNCTION (only the good one with logo & Type column) ---
 class PDF(FPDF):
     def header(self):
-        # Add logo
+        # Add logo (adjust path/size as needed)
         try:
             self.image("logo.png", x=10, y=8, w=30)
         except Exception:
@@ -54,10 +46,10 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.cell(0, 10, "Internal Production #: ____________________ (Admin to fill)", 0, 1)
     pdf.ln(10)
 
-    # Table header - Type column (Coil/Roll)
+    # Table header - only "Type" (Coil/Roll), no Item ID
     pdf.set_font('Arial', 'B', 11)
     pdf.cell(45, 10, "Size / Pieces", border=1)
-    pdf.cell(40, 10, "Type", border=1)
+    pdf.cell(40, 10, "Type", border=1)          # NEW: just "Coil" or "Roll"
     pdf.cell(55, 10, "Material", border=1)
     pdf.cell(30, 10, "Footage (ft)", border=1)
     pdf.cell(30, 10, "Waste (ft)", border=1, ln=1)
@@ -66,7 +58,7 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.set_font('Arial', '', 11)
     for line in deduction_details:
         size_pieces = f"{line['display_size']} / {line['pieces']} pcs"
-        line_type = line.get('type', 'Unknown')
+        line_type = line.get('type', 'Unknown')  # "Coil" or "Roll"
         
         pdf.cell(45, 10, size_pieces, border=1)
         pdf.cell(40, 10, line_type, border=1)
@@ -97,7 +89,7 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.cell(0, 10, f"**Total Footage: {grand_footage:.2f} ft**", fill=True, ln=1)
     pdf.cell(0, 10, f"**Total Waste: {grand_waste:.2f} ft**", fill=True, ln=1)
 
-    # Boxes used
+    # Boxes used (safe dash handling)
     pdf.ln(15)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, "Boxes Used:", ln=1)
@@ -115,11 +107,14 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.output(buffer)
     buffer.seek(0)
     return buffer
-
 # --- DATABASE CONNECTION ---
+# This pulls the credentials you just saved in the "Secrets" section
+# --- 2. DATABASE CONNECTION (SMART VERSION) ---
+# --- 2. DATABASE CONNECTION (TOP LEVEL) ---
 @st.cache_resource 
 def init_connection():
     try:
+        # Check if secrets exist
         if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
             return None
         
@@ -129,27 +124,348 @@ def init_connection():
     except:
         return None
 
+# THIS LINE MUST BE OUTSIDE ANY FUNCTION
 supabase = init_connection()
 
-# --- DATA LOADER ---
+# --- 3. UPDATED DATA LOADER ---
 @st.cache_data(ttl=300)
 def load_all_tables():
     if supabase is None:
         return pd.DataFrame(), pd.DataFrame()
     
     try:
+        # Fetching from the table named 'inventory'
         inv_res = supabase.table("inventory").select("*").execute()
         df_inv = pd.DataFrame(inv_res.data)
         
+        # Fetching from the table named 'audit_log' (NO 'S')
         audit_res = supabase.table("audit_log").select("*").execute()
         df_audit = pd.DataFrame(audit_res.data)
+        
+        return df_inv, df_audit
+    except Exception as e:
+        # This will catch the error and tell us the table name causing it
+        st.error(f"Error loading tables: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+# MUST BE THE FIRST ST COMMAND
+st.set_page_config(
+    page_title="MJP Pulse Inventory",
+    page_icon="⚡", # You can use an emoji or a URL to your logo image
+    layout="wide"
+)
+
+def send_email_to_admin(client, order_no, pdf_bytes):
+    # --- CONFIGURATION ---
+    SENDER_EMAIL = "internal.mjp@gmail.com"
+    SENDER_PASSWORD = "jxsajugwtbukgdwb" # Not your login password, a generated 'App Password'
+    ADMIN_EMAIL = "tmilazi@gmail.com"
+    SMTP_SERVER = "smtp.gmail.com"
+    SMTP_PORT = 587
+
+    # Create Message
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = ADMIN_EMAIL
+    msg['Subject'] = f"New Production Order: {order_no} - {client}"
+
+    body = f"Attached is the Production & Picking Ticket for Order #{order_no} ({client})."
+    msg.attach(MIMEText(body, 'plain'))
+
+    # Attach PDF
+    part = MIMEApplication(pdf_bytes, Name=f"Order_{order_no}.pdf")
+    part['Content-Disposition'] = f'attachment; filename="Order_{order_no}.pdf"'
+    msg.attach(part)
+
+    # Send Process
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"Email failed: {e}")
+        return False
+
+# --- LOW STOCK ALERT STYLING ---
+st.markdown("""
+<style>
+.low-stock-banner {
+    background-color: #FFB74D;  /* Soft amber */
+    padding: 15px;
+    border-radius: 8px;
+    border-left: 6px solid #FF8F00;
+    margin-bottom: 20px;
+}
+.low-stock-text {
+    color: #000000;  /* Bold black */
+    font-weight: bold;
+    font-size: 18px;
+}
+.low-stock-item {
+    color: #000000;
+    font-weight: bold;
+}
+.low-stock-row {
+    background-color: #FFF9C4 !important;  /* Light yellow */
+    font-weight: bold;
+    color: #000000 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+# --- 1. PAGE CONFIG (Must be at the very top) ---
+st.set_page_config(
+    page_title="MJP Pulse Inventory",
+    page_icon="⚡", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- 2. PWA & PROFESSIONAL STYLING ---
+st.markdown("""
+    <style>
+        /* PWA Meta Tags (Injected into Header) */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
+        
+        /* Professional Title Styling */
+        .main-title {
+            font-family: 'Inter', sans-serif;
+            font-weight: 800;
+            color: #1E3A8A;
+            font-size: 42px;
+            margin-bottom: 0px;
+        }
+        .sub-title {
+            font-family: 'Inter', sans-serif;
+            color: #64748B;
+            font-size: 16px;
+            margin-top: -15px;
+            margin-bottom: 20px;
+        }
+        /* Sidebar Polish */
+        [data-testid="stSidebar"] {
+            background-color: #f8fafc;
+            border-right: 1px solid #e2e8f0;
+        }
+    </style>
+    
+    <head>
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <title>MJP Pulse</title>
+    </head>
+""", unsafe_allow_html=True)
+
+# --- 3. SIDEBAR BRANDING ---
+with st.sidebar:
+    # Logo Logic
+    try:
+        st.image("logo.png", use_container_width=True)
+    except:
+        st.markdown("<h1 style='text-align: center;'>⚡ MJP</h1>", unsafe_allow_html=True)
+    try:
+        # Try a tiny query just to check the pulse
+        supabase.table("inventory").select("count", count="exact").limit(1).execute()
+        st.success("🛰️ Database: Online")
+    except Exception:
+        st.error("🛰️ Database: Offline")
+    
+    st.divider()
+    
+    # User Status Card
+    st.markdown(f"""
+        <div style="background-color: white; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+            <p style="margin:0; color: #64748B; font-size: 12px; font-weight: bold; text-transform: uppercase;">Current Operator</p>
+            <p style="margin:0; color: #1E3A8A; font-size: 18px; font-weight: bold;">{st.session_state.get('username', 'Admin User')}</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+# --- OFFLINE NOTIFICATION SYSTEM ---
+st.markdown("""
+    <script>
+        const updateOnlineStatus = () => {
+            const condition = navigator.onLine ? "online" : "offline";
+            if (condition === "offline") {
+                // Show a clean red alert at the top of the screen
+                const div = document.createElement("div");
+                div.id = "offline-warning";
+                div.style = "position: fixed; top: 0; left: 0; width: 100%; background: #ef4444; color: white; text-align: center; padding: 10px; z-index: 9999; font-family: sans-serif; font-weight: bold;";
+                div.innerHTML = "⚠️ Wi-Fi Connection Lost. Please check your signal to save changes.";
+                document.body.appendChild(div);
+            } else {
+                // Remove the alert if back online
+                const warning = document.getElementById("offline-warning");
+                if (warning) warning.remove();
+            }
+        };
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+    </script>
+""", unsafe_allow_html=True)
+
+    # Global Actions
+if st.button("🔄 Sync Cloud Data", use_container_width=True):
+    st.cache_data.clear()
+    st.toast("Pulling fresh data from Supabase...")
+    st.rerun()
+    
+    st.divider()
+    # Your Tab/Navigation code usually follows here...
+
+# --- 4. MAIN PAGE HEADER ---
+st.markdown('<p class="main-title">MJP Pulse</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">Precision Inventory & Logistics Engine</p>', unsafe_allow_html=True) 
+
+st.divider()
+
+# --- SIZE MAP ---
+SIZE_DISPLAY = {
+    "1#": 12.0,
+    "#2": 13.5,
+    "#3": 14.75,
+    "#4": 16.25,
+    "#5": 18.0,
+    "#6": 20.0,
+    "#7": 23.0,
+    "#8": 26.0,
+    "#9": 29.5,
+    "#10": 32.5,
+    "#11": 36.0,
+    "#12": 39.25,
+    "#13": 42.25,
+    "#14": 46.5,
+    "#15": 49.5,
+    "#16": 52.75,
+    "#17": 57,
+    "#18": 60.25,
+    "#19": 63.25,
+    "#20": 66.5,
+    "#21": 69.75,
+    "#22": 72.75,
+    "#23": 76,
+    "#24": 79.25,
+    "#25": 82.5,
+    "#26": 85.5,
+    "#27": 88.5,
+    "#28": 92,
+    "#29": 95,
+    "#30": 98.25,
+    "#31": 101.5,
+    "#32": 104.5,
+    "#33": 107.75,
+}
+SIZE_MAP = {k.replace("#", "Size "): v for k, v in SIZE_DISPLAY.items()}
+
+# --- MATERIALS FOR COILS ---
+COIL_MATERIALS = [
+    ".010 Smooth Stainless Steel No Polythene",
+    ".010 Stainless Steel Polythene",
+    ".016 Stainless Steel No Polythene",
+    ".016 Stainless Polythene",
+    ".020 Stainless Steel Polythene",
+    ".010 Stainless Steel RPR",
+    ".016 Smooth Aluminum",
+    ".016 Stucco Aluminum",
+    ".020 Smooth Aluminum",
+    ".020 Stucco Aluminum",
+    ".024 Smooth Aluminum",
+    ".024 Stucco Aluminum",
+    ".032 Smooth Aluminum",
+    ".032 Stucco Aluminum"
+]
+
+# --- MATERIALS FOR ROLLS ---
+ROLL_MATERIALS = [
+    "RPR .016 Smooth Aluminum",
+    "RPR .016 Stucco Aluminum",
+    "RPR .020 Smooth Aluminum",
+    "RPR .020 Stucco Aluminum",
+    "RPR .024 Smooth Aluminum",
+    "RPR .024 Stucco Aluminum",
+    "RPR .032 Smooth Aluminum",
+    "RPR .032 Stucco Aluminum",
+    ".010 Smooth Stainless Steel",
+    ".010 Stucco Stainless Steel",
+    ".016 Smooth Stainless Steel",
+    ".016 Stucco Stainless Steel",
+    ".020 Smooth Stainless Steel",
+    ".020 Stucco Stainless Steel",
+    ".016 Smooth Aluminum",
+    ".016 Stucco Aluminum",
+    ".020 Smooth Aluminum",
+    ".020 Stucco Aluminum",
+    ".024 Smooth Aluminum",
+    ".024 Stucco Aluminum",
+    ".032 Smooth Aluminum",
+    ".032 Stucco Aluminum"
+]
+
+# --- LOW STOCK THRESHOLDS ---
+LOW_STOCK_THRESHOLDS = {
+    ".016 Smooth Aluminum": 6000.0,
+    ".020 Stucco Aluminum": 6000.0,
+    ".020 Smooth Aluminum": 3500.0,
+    ".016 Stucco Aluminum": 2500.0,
+    ".010 Stainless Steel Polythene": 2500.0,
+    # Add roll thresholds if different
+}
+
+# --- LOGIN SYSTEM ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+
+if not st.session_state.logged_in:
+    st.subheader("🔐 Login Required")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Log In"):
+        users = st.secrets["users"]
+        if username in users and users[username] == password:
+            st.session_state.logged_in = True
+            st.session_state.username = username
+            st.success(f"Welcome, {username}!")
+            st.rerun()
+        else:
+            st.error("Invalid username or password")
+    st.stop()
+
+st.sidebar.success(f"Logged in as: **{st.session_state.username}**")
+if st.sidebar.button("Log Out"):
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.rerun()
+
+operator_name = st.session_state.username
+
+# --- 1. THE DATA ENGINE (REPLACE YOUR OLD GOOGLE CONNECTION WITH THIS) ---
+@st.cache_data(ttl=300)
+def load_all_tables():
+    try:
+        # 1. Fetch Inventory
+        inv_response = supabase.table("inventory").select("*").execute()
+        df_inv = pd.DataFrame(inv_response.data)
+        
+        # 2. Fetch Audit Logs
+        audit_response = supabase.table("audit_log").select("*").execute()
+        df_audit = pd.DataFrame(audit_response.data)
+        
+        # 3. Fetch log data
+        log_response = supabase.table("log_data").select("*").execute()
+        df_log = pd.DataFrame(log_response.data)
+
+        # 4 Fetch Production log
+        prod_response = supabase.table("production_log").select("*").execute()
+        df_prod = pd.DataFrame(prod_response.data)
         
         return df_inv, df_audit
     except Exception as e:
         st.error(f"Error loading tables: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-# Initialize data
+# Initialize both
 if 'df' not in st.session_state or 'df_audit' not in st.session_state:
     st.session_state.df, st.session_state.df_audit = load_all_tables()
 
@@ -169,22 +485,22 @@ def normalize_category(cat):
         return "Fab Strap"
     if "elbow" in cat:
         return "Elbow"
+    # Add more patterns as needed (e.g. "fab strap" vs "fab straps")
     return cat.capitalize()  # fallback
 
-# Apply normalization (NOW after df exists)
+# Apply normalization
 if 'Category' in df.columns:
     df['Category_normalized'] = df['Category'].apply(normalize_category)
-    category_col = 'Category_normalized'
+    category_col = 'Category_normalized'  # Use this normalized column everywhere
 else:
     st.warning("No 'Category' column found - normalization skipped")
-    category_col = 'Category'
-
-# Debug: Show normalized categories (remove later if you want)
-st.sidebar.write("DEBUG: Normalized Categories", df[category_col].unique().tolist())
+    category_col = 'Category'  # fallback
 
 # --- SAVE FUNCTION (PROTECTED VERSION) ---
 def save_inventory():
     try:
+        # 1. Safety Check: If the dataframe is empty, DO NOT SAVE.
+        # This prevents accidental wiping of your Google Sheet.
         if st.session_state.df is None or st.session_state.df.empty:
             st.error("⚠️ CRITICAL: Inventory data is empty. Save aborted to prevent data loss.")
             return
@@ -193,16 +509,20 @@ def save_inventory():
         sh = gc.open_by_url(st.secrets["SHEET_URL"])
         inv_ws = sh.worksheet("Inventory")
 
+        # 2. Prepare the data for Google Sheets
+        # We use the current state of 'df' to create the list for the sheet
         new_data = [st.session_state.df.columns.tolist()] + st.session_state.df.values.tolist()
 
+        # 3. Update the worksheet
         inv_ws.clear()
         inv_ws.update('A1', new_data)
         
+        # A small notification that disappears after a few seconds
         st.toast("✅ Inventory synchronized with Google Sheets.")
+
     except Exception as e:
         st.error(f"Failed to save inventory: {e}")
         st.info("Safety mode: Your data was NOT cleared on the Google Sheet.")
-
 # --- LOW STOCK CHECK & EMAIL ---
 def check_low_stock_and_alert():
     low_materials = []
@@ -234,7 +554,7 @@ def check_low_stock_and_alert():
         except Exception as e:
             st.error(f"Low stock detected but email failed: {e}")
 
-# --- PRODUCTION LOG SAVE (Google Sheets fallback - consider migrating to Supabase) ---
+# --- PRODUCTION LOG SAVE ---
 def save_production_log(order_number, client_name, operator_name, deduction_details, box_usage):
     try:
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
@@ -275,6 +595,13 @@ def log_action(action, details=""):
     except Exception as e:
         st.warning(f"Could not log action: {e}")
 
+# --- PDF GENERATION ---
+class PDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 16)
+        self.cell(0, 10, 'Production Order Complete', 0, 1, 'C')
+        self.ln(10)
+
 # --- EMAIL FUNCTION ---
 def send_production_pdf(pdf_buffer, order_number, client_name):
     try:
@@ -290,7 +617,7 @@ def send_production_pdf(pdf_buffer, order_number, client_name):
         part = MIMEBase('application', 'octet-stream')
         part.set_payload(pdf_buffer.read())
         encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f"attachment; filename={filename}")
+        part.add_header('Content-Disposition', f"attachment; filename= {filename}")
         msg.attach(part)
 
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
@@ -301,14 +628,13 @@ def send_production_pdf(pdf_buffer, order_number, client_name):
     except Exception as e:
         st.error(f"Email failed: {e}")
         return False
-
-# --- UPDATE STOCK (with better debug) ---
+        
 def update_stock(item_id, new_footage, user_name, action_type):
     try:
-        update_response = supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
-        print(f"DEBUG: Updated {item_id} to {new_footage} ft - Response: {update_response}")
-        st.toast(f"Inventory updated: {item_id} → {new_footage:.2f} ft", icon="✅")
-
+        # Update the Inventory table
+        supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
+        
+        # Insert into the Audit Log table
         log_entry = {
             "Item_ID": item_id,
             "Action": action_type,
@@ -317,13 +643,14 @@ def update_stock(item_id, new_footage, user_name, action_type):
         }
         supabase.table("audit_logs").insert(log_entry).execute()
         
+        # CRITICAL: Clear cache so the app pulls the new numbers immediately
         st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"Failed to update database: {e}")
         return False
 
-# --- PROCESS PRODUCTION LINE (with debug) ---
+# ── HELPER: Process one production line (coil or roll) ───────────────────────────
 def process_production_line(
     line,
     extra_inches: float,
@@ -355,6 +682,7 @@ def process_production_line(
         total_inches = base_inches + extra_inches
         ft_needed = (line["pieces"] * total_inches / 12.0) + line["waste"]
 
+        # Fresh read
         res = supabase.table("inventory").select("Footage").eq("Item_ID", item_id).execute()
         if not res.data:
             raise ValueError(f"Item {item_id} not found in inventory")
@@ -365,12 +693,17 @@ def process_production_line(
 
         new_footage = current_ft - ft_needed
 
+        # CRITICAL UPDATE - with error checking
         update_response = supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
-        print(f"DEBUG: Updated {item_id} ({material_type}) to {new_footage:.2f} ft - Response: {update_response}")
 
-        feedback.append(f"✓ {material_type} {item_id} – deducted {ft_needed:.2f} ft")
+        # Log the response for debugging (visible in logs)
+        print(f"UPDATE RESPONSE for {item_id} ({material_type}): {update_response}")
+
+        # If we got here, show success in app
+        feedback.append(f"✓ {material_type} {item_id} – deducted {ft_needed:.2f} ft (Footage now: {new_footage:.2f})")
         st.toast(f"Inventory updated: {item_id} → {new_footage:.2f} ft", icon="✅")
 
+        # Log to production_log2
         log_entry = {
             "order_number": order_number,
             "client_name": client_name,
@@ -401,15 +734,15 @@ def process_production_line(
     except Exception as e:
         error_msg = f"✗ {material_type} line failed: {str(e)}"
         feedback.append(error_msg)
-        st.error(error_msg)
+        st.error(error_msg)  # Show real error in app
         return False, 0.0
-
 # --- TABS ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
 
 with tab1:
+    # 1. Dashboard Navigation
     if not df.empty:
-        available_categories = sorted(df[category_col].unique().tolist())
+        available_categories = sorted(df['Category'].unique().tolist())
         view_options = ["All Materials"] + available_categories
         
         selected_view = st.radio(
@@ -419,19 +752,22 @@ with tab1:
             help="Switch between Coils, Rolls, or other material categories"
         )
         
+        # Filter data based on selection
         if selected_view == "All Materials":
             display_df = df.copy()
             st.subheader("📊 Global Material Pulse")
         else:
-            display_df = df[df[category_col] == selected_view].copy()
+            display_df = df[df['Category'] == selected_view].copy()
             st.subheader(f"📊 {selected_view} Inventory Pulse")
 
-        summary_df = display_df.groupby(['Material', category_col]).agg({
+        # 2. DATA AGGREGATION
+        summary_df = display_df.groupby(['Material', 'Category']).agg({
             'Footage': 'sum',
             'Item_ID': 'count'
         }).reset_index()
         summary_df.columns = ['Material', 'Type', 'Total_Footage', 'Unit_Count']
 
+        # 3. TOP-LEVEL METRICS
         m1, m2, m3 = st.columns(3)
         current_total_ft = display_df['Footage'].sum()
         current_unit_count = len(display_df)
@@ -443,6 +779,7 @@ with tab1:
 
         st.divider()
 
+        # 4. THE PULSE GRID
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
@@ -451,33 +788,37 @@ with tab1:
                 units = row['Unit_Count']
                 cat_type = row['Type'] 
                 
+                # --- A. SET DEFAULTS ---
                 display_value = f"{ft:,.1f}"
                 unit_text = "Units"
                 sub_label_text = "In Stock"
 
-                if cat_type == "Roll":
+                # --- B. LOGIC BRANCHES ---
+                if cat_type == "Rolls":
+                    # Smart check for RPR 200ft vs Standard 100ft
                     divisor = 200 if "RPR" in mat.upper() else 100
                     roll_qty = ft / divisor
                     display_value = f"{roll_qty:.1f}"
                     unit_text = f"Rolls ({divisor}ft)"
                     sub_label_text = f"Total: {ft:,.1f} FT"
                 
-                elif cat_type == "Coil":
+                elif cat_type == "Coils":
                     display_value = f"{ft:,.1f}"
                     unit_text = "FT"
                     sub_label_text = f"{int(units)} Separate Coils"
                 
-                elif cat_type == "Fab Strap":
+                elif cat_type == "Fab Straps":
                     display_value = f"{int(ft)}"
                     unit_text = "Bundles"
                     sub_label_text = "Standard Stock"
 
-                elif cat_type == "Elbow":
+                elif cat_type == "Elbows":
                     display_value = f"{int(ft)}"
                     unit_text = "Pcs"
                     sub_label_text = "Standard Stock"
 
-                limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type in ["Fab Strap", "Elbow"] else 1000.0)
+                # --- C. THRESHOLD / HEALTH LOGIC ---
+                limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type in ["Fab Straps", "Elbows"] else 1000.0)
                 
                 if ft < limit:
                     status_color, status_text = "#FF4B4B", "🚨 REORDER REQUIRED"
@@ -486,6 +827,7 @@ with tab1:
                 else:
                     status_color, status_text = "#00C853", "✅ STOCK HEALTHY"
 
+                # --- D. RENDER THE CARD ---
                 st.markdown(f"""
                 <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
                             border-left: 12px solid {status_color}; margin-bottom: 15px; min-height: 180px;">
@@ -499,32 +841,37 @@ with tab1:
                 </div>
                 """, unsafe_allow_html=True)
 
+        # 5. INDIVIDUAL ITEM TABLE
         with st.expander(f"🔍 View {selected_view} Serial Numbers / Detail"):
             st.dataframe(
-                display_df[['Item_ID', category_col, 'Material', 'Footage', 'Location']].sort_values('Material'), 
+                display_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location']].sort_values('Material'), 
                 use_container_width=True, 
                 hide_index=True
             )
     else:
         st.info("No data available. Add inventory in the Warehouse tab.")
-
 # ── TAB 2: Production Log ────────────────────────────────────────────────────────
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
 
+    # Guard rails
     if df.empty:
         st.warning("⚠️ No inventory data found. Please add items first.")
         st.stop()
 
-    category_col = next((c for c in df.columns if c.lower() == 'category_normalized' or c.lower() == 'category'), 'Category')
-    if category_col == 'Category':
-        st.warning("Using original Category column - normalization may not be applied.")
+    # Safe column name handling
+    category_col = next((c for c in df.columns if c.lower() == 'category'), None)
+    if not category_col:
+        st.error("Column 'Category' not found in inventory data.")
+        st.stop()
 
+    # Initialize session state - start with one default line each
     if "coil_lines" not in st.session_state:
         st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": [], "use_custom": False, "custom_inches": 12.0}]
     if "roll_lines" not in st.session_state:
         st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": [], "use_custom": False, "custom_inches": 12.0}]
 
+    # Material type toggle
     st.markdown("### 🔧 Material Type Filter")
     material_type = st.radio(
         "Select texture for sources (applies to both Coils & Rolls)",
@@ -540,13 +887,8 @@ with tab2:
             return df_subset[df_subset['Material'].str.contains("Stucco", case=False)]
         return df_subset
 
-    # Robust filter using contains
-    available_coils = filter_materials(
-        df[df[category_col].str.contains("coil", case=False, na=False) & (df['Footage'] > 0)]
-    )
-    available_rolls = filter_materials(
-        df[df[category_col].str.contains("roll", case=False, na=False) & (df['Footage'] > 0)]
-    )
+    available_coils = filter_materials(df[(df[category_col] == "Coil") & (df['Footage'] > 0)])
+    available_rolls = filter_materials(df[(df[category_col] == "Roll") & (df['Footage'] > 0)])
 
     if available_coils.empty and available_rolls.empty:
         st.info("No available stock matching the selected texture.")
@@ -766,6 +1108,7 @@ with tab2:
                 for msg in feedback:
                     st.info(msg)
 
+                # Generate PDF
                 pdf_buffer = generate_production_pdf(
                     order_number=order_number,
                     client_name=client_name,
@@ -774,12 +1117,14 @@ with tab2:
                     box_usage=box_usage
                 )
 
+                # Send email
                 if send_production_pdf(pdf_buffer, order_number, client_name):
                     st.balloons()
                     st.success("PDF generated and emailed to admin! Form cleared.")
                 else:
                     st.warning("PDF generated, but email failed. Form cleared anyway.")
 
+                # Clear dynamic lines only (form fields auto-clear via clear_on_submit)
                 st.session_state.coil_lines = []
                 st.session_state.roll_lines = []
 
