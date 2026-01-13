@@ -1014,7 +1014,7 @@ with tab2:
     st.divider()
 
     # ── SUBMISSION FORM ─────────────────────────────────────────────────────────────
-    with st.form("production_order_form", clear_on_submit=False):
+    with st.form("production_order_form", clear_on_submit=True):
         st.markdown("#### 📑 Order Information")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1033,18 +1033,10 @@ with tab2:
             "Small Metal Box", "Big Metal Box",
             "Small Elbow Box", "Medium Elbow Box", "Large Elbow Box"
         ]
-        box_usage = {}
-        for box in box_types:
-            box_usage[box] = st.number_input(
-                box, min_value=0, step=1,
-                key=f"box_{box.replace(' ', '_')}"
-            )
+        box_usage = {box: st.number_input(box, min_value=0, step=1, key=f"box_{box.replace(' ','_')}") 
+                     for box in box_types}
 
-        submitted = st.form_submit_button(
-            "🚀 Complete Order & Deduct Stock",
-            use_container_width=True,
-            type="primary"
-        )
+        submitted = st.form_submit_button("🚀 Complete Order & Deduct Stock", use_container_width=True, type="primary")
 
     if submitted:
         if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
@@ -1098,15 +1090,9 @@ with tab2:
                 else:
                     st.warning("PDF generated, but email failed. Form cleared anyway.")
 
-                # Clear form completely
+                # Clear dynamic lines only (form fields auto-clear via clear_on_submit)
                 st.session_state.coil_lines = []
                 st.session_state.roll_lines = []
-                st.session_state.prod_client = ""
-                st.session_state.prod_order = ""
-                st.session_state.prod_operator = st.session_state.get('username', '')
-
-                for box in box_types:
-                    st.session_state[f"box_{box.replace(' ', '_')}"] = 0
 
                 st.cache_data.clear()
                 st.rerun()
