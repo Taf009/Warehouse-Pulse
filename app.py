@@ -14,9 +14,18 @@ from supabase import create_client, Client
 from fpdf import FPDF
 import io
 from datetime import datetime
+from collections import defaultdict
 
 class PDF(FPDF):
     def header(self):
+        # Add logo (adjust path or use URL if hosted)
+        try:
+            self.image("logo.png", x=10, y=8, w=30)  # w = width in mm; adjust as needed
+        except Exception:
+            # Fallback if logo file missing
+            self.set_font('Arial', 'I', 10)
+            self.cell(0, 10, "MJP Pulse Logo", 0, 1, 'L')
+        
         self.set_font('Arial', 'B', 16)
         self.cell(0, 10, 'Production Order', 0, 1, 'C')
         self.ln(5)
@@ -26,10 +35,10 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.add_page()
     pdf.set_font('Arial', '', 12)
 
-    # Top information
+    # Top information section
     pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1)
-
-    pdf.set_fill_color(200, 255, 200)  # Very light green
+    
+    pdf.set_fill_color(200, 255, 200)  # Light green highlight
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, f"Client: {client_name}", fill=True, ln=1)
     pdf.cell(0, 10, f"Internal Order #: {order_number}", fill=True, ln=1)
@@ -38,21 +47,25 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.cell(0, 10, "Internal Production #: ____________________ (Admin to fill)", 0, 1)
     pdf.ln(10)
 
-    # Table header
+    # Table header - includes new Type / Source ID column
     pdf.set_font('Arial', 'B', 11)
-    pdf.cell(50, 10, "Size / Pieces", border=1)
-    pdf.cell(60, 10, "Material", border=1)
-    pdf.cell(35, 10, "Footage (ft)", border=1)
-    pdf.cell(35, 10, "Waste (ft)", border=1, ln=1)
+    pdf.cell(45, 10, "Size / Pieces", border=1)
+    pdf.cell(50, 10, "Type / Source ID", border=1)   # NEW COLUMN
+    pdf.cell(50, 10, "Material", border=1)
+    pdf.cell(30, 10, "Footage (ft)", border=1)
+    pdf.cell(30, 10, "Waste (ft)", border=1, ln=1)
 
-    # Table rows
+    # Table body
     pdf.set_font('Arial', '', 11)
     for line in deduction_details:
         size_pieces = f"{line['display_size']} / {line['pieces']} pcs"
-        pdf.cell(50, 10, size_pieces, border=1)
-        pdf.cell(60, 10, line['material'], border=1)
-        pdf.cell(35, 10, f"{line['total_used']:.2f}", border=1)
-        pdf.cell(35, 10, f"{line['waste']:.2f}", border=1, ln=1)
+        type_source = f"{line.get('type', 'Unknown')} - {line.get('source', 'N/A')}"
+        
+        pdf.cell(45, 10, size_pieces, border=1)
+        pdf.cell(50, 10, type_source, border=1)
+        pdf.cell(50, 10, line['material'], border=1)
+        pdf.cell(30, 10, f"{line['total_used']:.2f}", border=1)
+        pdf.cell(30, 10, f"{line['waste']:.2f}", border=1, ln=1)
 
     # Material totals
     pdf.ln(10)
@@ -60,14 +73,13 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.cell(0, 10, "Material Totals", ln=1)
     pdf.set_font('Arial', '', 11)
 
-    from collections import defaultdict
     totals = defaultdict(lambda: {"footage": 0.0, "waste": 0.0})
     for line in deduction_details:
         mat = line['material']
         totals[mat]["footage"] += line['total_used']
         totals[mat]["waste"] += line['waste']
 
-    pdf.set_fill_color(200, 255, 200)  # light green for totals
+    pdf.set_fill_color(200, 255, 200)
     grand_footage = 0.0
     grand_waste = 0.0
     for mat, t in totals.items():
@@ -78,7 +90,7 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     pdf.cell(0, 10, f"**Total Footage: {grand_footage:.2f} ft**", fill=True, ln=1)
     pdf.cell(0, 10, f"**Total Waste: {grand_waste:.2f} ft**", fill=True, ln=1)
 
-        # Boxes used
+    # Boxes used (safe dash handling)
     pdf.ln(15)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, "Boxes Used:", ln=1)
@@ -86,19 +98,17 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     used_any = False
     for box, count in box_usage.items():
         if count > 0:
-            # Replace en-dash/em-dash with plain hyphen
             safe_box = box.replace('–', '-').replace('—', '-')
             pdf.cell(0, 10, f"{safe_box} - {count}", ln=1)
             used_any = True
     if not used_any:
         pdf.cell(0, 10, "No boxes used", ln=1)
 
-    # Output to bytes buffer
+    # Output to buffer
     buffer = io.BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
     return buffer
-
 # --- DATABASE CONNECTION ---
 # This pulls the credentials you just saved in the "Secrets" section
 # --- 2. DATABASE CONNECTION (SMART VERSION) ---
