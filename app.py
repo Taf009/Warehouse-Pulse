@@ -630,7 +630,7 @@ def update_stock(item_id, new_footage, user_name, action_type):
 def process_production_line(
     line,
     extra_inches: float,
-    material_type: str,  # "Coil" or "Roll"
+    material_type: str,
     order_number: str,
     client_name: str,
     operator_name: str,
@@ -653,14 +653,15 @@ def process_production_line(
             display_size = line["display_size"]
 
         if base_inches <= 0:
-            raise ValueError("Invalid size or length selected")
+            raise ValueError("Invalid size/length selected")
 
         total_inches = base_inches + extra_inches
         ft_needed = (line["pieces"] * total_inches / 12.0) + line["waste"]
 
+        # Fresh read
         res = supabase.table("inventory").select("Footage").eq("Item_ID", item_id).execute()
         if not res.data:
-            raise ValueError(f"Item {item_id} not found")
+            raise ValueError(f"Item {item_id} not found in inventory")
 
         current_ft = float(res.data[0]["Footage"])
         if current_ft < ft_needed - 0.01:
@@ -668,8 +669,17 @@ def process_production_line(
 
         new_footage = current_ft - ft_needed
 
-        supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
+        # CRITICAL UPDATE - with error checking
+        update_response = supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
 
+        # Log the response for debugging (visible in logs)
+        print(f"UPDATE RESPONSE for {item_id} ({material_type}): {update_response}")
+
+        # If we got here, show success in app
+        feedback.append(f"✓ {material_type} {item_id} – deducted {ft_needed:.2f} ft (Footage now: {new_footage:.2f})")
+        st.toast(f"Inventory updated: {item_id} → {new_footage:.2f} ft", icon="✅")
+
+        # Log to production_log2
         log_entry = {
             "order_number": order_number,
             "client_name": client_name,
@@ -681,7 +691,7 @@ def process_production_line(
             "footage_used": round(ft_needed, 2),
             "source_item_ids": item_id,
             "extra_inches": extra_inches,
-            "type": material_type,  # NEW: "Coil" or "Roll"
+            "type": material_type,
             "box_usage": "pending"
         }
         supabase.table("production_log2").insert(log_entry).execute()
@@ -692,15 +702,15 @@ def process_production_line(
             "material": material,
             "total_used": ft_needed,
             "waste": line["waste"],
-            "source": item_id,  # NEW: for admin tracking in PDF if needed
-            "type": material_type  # NEW: for admin to know Coil/Roll
+            "type": material_type
         })
 
-        feedback.append(f"✓ {material_type} {item_id} deducted {ft_needed:.2f} ft")
         return True, ft_needed
 
     except Exception as e:
-        feedback.append(f"✗ {material_type} line failed: {str(e)}")
+        error_msg = f"✗ {material_type} line failed: {str(e)}"
+        feedback.append(error_msg)
+        st.error(error_msg)  # Show real error in app
         return False, 0.0
 # --- TABS ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
