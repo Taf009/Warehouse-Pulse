@@ -496,33 +496,6 @@ else:
     st.warning("No 'Category' column found - normalization skipped")
     category_col = 'Category'  # fallback
 
-# --- SAVE FUNCTION (PROTECTED VERSION) ---
-def save_inventory():
-    try:
-        # 1. Safety Check: If the dataframe is empty, DO NOT SAVE.
-        # This prevents accidental wiping of your Google Sheet.
-        if st.session_state.df is None or st.session_state.df.empty:
-            st.error("⚠️ CRITICAL: Inventory data is empty. Save aborted to prevent data loss.")
-            return
-
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-        sh = gc.open_by_url(st.secrets["SHEET_URL"])
-        inv_ws = sh.worksheet("Inventory")
-
-        # 2. Prepare the data for Google Sheets
-        # We use the current state of 'df' to create the list for the sheet
-        new_data = [st.session_state.df.columns.tolist()] + st.session_state.df.values.tolist()
-
-        # 3. Update the worksheet
-        inv_ws.clear()
-        inv_ws.update('A1', new_data)
-        
-        # A small notification that disappears after a few seconds
-        st.toast("✅ Inventory synchronized with Google Sheets.")
-
-    except Exception as e:
-        st.error(f"Failed to save inventory: {e}")
-        st.info("Safety mode: Your data was NOT cleared on the Google Sheet.")
 # --- LOW STOCK CHECK & EMAIL ---
 def check_low_stock_and_alert():
     low_materials = []
@@ -553,47 +526,6 @@ def check_low_stock_and_alert():
             st.success("⚠️ Low stock detected — reorder email sent to admin!")
         except Exception as e:
             st.error(f"Low stock detected but email failed: {e}")
-
-# --- PRODUCTION LOG SAVE ---
-def save_production_log(order_number, client_name, operator_name, deduction_details, box_usage):
-    try:
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-        sh = gc.open_by_url(st.secrets["SHEET_URL"])
-        log_ws = sh.worksheet("Production_Log")
-
-        rows = []
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        boxes_str = "; ".join([f"{k}: {v}" for k, v in box_usage.items() if v > 0]) or "None"
-
-        for line in deduction_details:
-            rows.append([
-                timestamp,
-                operator_name,
-                client_name,
-                order_number,
-                line["material"],
-                line["display_size"],
-                line["pieces"],
-                line["waste"],
-                line["items"],
-                boxes_str,
-                line["total_used"]
-            ])
-
-        log_ws.append_rows(rows)
-    except Exception as e:
-        st.warning(f"Could not save to production log: {e}")
-
-# --- AUDIT LOG ---
-def log_action(action, details=""):
-    try:
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-        sh = gc.open_by_url(st.secrets["SHEET_URL"])
-        log_ws = sh.worksheet("Audit_Log")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_ws.append_row([timestamp, st.session_state.username, action, details])
-    except Exception as e:
-        st.warning(f"Could not log action: {e}")
 
 # --- PDF GENERATION ---
 class PDF(FPDF):
