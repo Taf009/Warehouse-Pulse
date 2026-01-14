@@ -1303,8 +1303,8 @@ with tab3:
 
             if success:
                 st.success(f"✅ Stock removed for {customer} ({sales_order})!")
-                st.balloons()
-                st.snow()  # confetti/snow effect
+                st.balloons()          # Classic balloons
+                st.snow()              # Falling snow/confetti effect
                 st.toast("Another one bites the dust! 🦆", icon="🎉")
                 st.cache_data.clear()
                 st.rerun()
