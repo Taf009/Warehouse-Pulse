@@ -333,19 +333,35 @@ LOW_STOCK_THRESHOLDS = {
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
 
 with tab1:
-    # 1. Dashboard Navigation
+    # Refresh button (optional but super useful)
+    col_refresh, _ = st.columns([1, 3])
+    with col_refresh:
+        if st.button("🔄 Refresh Dashboard", use_container_width=False):
+            st.cache_data.clear()
+            st.toast("Dashboard refreshed from cloud!", icon="🛰️")
+            st.rerun()
+
+    # Optional last updated time
+    st.caption(f"Data last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
     if not df.empty:
+        # Available categories (sorted)
         available_categories = sorted(df['Category'].unique().tolist())
         view_options = ["All Materials"] + available_categories
-        
-        selected_view = st.radio(
-            "Select Dashboard View", 
-            view_options, 
-            horizontal=True,
-            help="Switch between Coils, Rolls, or other material categories"
-        )
-        
-        # Filter data based on selection
+
+        # Sidebar filter - clean and scales to any number of categories
+        with st.sidebar:
+            st.subheader("Dashboard Filter")
+            selected_view = st.selectbox(
+                "Category",
+                view_options,
+                index=0,  # Default: All Materials
+                placeholder="Select category...",
+                help="Choose what to show on the dashboard",
+                key="dashboard_category_filter"
+            )
+
+        # Filter data based on sidebar selection
         if selected_view == "All Materials":
             display_df = df.copy()
             st.subheader("📊 Global Material Pulse")
@@ -372,7 +388,7 @@ with tab1:
 
         st.divider()
 
-        # 4. THE PULSE GRID
+        # 4. THE PULSE GRID (your original cards)
         cols = st.columns(2)
         for idx, row in summary_df.iterrows():
             with cols[idx % 2]:
@@ -388,7 +404,6 @@ with tab1:
 
                 # --- B. LOGIC BRANCHES ---
                 if cat_type == "Rolls":
-                    # Smart check for RPR 200ft vs Standard 100ft
                     divisor = 200 if "RPR" in mat.upper() else 100
                     roll_qty = ft / divisor
                     display_value = f"{roll_qty:.1f}"
@@ -429,7 +444,7 @@ with tab1:
                     <h1 style="margin: 10px 0; color: {status_color};">{display_value} <span style="font-size: 16px;">{unit_text}</span></h1>
                     <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
                         <span style="font-weight: bold; color: {status_color}; font-size: 12px;">{status_text}</span>
-                        <span style="color: #888; font-size: 11px;">{sub_label_text} ({units} IDs)</span>
+                        <span style="color: #888; font-size: 11px;">{units} IDs</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
