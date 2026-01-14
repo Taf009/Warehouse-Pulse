@@ -631,25 +631,27 @@ def send_production_pdf(pdf_buffer, order_number, client_name):
         
 def update_stock(item_id, new_footage, user_name, action_type):
     try:
-        # Update the Inventory table
+        # Update inventory
         supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
         
-        # Insert into the Audit Log table
+        # Log entry - ALWAYS include "Details" with a value
         log_entry = {
             "Item_ID": item_id,
             "Action": action_type,
             "User": user_name,
-            "Timestamp": datetime.now().isoformat()
+            "Timestamp": datetime.now().isoformat(),
+            "Details": f"Updated Item {item_id} to {new_footage:.2f} ft via {action_type}"  # ← non-null value!
+            # You can make this more detailed, e.g.:
+            # "Details": f"Removed stock for {action_type.split('for ')[-1]} (new total: {new_footage:.2f})"
         }
         supabase.table("audit_log").insert(log_entry).execute()
         
-        # CRITICAL: Clear cache so the app pulls the new numbers immediately
         st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"Failed to update database: {e}")
         return False
-
+        
 # ── HELPER: Process one production line (coil or roll) ───────────────────────────
 def process_production_line(
     line,
