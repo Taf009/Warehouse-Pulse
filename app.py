@@ -1261,7 +1261,7 @@ with tab3:
 
         submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True, type="primary")
 
-    # ── Processing logic ────────────────────────────────────────────────────────
+    # ── Processing logic with Back Order feature ────────────────────────────────
     if submit_pick and selected_mat:
         if not customer.strip():
             st.error("⚠️ Please enter Customer / Job Name.")
@@ -1269,6 +1269,7 @@ with tab3:
             st.error("⚠️ Please enter Sales Order Number.")
         else:
             success = False
+            back_order_created = False
             
             action_suffix = f" (SO: {sales_order})"
             
@@ -1281,7 +1282,7 @@ with tab3:
                         action_type=f"Sold {pick_cat[:-1]} to {customer}{action_suffix}"
                     )
             else:
-                # Use global df for actual update (safety)
+                # Bulk removal with partial deduction + back order
                 mask = (df['Category'] == pick_cat) & (df['Material'] == selected_mat)
                 if mask.any():
                     current_stock = df.loc[mask, 'Footage'].values[0]
@@ -1297,14 +1298,60 @@ with tab3:
                                 action_type=f"Removed {pick_qty} {pick_cat[:-1]}(s) for {customer}{action_suffix}"
                             )
                     else:
-                        st.error(f"❌ Not enough stock! Current: {current_stock} | Requested: {pick_qty}")
+                        # Partial deduction
+                        shortfall = pick_qty - current_stock
+                        new_total = 0.0  # Deduct everything available
+                        with st.spinner("Processing Partial Removal..."):
+                            success = update_stock(
+                                item_id=bulk_item_id,
+                                new_footage=new_total,
+                                user_name=picker_name,
+                                action_type=f"Partial removal: {current_stock} {pick_cat[:-1]}(s) deducted (shortfall: {shortfall}) for {customer}{action_suffix}"
+                            )
+                        
+                        if success:
+                            st.warning(f"⚠️ Only {current_stock} available – deducted all. Shortfall: {shortfall}")
+                            
+                            # Back order option
+                            st.markdown("### Back Order the Shortfall?")
+                            create_back_order = st.checkbox(
+                                f"Create back order for {shortfall} {pick_cat[:-1]}(s) of {selected_mat}",
+                                value=True,
+                                key="back_order_chk"
+                            )
+                            
+                            back_order_note = st.text_input(
+                                "Optional note for back order",
+                                placeholder="e.g. Urgent for client - ship when restocked",
+                                key="back_order_note"
+                            )
+                            
+                            if create_back_order:
+                                try:
+                                    back_order_data = {
+                                        "material": selected_mat,
+                                        "shortfall_quantity": shortfall,
+                                        "client_name": customer.strip(),
+                                        "order_number": sales_order.strip(),
+                                        "status": "Open",
+                                        "note": back_order_note.strip() or None
+                                    }
+                                    supabase.table("back_orders").insert(back_order_data).execute()
+                                    back_order_created = True
+                                    st.success(f"✅ Back order created for {shortfall} {pick_cat[:-1]}(s)!")
+                                except Exception as e:
+                                    st.error(f"Failed to create back order: {e}")
                 else:
                     st.error("Item not found in current data – try Sync Cloud Data.")
 
             if success:
-                st.success(f"✅ Stock removed for {customer} ({sales_order})!")
+                msg = f"✅ Stock removed for {customer} ({sales_order})!"
+                if back_order_created:
+                    msg += f"\nBack order placed for shortfall."
+                
+                st.success(msg)
                 st.balloons()
-                st.snow()  # confetti/snow effect
+                st.snow()
                 st.toast("Another one bites the dust! 🦆", icon="🎉")
                 st.cache_data.clear()
                 st.rerun()
