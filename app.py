@@ -641,7 +641,7 @@ def update_stock(item_id, new_footage, user_name, action_type):
             "User": user_name,
             "Timestamp": datetime.now().isoformat()
         }
-        supabase.table("audit_logs").insert(log_entry).execute()
+        supabase.table("audit_log").insert(log_entry).execute()
         
         # CRITICAL: Clear cache so the app pulls the new numbers immediately
         st.cache_data.clear()
