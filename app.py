@@ -118,6 +118,32 @@ if 'df' not in st.session_state or 'df_audit' not in st.session_state:
 df = st.session_state.df
 df_audit = st.session_state.df_audit
 
+# After this:
+df = st.session_state.df
+df_audit = st.session_state.df_audit
+
+# Paste update_stock here
+def update_stock(item_id, new_footage, user_name, action_type):
+    try:
+        supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
+        
+        log_entry = {
+            "Item_ID": item_id,
+            "Action": action_type,
+            "User": user_name,
+            "Timestamp": datetime.now().isoformat(),
+            "Details": f"Updated Item {item_id} to {new_footage:.2f} ft via {action_type}"
+        }
+        supabase.table("audit_log").insert(log_entry).execute()
+        
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Failed to update database: {e}")
+        return False
+
+# Then continue with login, sidebar, etc.
+
 # --- LOW STOCK THRESHOLDS (define FIRST - before the function) ---
 LOW_STOCK_THRESHOLDS = {
     ".016 Smooth Aluminum": 6000.0,
