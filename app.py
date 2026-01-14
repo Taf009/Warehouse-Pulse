@@ -1138,15 +1138,55 @@ with tab2:
                         st.error(msg)                            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
-    st.caption("Perform instant stock removals. Updates will sync across all tablets immediately.")
+    st.caption("Perform instant stock removals. Updates sync across all devices in real-time.")
 
-    # 1. Filter Data based on Category Selection
-    # Note: We use singular names here to match our new database cleaning logic
-    pick_cat = st.selectbox("What are you picking?", ["Fab Strap", "Roll", "Elbow", "Mineral Wool", "Coil"], key="pick_cat_sales")
+    # ── Local helper function - only lives inside this tab ───────────────────────
+    def normalize_pick_category(cat):
+        if pd.isna(cat) or not isinstance(cat, str):
+            return "Unknown"
+        
+        cat_lower = str(cat).strip().lower()
+        
+        mapping = {
+            'fab strap':     'Fab Straps',
+            'fabstraps':     'Fab Straps',
+            'fab straps':    'Fab Straps',
+            'strap':         'Fab Straps',
+            'straps':        'Fab Straps',
+            'coil':          'Coils',
+            'coils':         'Coils',
+            'roll':          'Rolls',
+            'rolls':         'Rolls',
+            'elbow':         'Elbows',
+            'elbows':        'Elbows',
+            'mineral wool':  'Mineral Wool',
+            'mineralwools':  'Mineral Wool',
+        }
+        
+        for key, value in mapping.items():
+            if key in cat_lower:
+                return value
+        
+        # Fallback - try to make it plural-ish
+        return cat.strip().title() + 's' if not cat.strip().endswith(('s', 'wool')) else cat.strip().title()
+
+    # ── Apply normalization only to the copy we use in this tab ──────────────────
+    pick_df = df.copy()  # never modify the global df!
+    if 'Category' in pick_df.columns:
+        pick_df['Category'] = pick_df['Category'].apply(normalize_pick_category)
+
+    # Consistent UI options (plural form)
+    category_options = ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"]
     
-    # Filter the cached dataframe
-    filtered_df = df[df['Category'] == pick_cat]
-
+    pick_cat = st.selectbox(
+        "What are you picking?",
+        category_options,
+        key="pick_cat_sales"
+    )
+    
+    # Now filter using the locally normalized copy
+    filtered_df = pick_df[pick_df['Category'] == pick_cat].copy()
+    
     with st.form("dedicated_pick_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
@@ -1160,66 +1200,62 @@ with tab3:
 
         with col2:
             if selected_mat:
-                # Logic for Serialized items (Rolls/Coils) vs Bulk items
-                if pick_cat in ["Roll", "Coil"]:
+                if pick_cat in ["Rolls", "Coils"]:
                     specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
-                    pick_id = st.selectbox("Select Serial # to Sell", specific_ids)
-                    pick_qty = 0 # For serialized, we set footage to 0
+                    pick_id = st.selectbox("Select Serial # to Sell", specific_ids or ["No items available"])
+                    pick_qty = 0
                 else:
-                    # Bulk items use the Material name as ID for the database update
-                    pick_id = "BULK" 
+                    pick_id = "BULK"
                     pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
 
         st.divider()
         
         c1, c2 = st.columns(2)
         customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
-        # Fallback to 'Admin' if session state username isn't set yet
         picker_name = c2.text_input("Authorized By", value=st.session_state.get("username", "Admin"))
 
-        submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True)
+        submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True, type="primary")
 
-    # --- 2. THE HIGH-SPEED PROCESSING ---
+    # ── Rest of the processing logic stays exactly the same ──────────────────────
     if submit_pick and selected_mat:
-        if not customer:
+        if not customer.strip():
             st.error("⚠️ Please enter a Customer or Job Name before confirming.")
         else:
             success = False
             
-            # CASE A: Serialized (Rolls/Coils) -> Set Footage to 0
-            if pick_cat in ["Roll", "Coil"]:
+            if pick_cat in ["Rolls", "Coils"]:
                 with st.spinner("Updating Cloud Database..."):
                     success = update_stock(
-                        item_id=pick_id, 
-                        new_footage=0, 
-                        user_name=picker_name, 
-                        action_type=f"Sold {pick_cat} to {customer}"
+                        item_id=pick_id,
+                        new_footage=0,
+                        user_name=picker_name,
+                        action_type=f"Sold {pick_cat[:-1]} to {customer}"
                     )
-            
-            # CASE B: Bulk Items (Elbows, Straps) -> Subtract Quantity
             else:
-                # Find current stock for this specific bulk item
+                # Use the **global df** for the mask when updating (safety)
                 mask = (df['Category'] == pick_cat) & (df['Material'] == selected_mat)
-                current_stock = df.loc[mask, 'Footage'].values[0]
-                bulk_item_id = df.loc[mask, 'Item_ID'].values[0] # Get the unique ID
-                
-                if current_stock >= pick_qty:
-                    new_total = current_stock - pick_qty
-                    with st.spinner("Processing Bulk Removal..."):
-                        success = update_stock(
-                            item_id=bulk_item_id, 
-                            new_footage=new_total, 
-                            user_name=picker_name, 
-                            action_type=f"Removed {pick_qty} for {customer}"
-                        )
+                if mask.any():
+                    current_stock = df.loc[mask, 'Footage'].values[0]
+                    bulk_item_id = df.loc[mask, 'Item_ID'].values[0]
+                    
+                    if current_stock >= pick_qty:
+                        new_total = current_stock - pick_qty
+                        with st.spinner("Processing Bulk Removal..."):
+                            success = update_stock(
+                                item_id=bulk_item_id,
+                                new_footage=new_total,
+                                user_name=picker_name,
+                                action_type=f"Removed {pick_qty} {pick_cat[:-1]}(s) for {customer}"
+                            )
+                    else:
+                        st.error(f"❌ Not enough stock! Current: {current_stock} | Requested: {pick_qty}")
                 else:
-                    st.error(f"❌ Not enough stock! Current balance: {current_stock}")
+                    st.error("Item not found in current data – please refresh (Sync Cloud Data).")
 
-            # FINAL FEEDBACK
             if success:
-                st.toast(f"Stock Updated for {customer}!", icon="✅")
+                st.toast(f"Stock updated for {customer}!", icon="✅")
                 st.balloons()
-                # Forces the app to re-pull the data from Supabase so the change is visible everywhere
+                st.cache_data.clear()
                 st.rerun()
 with tab4:
     st.subheader("📦 Smart Inventory Receiver")
