@@ -1312,7 +1312,7 @@ with tab3:
 with tab4:
     st.subheader("📦 Smart Inventory Receiver")
     
-    # Updated mapping with new categories (use plural for consistency)
+    # Category mapping (plural consistent)
     cat_mapping = {
         "Coils": "Coils", 
         "Rolls": "Rolls", 
@@ -1334,9 +1334,9 @@ with tab4:
         
         # ── Dynamic Material Builder with Hierarchy ─────────────────────────────
         material = ""
-        qty_val = 1.0  # Default per-item quantity (e.g., footage, pieces)
+        qty_val = 1.0  # Default per-item quantity (e.g., footage, rolls, pieces)
         unit_label = "Items"  # Default
-        is_serialized = cat_choice in ["Coils", "Rolls", "Wire"]  # Categories that get unique IDs
+        is_serialized = cat_choice in ["Coils", "Rolls", "Wire"]  # Wire still optional serialized
         
         with col1:
             st.markdown("**Specs (Step 1)**")
@@ -1350,9 +1350,15 @@ with tab4:
             if gauge == "Other":
                 gauge = st.text_input("Custom Gauge (e.g. .040)")
             
-            material = f"{texture} {metal} {cat_choice[:-1]} - {gauge} Gauge"  # e.g. "Stucco Aluminum Coil - .016 Gauge"
+            clean_gauge = gauge.replace('.', '')
+            texture_code = "SMP" if texture == "Smooth" else "STP"
+            metal_code = "AL" if metal == "Aluminum" else "SST"
+            
+            material = f"{texture} {metal} {cat_choice[:-1]} - {gauge} Gauge"
             qty_val = st.number_input("Footage per Item", min_value=0.1, value=3000.0 if cat_choice == "Coils" else 100.0)
             unit_label = "Footage"
+            
+            id_prefix = f"{cat_choice[:-1]}-{metal_code}-{clean_gauge}-{texture_code}-{int(qty_val)}"
         
         elif cat_choice == "Fiberglass Insulation":
             form_type = st.radio("Form", ["Rolls", "Batts", "Pipe Wrap", "Other"])
@@ -1360,11 +1366,13 @@ with tab4:
             if thickness == "Other":
                 thickness = st.text_input("Custom Thickness (e.g. 3 in)")
             
-            sq_ft_per_roll = st.number_input("Sq Ft per Roll", min_value=1.0, value=150.0, help="Typically 60\" x X for 150 sq ft")
+            sq_ft_per_roll = st.number_input("Sq Ft per Roll", min_value=1.0, value=150.0)
             material = f"Fiberglass {form_type} - {thickness} Thickness - {sq_ft_per_roll} sq ft/roll"
-            qty_val = sq_ft_per_roll  # Per roll
+            qty_val = sq_ft_per_roll
             unit_label = "Sq Ft"
-            is_serialized = form_type == "Rolls"  # Optional: serialize rolls if needed
+            is_serialized = form_type == "Rolls"
+            
+            id_prefix = f"FG-{thickness.replace(' ', '')}-{int(sq_ft_per_roll)}"
         
         elif cat_choice == "Elbows":
             angle = st.radio("Angle", ["45°", "90°", "Other"], horizontal=True)
@@ -1376,11 +1384,12 @@ with tab4:
             material = f"{angle} Elbow - Size #{size_num} - {metal}"
             qty_val = 1.0
             unit_label = "Pieces"
+            id_prefix = f"ELB-{angle.replace('°', '')}-S{size_num}"
         
         elif cat_choice == "Mineral Wool":
             pipe_size = st.selectbox("Pipe Size", ["1 in", "2 in", "3 in", "4 in", "Other"])
             if pipe_size == "Other":
-                pipe_size = st.text_input("Custom Pipe Size (e.g. 6 in)")
+                pipe_size = st.text_input("Custom Pipe Size")
             thickness = st.selectbox("Thickness", ["0.5 in", "1 in", "1.5 in", "2 in", "Other"])
             if thickness == "Other":
                 thickness = st.text_input("Custom Thickness")
@@ -1388,6 +1397,7 @@ with tab4:
             material = f"Mineral Wool - Pipe Size: {pipe_size} - Thickness: {thickness}"
             qty_val = 1.0
             unit_label = "Sections"
+            id_prefix = f"MW-PS{pipe_size.replace(' ', '')}-THK{thickness.replace(' ', '')}"
         
         elif cat_choice == "Wing Seals":
             seal_type = st.radio("Type", ["Open", "Closed"], horizontal=True)
@@ -1400,34 +1410,38 @@ with tab4:
             
             material = f"{seal_type} Wing Seal - {size} - {gauge} Gauge - {grooves} - Joint at {joint_pos}"
             box_qty = st.number_input("Pieces per Box", min_value=1, value=1000, step=100)
-            qty_val = box_qty  # Total pieces per "item" (box)
+            qty_val = box_qty
             unit_label = "Pieces"
+            id_prefix = f"WS-{seal_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
         
         elif cat_choice == "Wire":
             gauge = st.selectbox("Gauge", ["14", "16", "18", "Other"])
             if gauge == "Other":
                 gauge = st.text_input("Custom Gauge")
-            roll_weight = st.number_input("Roll Weight (kg)", min_value=1.0, value=11.0)
+            rolls_count = st.number_input("Number of Rolls per Batch", min_value=1, value=1, step=1)
+            footage_per_roll = st.number_input("Footage per Roll (optional)", min_value=0.0, value=0.0)  # If you track footage
             
-            material = f"Wire - {gauge} Gauge - {roll_weight}kg Roll"
-            qty_val = roll_weight  # Per roll
-            unit_label = "kg"
-            is_serialized = True  # Treat as serialized rolls
+            material = f"Wire - {gauge} Gauge - {rolls_count} Roll(s)"
+            qty_val = rolls_count if footage_per_roll == 0 else footage_per_roll * rolls_count
+            unit_label = "Rolls" if footage_per_roll == 0 else "Footage"
+            is_serialized = st.checkbox("Assign unique ID to each roll?", value=False)  # Optional serialization
+            
+            id_prefix = f"WIRE-{gauge}"  # Simple prefix if serialized
         
         elif cat_choice == "Banding":
-            # From earlier hierarchy
             osc_type = st.radio("Type", ["Oscillated", "Non-Oscillated"])
             size = st.radio("Size", ["3/4 in", "1/2 in"])
             gauge = st.selectbox("Gauge", [".015", ".020"])
             core = st.radio("Core", ["Metal Core", "Non-Metal Core"])
             
             material = f"{osc_type} Banding - {size} - {gauge} Gauge - {core}"
-            qty_val = st.number_input("Footage per Item", min_value=0.1, value=100.0)  # Assuming rolls
+            qty_val = st.number_input("Footage per Item", min_value=0.1, value=100.0)
             unit_label = "Footage"
             is_serialized = True
+            
+            id_prefix = f"BAND-{osc_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
         
         elif cat_choice == "Fab Straps":
-            # Existing, but add metal if needed
             gauge = st.selectbox("Gauge", [".015", ".020"])
             size_num = st.number_input("Size Number", min_value=1, max_value=50, value=1)
             metal = st.radio("Metal Type", ["Aluminum", "Stainless Steel", "Other"])
@@ -1435,28 +1449,29 @@ with tab4:
             material = f"Fab Strap {gauge} - #{size_num} - {metal}"
             qty_val = 1.0
             unit_label = "Bundles"
+            id_prefix = f"FS-{gauge.replace('.', '')}-S{size_num}"
         
         elif cat_choice == "Other":
             cat_choice = st.text_input("New Category Name", placeholder="e.g. Accessories")
             material = st.text_input("Material Description", placeholder="e.g. Custom Gaskets")
             qty_val = st.number_input("Qty/Footage per item", min_value=0.1, value=1.0)
             unit_label = st.text_input("Unit Label", value="Units")
+            id_prefix = f"OTH-{cat_choice.upper()[:3]}" if cat_choice else "OTH-UNK"
         
-        # ── New: Purchase Order Number Input ────────────────────────────────────
+        # ── Purchase Order Number ───────────────────────────────────────────────
         st.divider()
         purchase_order_num = st.text_input(
             "Purchase Order Number",
-            placeholder="e.g. PO-2026-001 (for tracking batch issues)",
-            help="Enter the supplier's order number for this receipt. Useful for tracing quality issues."
+            placeholder="e.g. PO-2026-001",
+            help="Supplier PO# for batch/quality tracking"
         )
         
-        # ── Quantity & Location (existing, with preview) ────────────────────────
+        # ── Quantity & Location ─────────────────────────────────────────────────
         st.divider()
         item_count = st.number_input(f"How many {unit_label} are you receiving?", min_value=1, value=1, step=1)
         total_added = item_count * qty_val
         st.info(f"**Preview:** Adding {item_count} × '{material}' ({total_added} total {unit_label.lower()}) | PO: {purchase_order_num or 'N/A'}")
         
-        # Location Logic (keep your existing rack/floor code here)
         loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
         if loc_type == "Rack System":
             l1, l2, l3 = st.columns(3)
@@ -1467,106 +1482,147 @@ with tab4:
         else:
             gen_loc = st.text_input("Floor Zone Name", value="FLOOR").strip().upper()
 
-        # ID & Operator (existing)
-        prefix = cat_choice.upper()[:4]
-        starting_id = st.text_input("Starting ID", value=f"{prefix}-1001")
         operator = st.text_input("Receiving Operator", value=st.session_state.get("username", ""))
+
+        # ── ID Generation ───────────────────────────────────────────────────────
+        if cat_choice == "Coils" and is_serialized:
+            starting_num = st.number_input("Starting Identifier Number", min_value=1, value=1, step=1)
+            id_preview = f"{id_prefix}-{starting_num:02d}"
+            st.info(f"**ID Preview (first item):** {id_preview}")
+        
+        elif cat_choice == "Rolls" and is_serialized:
+            pallet_num = st.number_input("Pallet Number", min_value=1, value=1, step=1)
+            id_preview = f"{id_prefix}-{pallet_num:02d}"
+            st.info(f"**Pallet ID Preview:** {id_preview} (Total Footage: {total_added})")
+            is_serialized = False  # Pallet as bulk
+        
+        elif is_serialized:
+            starting_id = st.text_input("Starting ID", value=f"{id_prefix}-1001")
+            id_preview = starting_id
+            st.info(f"**ID Preview (first item):** {id_preview}")
+        
+        else:
+            st.info("Bulk item - no unique IDs needed (quantity will be added to existing or new row)")
 
         submitted = st.form_submit_button("📥 Add to Cloud Inventory", use_container_width=True)
 
-    # ── Save Logic (updated to include purchase_order_num) ──────────────────────
+    # ── Save Logic ──────────────────────────────────────────────────────────────
     if submitted:
         if not operator or not material:
             st.error("Operator and material details required.")
         else:
             with st.spinner("Syncing with Cloud..."):
-                # Updated: Include purchase_order_num in new_data/log_entry
-                new_data = {
-                    "Item_ID": ...,  # Existing
-                    "Material": material,
-                    "Footage": qty_val if unit_label == "Footage" else total_added,  # Adapt based on unit
-                    "Location": gen_loc,
-                    "Status": "Active",
-                    "Category": cat_choice,
-                    "Purchase_Order_Num": purchase_order_num or None  # New field - add to Supabase table if needed
-                }
-                # For serialized: Include in each row
-                # For bulk: Update with purchase_order_num if tracking batches
+                try:
+                    if is_serialized:
+                        new_rows = []
+                        for i in range(item_count):
+                            if cat_choice == "Coils":
+                                unique_id = f"{id_prefix}-{ (starting_num + i):02d }"
+                            else:
+                                parts = starting_id.split('-')
+                                base = '-'.join(parts[:-1])
+                                num = int(parts[-1]) + i
+                                unique_id = f"{base}-{num:04d}"
+                            
+                            new_rows.append({
+                                "Item_ID": unique_id,
+                                "Material": material,
+                                "Footage": qty_val,
+                                "Location": gen_loc,
+                                "Status": "Active",
+                                "Category": cat_choice,
+                                "Purchase_Order_Num": purchase_order_num.strip() or None
+                            })
+                        
+                        supabase.table("inventory").insert(new_rows).execute()
+                    
+                    else:
+                        mask = (df['Category'] == cat_choice) & (df['Material'] == material)
+                        if mask.any():
+                            current_qty = df.loc[mask, 'Footage'].values[0]
+                            new_qty = current_qty + total_added
+                            bulk_id = df.loc[mask, 'Item_ID'].values[0]
+                            update_stock(bulk_id, new_qty, operator, f"Received {total_added} {unit_label.lower()} (PO: {purchase_order_num or 'N/A'})")
+                        else:
+                            unique_id = id_preview if 'id_preview' in locals() else f"{cat_choice.upper()}-BULK-{datetime.now().strftime('%Y%m%d')}"
+                            new_data = {
+                                "Item_ID": unique_id,
+                                "Material": material,
+                                "Footage": total_added,
+                                "Location": gen_loc,
+                                "Status": "Active",
+                                "Category": cat_choice,
+                                "Purchase_Order_Num": purchase_order_num.strip() or None
+                            }
+                            supabase.table("inventory").insert(new_data).execute()
+                    
+                    # Audit log
+                    log_id = unique_id if 'unique_id' in locals() else bulk_id
+                    log_entry = {
+                        "Item_ID": log_id,
+                        "Action": "Received",
+                        "User": operator,
+                        "Timestamp": datetime.now().isoformat(),
+                        "Details": f"PO: {purchase_order_num or 'N/A'} | {item_count} × {material} ({total_added} {unit_label.lower()})"
+                    }
+                    supabase.table("audit_logs").insert(log_entry).execute()
+                    
+                    st.cache_data.clear()
+                    st.success(f"Added {item_count} × '{material}' ({total_added} {unit_label.lower()}) to {gen_loc}! PO: {purchase_order_num or 'N/A'}")
+                    st.rerun()
                 
-                # Your existing Supabase insert/update here...
-                # e.g., supabase.table("inventory").insert(new_rows).execute()
-                
-                # Log to audit_logs with PO
-                log_entry = {
-                    "Item_ID": ...,  # Existing
-                    "Action": "Received",
-                    "User": operator,
-                    "Timestamp": datetime.now().isoformat(),
-                    "Details": f"PO: {purchase_order_num or 'N/A'}"
-                }
-                supabase.table("audit_logs").insert(log_entry).execute()
-                
-                st.cache_data.clear()
-                st.success(f"Added {item_count} × '{material}' ({total_added} {unit_label.lower()}) to {gen_loc}! PO: {purchase_order_num or 'N/A'}")
-                st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to add inventory: {e}")
 
-    # ── New: Export Report Section ──────────────────────────────────────────────
+    # ── Receipt Report Section (PDF) ────────────────────────────────────────────
     st.divider()
-    st.subheader("📄 Export Receipt Report")
+    st.subheader("📄 Export Receipt Report (PDF)")
     st.caption("Generate and email a PDF report for items received under a specific Purchase Order Number.")
-    
+
     with st.form("export_report_form"):
-        report_po_num = st.text_input("Purchase Order Number to Report", placeholder="e.g. PO-2026-001")
-        submitted_report = st.form_submit_button("📧 Generate & Email Report to Admin", use_container_width=True)
-    
-    if submitted_report and report_po_num:
-        with st.spinner("Generating report..."):
-            # Fetch items for this PO (assuming you added Purchase_Order_Num column)
-            response = supabase.table("inventory").select("*").eq("Purchase_Order_Num", report_po_num).execute()
+        report_po_num = st.text_input(
+            "Purchase Order Number",
+            placeholder="e.g. PO-2026-001",
+            key="report_po"
+        )
+        
+        export_mode = st.radio(
+            "Action",
+            ["Download Only", "Download & Email to Admin"],
+            horizontal=True
+        )
+        
+        submitted_report = st.form_submit_button("Generate PDF Report", use_container_width=True, type="primary")
+
+    if submitted_report and report_po_num.strip():
+        with st.spinner(f"Fetching items for PO: {report_po_num}..."):
+            response = supabase.table("inventory").select("*").eq("Purchase_Order_Num", report_po_num.strip()).execute()
             report_df = pd.DataFrame(response.data)
             
             if report_df.empty:
                 st.warning(f"No items found for PO: {report_po_num}")
             else:
-                # Generate PDF (reuse your generate_production_pdf or similar)
-                pdf_buffer = generate_receipt_pdf(report_po_num, report_df, operator)  # New function - see below
+                pdf_buffer = generate_receipt_pdf(
+                    po_num=report_po_num,
+                    df=report_df,
+                    operator=st.session_state.get('username', 'Operator')
+                )
                 
-                # Email to admin (reuse your send_email_to_admin)
-                if send_email_to_admin("admin_email", report_po_num, pdf_buffer.getvalue()):
-                    st.success(f"Report for PO {report_po_num} emailed to admin!")
-                else:
-                    st.error("Report generated but email failed. Download below.")
-                    st.download_button("📥 Download PDF", pdf_buffer.getvalue(), f"Receipt_{report_po_num}.pdf")
-
-# ── New Helper Function: Generate Receipt PDF ───────────────────────────────────
-def generate_receipt_pdf(po_num, df, operator):
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_font('Arial', 'B', 16)
-    pdf.cell(0, 10, f'Receipt Report - PO: {po_num}', 0, 1, 'C')
-    pdf.ln(5)
-    pdf.set_font('Arial', '', 12)
-    pdf.cell(0, 10, f"Received by: {operator} | Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
-    pdf.ln(10)
-    
-    # Table of items
-    pdf.set_font('Arial', 'B', 11)
-    pdf.cell(80, 10, "Material", border=1)
-    pdf.cell(30, 10, "Quantity", border=1)
-    pdf.cell(40, 10, "Location", border=1)
-    pdf.ln(10)
-    
-    pdf.set_font('Arial', '', 11)
-    for _, row in df.iterrows():
-        pdf.cell(80, 10, row['Material'], border=1)
-        pdf.cell(30, 10, str(row['Footage']), border=1)
-        pdf.cell(40, 10, row['Location'], border=1)
-        pdf.ln(10)
-    
-    buffer = io.BytesIO()
-    pdf.output(buffer)
-    buffer.seek(0)
-    return buffer            
+                file_name = f"Receipt_{report_po_num.replace(' ', '_')}.pdf"
+                
+                st.download_button(
+                    label="📥 Download PDF Report",
+                    data=pdf_buffer.getvalue(),
+                    file_name=file_name,
+                    mime="application/pdf",
+                    key=f"dl_{report_po_num}"
+                )
+                
+                if export_mode == "Download & Email to Admin":
+                    if send_email_to_admin("tmilazi@gmail.com", report_po_num, pdf_buffer.getvalue(), file_name=file_name):
+                        st.success(f"PDF report for PO {report_po_num} emailed to admin!")
+                    else:
+                        st.warning("PDF generated, but email failed. Use the download button above.")            
 import google.generativeai as genai
 import plotly.express as px
 import plotly.graph_objects as go
