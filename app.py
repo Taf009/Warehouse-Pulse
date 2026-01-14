@@ -118,7 +118,17 @@ if 'df' not in st.session_state or 'df_audit' not in st.session_state:
 df = st.session_state.df
 df_audit = st.session_state.df_audit
 
-# --- LOW STOCK CHECK & EMAIL ---
+# --- LOW STOCK THRESHOLDS (define FIRST - before the function) ---
+LOW_STOCK_THRESHOLDS = {
+    ".016 Smooth Aluminum": 6000.0,
+    ".020 Stucco Aluminum": 6000.0,
+    ".020 Smooth Aluminum": 3500.0,
+    ".016 Stucco Aluminum": 2500.0,
+    ".010 Stainless Steel Polythene": 2500.0,
+    # Add more as needed (e.g. for rolls, insulation, etc.)
+}
+
+# --- LOW STOCK CHECK & EMAIL (now safe) ---
 def check_and_alert_low_stock():
     if df is None or df.empty:
         st.warning("Low stock check skipped: No inventory data loaded.")
@@ -149,7 +159,7 @@ def check_and_alert_low_stock():
             st.toast("Low stock alert email sent!", icon="⚠️")
         except Exception as e:
             st.error(f"Low stock email failed: {e}")
-
+            
 # --- LOGIN SYSTEM ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
