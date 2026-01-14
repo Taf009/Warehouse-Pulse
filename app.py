@@ -788,7 +788,13 @@ with tab3:
     if 'order_lines' not in st.session_state:
         st.session_state.order_lines = []  # list of dicts: category, material, qty, id, shortfall
 
-    # ── Order Information ───────────────────────────────────────────────────────
+    # Session state for single-item back order persistence
+    if 'show_back_order' not in st.session_state:
+        st.session_state.show_back_order = False
+        st.session_state.shortfall = 0
+        st.session_state.selected_mat_back = None
+
+    # ── Order Information (shared) ──────────────────────────────────────────────
     st.markdown("#### 📋 Order Details")
     col1, col2 = st.columns(2)
     with col1:
@@ -913,21 +919,34 @@ with tab3:
                 if success:
                     msg = f"✅ Order complete for {customer} ({sales_order})! {len(st.session_state.order_lines)} item(s) deducted."
                     if partial_lines:
-                        msg += f"\n⚠️ {len(partial_lines)} line(s) had shortfalls — see below."
+                        msg += f"\n⚠️ {len(partial_lines)} line(s) had shortfalls — see back order options below."
                     st.success(msg)
                     st.balloons()
                     st.snow()
                     st.toast("Order processed! 🦆", icon="🎉")
 
-                    # Per-line back order UI for shortfalls
+                    # Per-line back order UI (safe unique keys)
                     if partial_lines:
                         st.markdown("### Back Order Shortfalls?")
                         for p in partial_lines:
-                            st.markdown(f"- **{p['material']}**: Shortfall {p['shortfall']}")
-                            create_back = st.checkbox(f"Create back order for this line", value=True, key=f"back_{p['line_idx']}")
-                            note = st.text_input("Optional note", key=f"note_{p['line_idx']}")
+                            line_idx = p['line_idx']
+                            unique_suffix = f"{line_idx}_{datetime.now().strftime('%H%M%S%f')}"
                             
-                            if create_back:
+                            st.markdown(f"- **{p['material']}**: Shortfall {p['shortfall']}")
+                            
+                            create_back = st.checkbox(
+                                f"Create back order for line {line_idx+1}",
+                                value=True,
+                                key=f"back_{unique_suffix}"
+                            )
+                            
+                            note = st.text_input(
+                                "Optional note",
+                                placeholder="e.g. Urgent - ship when restocked",
+                                key=f"note_{unique_suffix}"
+                            )
+                            
+                            if create_back and st.button("Confirm This Back Order", key=f"confirm_back_{unique_suffix}"):
                                 try:
                                     back_order_data = {
                                         "material": p['material'],
@@ -938,18 +957,19 @@ with tab3:
                                         "note": note.strip() or None
                                     }
                                     supabase.table("back_orders").insert(back_order_data).execute()
-                                    st.success(f"Back order created!")
+                                    st.success(f"Back order created for {p['material']}!")
                                 except Exception as e:
                                     st.error(f"Back order failed: {e}")
 
-                    # Clear after success
+                    # Clear order after success
                     st.session_state.order_lines = []
                     st.cache_data.clear()
                     st.rerun()
                 else:
-                    st.error("Order failed — partial changes may have occurred.")
+                    st.error("Order failed — partial changes may have occurred. Check logs.")
     else:
         st.info("Add items above to build your order.")
+        
 with tab4:
     st.subheader("📦 Smart Inventory Receiver")
     
