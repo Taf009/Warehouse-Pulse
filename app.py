@@ -1302,13 +1302,10 @@ with tab3:
                     st.error("Item not found in current data – try Sync Cloud Data.")
 
             if success:
-                st.success(f"""
-                    ✅ Stock removal confirmed  
-                    **Customer:** {customer}  
-                    **Sales Order:** {sales_order}
-                """)
-                st.toast("Stock updated successfully!", icon="✅")
+                st.success(f"✅ Stock removed for {customer} ({sales_order})!")
                 st.balloons()
+                st.snow()  # confetti/snow effect
+                st.toast("Another one bites the dust! 🦆", icon="🎉")
                 st.cache_data.clear()
                 st.rerun()
 with tab4:
