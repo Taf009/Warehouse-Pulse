@@ -412,6 +412,35 @@ LOW_STOCK_THRESHOLDS = {
     # Add roll thresholds if different
 }
 
+# --- LOW STOCK CHECK & EMAIL ---
+def check_and_alert_low_stock():
+    low_materials = []
+    for material, threshold in LOW_STOCK_THRESHOLDS.items():
+        total = df[df['Material'] == material]['Footage'].sum()
+        if total < threshold:
+            low_materials.append(f"{material}: {total:.1f} ft (below {threshold})")
+
+    if low_materials:
+        subject = "URGENT: Low Stock Alert - MJP Pulse"
+        body = "The following materials are low:\n\n" + "\n".join(low_materials) + "\n\nCheck dashboard immediately."
+        
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = st.secrets["SMTP_EMAIL"]
+            msg['To'] = st.secrets["ADMIN_EMAIL"]
+            msg['Subject'] = subject
+            msg.attach(MIMEText(body, 'plain'))
+
+            server = smtplib.SMTP('smtp.gmail.com', 587)
+            server.starttls()
+            server.login(st.secrets["SMTP_EMAIL"], st.secrets["SMTP_PASSWORD"])
+            server.send_message(msg)
+            server.quit()
+            st.toast("Low stock alert email sent!", icon="⚠️")
+        except Exception as e:
+            st.error(f"Low stock email failed: {e}")
+
+
 # --- LOGIN SYSTEM ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -427,6 +456,9 @@ if not st.session_state.logged_in:
             st.session_state.logged_in = True
             st.session_state.username = username
             st.success(f"Welcome, {username}!")
+
+            #NEW: Check low stock alert on successful login
+            check_and_alert_low_stock()
             st.rerun()
         else:
             st.error("Invalid username or password")
@@ -495,37 +527,6 @@ if 'Category' in df.columns:
 else:
     st.warning("No 'Category' column found - normalization skipped")
     category_col = 'Category'  # fallback
-
-# --- LOW STOCK CHECK & EMAIL ---
-def check_low_stock_and_alert():
-    low_materials = []
-    for material in df['Material'].unique():
-        total_footage = df[df['Material'] == material]['Footage'].sum()
-        threshold = LOW_STOCK_THRESHOLDS.get(material, 1000.0)
-        if total_footage < threshold:
-            low_materials.append(f"{material}: {total_footage:.1f} ft (below {threshold} ft)")
-
-    if low_materials:
-        subject = "URGENT: Low Stock Alert - Reorder Required"
-        body = "The following materials have fallen below minimum stock levels:\n\n" + \
-               "\n".join(low_materials) + \
-               "\n\nPlease place a reorder as soon as possible.\n\n" + \
-               f"Generated automatically on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = st.secrets["SMTP_EMAIL"]
-            msg['To'] = st.secrets["ADMIN_EMAIL"]
-            msg['Subject'] = subject
-            msg.attach(MIMEText(body, 'plain'))
-
-            server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-            server.login(st.secrets["SMTP_EMAIL"], st.secrets["SMTP_PASSWORD"])
-            server.send_message(msg)
-            server.quit()
-            st.success("⚠️ Low stock detected — reorder email sent to admin!")
-        except Exception as e:
-            st.error(f"Low stock detected but email failed: {e}")
 
 # --- PDF GENERATION ---
 class PDF(FPDF):
