@@ -1140,7 +1140,7 @@ with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates sync across all devices in real-time.")
 
-    # ── Local helper function - only lives inside this tab ───────────────────────
+    # ── Local helper function - only for this tab (safe, no global changes) ─────
     def normalize_pick_category(cat):
         if pd.isna(cat) or not isinstance(cat, str):
             return "Unknown"
@@ -1161,21 +1161,22 @@ with tab3:
             'elbows':        'Elbows',
             'mineral wool':  'Mineral Wool',
             'mineralwools':  'Mineral Wool',
+            'mineral wools': 'Mineral Wool',
         }
         
         for key, value in mapping.items():
             if key in cat_lower:
                 return value
         
-        # Fallback - try to make it plural-ish
+        # Fallback - make it plural-ish if it doesn't look plural
         return cat.strip().title() + 's' if not cat.strip().endswith(('s', 'wool')) else cat.strip().title()
 
-    # ── Apply normalization only to the copy we use in this tab ──────────────────
-    pick_df = df.copy()  # never modify the global df!
+    # ── Work on a local copy only ───────────────────────────────────────────────
+    pick_df = df.copy()
     if 'Category' in pick_df.columns:
         pick_df['Category'] = pick_df['Category'].apply(normalize_pick_category)
 
-    # Consistent UI options (plural form)
+    # Consistent plural category options
     category_options = ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"]
     
     pick_cat = st.selectbox(
@@ -1184,10 +1185,49 @@ with tab3:
         key="pick_cat_sales"
     )
     
-    # Now filter using the locally normalized copy
+    # Filter using the locally normalized copy
     filtered_df = pick_df[pick_df['Category'] == pick_cat].copy()
     
     with st.form("dedicated_pick_form", clear_on_submit=True):
+        
+        # ── Two separate panels for Customer & Sales Order ──────────────────────
+        st.markdown("#### 📋 Order & Customer Information")
+        
+        col_cust, col_order = st.columns(2, gap="medium")
+        
+        with col_cust:
+            st.markdown("""
+                <div style="background-color: #f0f7ff; padding: 20px; border-radius: 12px; 
+                            border: 1px solid #d1e3ff; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                    <p style="font-weight: bold; margin: 0 0 12px 0; color: #1e40af;">Customer / Job</p>
+            """, unsafe_allow_html=True)
+            
+            customer = st.text_input(
+                "Customer / Job Name",
+                placeholder="e.g. John Doe / Site A",
+                key="pick_customer"
+            )
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        with col_order:
+            st.markdown("""
+                <div style="background-color: #fff7e6; padding: 20px; border-radius: 12px; 
+                            border: 1px solid #ffe8c2; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                    <p style="font-weight: bold; margin: 0 0 12px 0; color: #92400e;">Sales Order</p>
+            """, unsafe_allow_html=True)
+            
+            sales_order = st.text_input(
+                "Sales Order Number",
+                placeholder="e.g. SO-2026-0456",
+                key="pick_sales_order"
+            )
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # ── Material Selection ──────────────────────────────────────────────────
         col1, col2 = st.columns(2)
         
         with col1:
@@ -1210,18 +1250,25 @@ with tab3:
 
         st.divider()
         
-        c1, c2 = st.columns(2)
-        customer = c1.text_input("Customer / Job Name", placeholder="e.g. John Doe / Site A")
-        picker_name = c2.text_input("Authorized By", value=st.session_state.get("username", "Admin"))
+        # Authorized By (single field, below panels)
+        picker_name = st.text_input(
+            "Authorized By",
+            value=st.session_state.get("username", "Admin"),
+            key="pick_authorized"
+        )
 
         submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True, type="primary")
 
-    # ── Rest of the processing logic stays exactly the same ──────────────────────
+    # ── Processing logic ────────────────────────────────────────────────────────
     if submit_pick and selected_mat:
         if not customer.strip():
-            st.error("⚠️ Please enter a Customer or Job Name before confirming.")
+            st.error("⚠️ Please enter Customer / Job Name.")
+        elif not sales_order.strip():
+            st.error("⚠️ Please enter Sales Order Number.")
         else:
             success = False
+            
+            action_suffix = f" (SO: {sales_order})"
             
             if pick_cat in ["Rolls", "Coils"]:
                 with st.spinner("Updating Cloud Database..."):
@@ -1229,10 +1276,10 @@ with tab3:
                         item_id=pick_id,
                         new_footage=0,
                         user_name=picker_name,
-                        action_type=f"Sold {pick_cat[:-1]} to {customer}"
+                        action_type=f"Sold {pick_cat[:-1]} to {customer}{action_suffix}"
                     )
             else:
-                # Use the **global df** for the mask when updating (safety)
+                # Use global df for actual update (safety)
                 mask = (df['Category'] == pick_cat) & (df['Material'] == selected_mat)
                 if mask.any():
                     current_stock = df.loc[mask, 'Footage'].values[0]
@@ -1245,15 +1292,20 @@ with tab3:
                                 item_id=bulk_item_id,
                                 new_footage=new_total,
                                 user_name=picker_name,
-                                action_type=f"Removed {pick_qty} {pick_cat[:-1]}(s) for {customer}"
+                                action_type=f"Removed {pick_qty} {pick_cat[:-1]}(s) for {customer}{action_suffix}"
                             )
                     else:
                         st.error(f"❌ Not enough stock! Current: {current_stock} | Requested: {pick_qty}")
                 else:
-                    st.error("Item not found in current data – please refresh (Sync Cloud Data).")
+                    st.error("Item not found in current data – try Sync Cloud Data.")
 
             if success:
-                st.toast(f"Stock updated for {customer}!", icon="✅")
+                st.success(f"""
+                    ✅ Stock removal confirmed  
+                    **Customer:** {customer}  
+                    **Sales Order:** {sales_order}
+                """)
+                st.toast("Stock updated successfully!", icon="✅")
                 st.balloons()
                 st.cache_data.clear()
                 st.rerun()
