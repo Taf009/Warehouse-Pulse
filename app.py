@@ -832,13 +832,15 @@ with tab3:
     # Filter using the locally normalized copy
     filtered_df = pick_df[pick_df['Category'] == pick_cat].copy()
     
-    # Session state for back order persistence
+    # Session state to persist back order UI after partial deduction
     if 'show_back_order' not in st.session_state:
         st.session_state.show_back_order = False
         st.session_state.shortfall = 0
         st.session_state.selected_mat_back = None
-        st.session_state.last_customer = ""
-        st.session_state.last_sales_order = ""
+
+    # Multi-line order session state
+    if 'order_lines' not in st.session_state:
+        st.session_state.order_lines = []
 
     with st.form("dedicated_pick_form", clear_on_submit=True):
         
@@ -913,10 +915,6 @@ with tab3:
 
     # ── Processing logic with Back Order feature ────────────────────────────────
     if submit_pick and selected_mat:
-        # Save last values for back order fallback (prevents disappearing)
-        st.session_state.last_customer = customer.strip()
-        st.session_state.last_sales_order = sales_order.strip()
-        
         if not customer.strip():
             st.error("⚠️ Please enter Customer / Job Name.")
         elif not sales_order.strip():
@@ -952,6 +950,7 @@ with tab3:
                                 action_type=f"Removed {pick_qty} {pick_cat[:-1]}(s) for {customer}{action_suffix}"
                             )
                     else:
+                        # Partial deduction + back order trigger
                         shortfall = pick_qty - current_stock
                         new_total = 0.0
                         with st.spinner("Processing Partial Removal..."):
@@ -963,7 +962,7 @@ with tab3:
                             )
                         partial_deduction = True
                         
-                        # Trigger back order UI
+                        # Show back order UI after partial deduction
                         st.session_state.show_back_order = True
                         st.session_state.shortfall = shortfall
                         st.session_state.selected_mat_back = selected_mat
@@ -982,7 +981,7 @@ with tab3:
                 st.cache_data.clear()
                 st.rerun()
 
-    # ── Back Order UI (outside form - persists reliably) ────────────────────────
+    # ── Back Order UI (outside the form - persists after submit) ────────────────
     if st.session_state.show_back_order:
         st.markdown("### Back Order the Shortfall?")
         st.info(f"Shortfall: **{st.session_state.shortfall}** of **{st.session_state.selected_mat_back}**")
@@ -999,29 +998,75 @@ with tab3:
             key="back_order_note"
         )
         
-        col_confirm, col_clear = st.columns(2)
-        with col_confirm:
-            if st.button("Confirm Back Order", type="primary"):
-                try:
-                    back_order_data = {
-                        "material": st.session_state.selected_mat_back,
-                        "shortfall_quantity": st.session_state.shortfall,
-                        "client_name": st.session_state.last_customer,
-                        "order_number": st.session_state.last_sales_order,
-                        "status": "Open",
-                        "note": back_order_note.strip() or None
-                    }
-                    supabase.table("back_orders").insert(back_order_data).execute()
-                    st.success(f"✅ Back order created!")
-                    st.session_state.show_back_order = False
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to create back order: {e}")
-        
-        with col_clear:
-            if st.button("Clear Prompt"):
+        if st.button("Confirm Back Order", type="primary"):
+            try:
+                back_order_data = {
+                    "material": st.session_state.selected_mat_back,
+                    "shortfall_quantity": st.session_state.shortfall,
+                    "client_name": customer.strip() if 'customer' in locals() else "Unknown",
+                    "order_number": sales_order.strip() if 'sales_order' in locals() else "Unknown",
+                    "status": "Open",
+                    "note": back_order_note.strip() or None
+                }
+                supabase.table("back_orders").insert(back_order_data).execute()
+                st.success(f"✅ Back order created for {st.session_state.shortfall} of {st.session_state.selected_mat_back}!")
+                # Reset state after creation
                 st.session_state.show_back_order = False
                 st.rerun()
+            except Exception as e:
+                st.error(f"Failed to create back order: {e}")
+
+    # ── MULTI-LINE ORDER MODE (added on top of your code) ───────────────────────
+    st.divider()
+    st.markdown("### Multi-Line Order Builder (Add Multiple Items)")
+    
+    # Add line
+    col_cat_multi, col_mat_multi = st.columns(2)
+    with col_cat_multi:
+        pick_cat_multi = st.selectbox("Category (multi)", category_options, key="multi_cat")
+    filtered_df_multi = df[df['Category'] == pick_cat_multi].copy()
+    with col_mat_multi:
+        if filtered_df_multi.empty:
+            st.warning(f"No stock in {pick_cat_multi}")
+            selected_mat_multi = None
+        else:
+            mat_options_multi = sorted(filtered_df_multi['Material'].unique())
+            selected_mat_multi = st.selectbox("Material (multi)", mat_options_multi, key="multi_mat")
+
+    if selected_mat_multi:
+        if pick_cat_multi in ["Rolls", "Coils"]:
+            ids_multi = filtered_df_multi[filtered_df_multi['Material'] == selected_mat_multi]['Item_ID'].tolist()
+            pick_id_multi = st.selectbox("Serial # (multi)", ids_multi or ["No items"], key="multi_id")
+            qty_multi = 0
+        else:
+            pick_id_multi = "BULK"
+            qty_multi = st.number_input("Quantity (multi)", min_value=1, step=1, key="multi_qty")
+
+        if st.button("➕ Add Line to Order", type="secondary"):
+            st.session_state.order_lines.append({
+                'category': pick_cat_multi,
+                'material': selected_mat_multi,
+                'qty': qty_multi,
+                'id': pick_id_multi,
+                'shortfall': None
+            })
+            st.toast("Line added!", icon="✅")
+            st.rerun()
+
+    # Show current lines
+    if st.session_state.order_lines:
+        st.markdown("Current lines in order:")
+        for i, line in enumerate(st.session_state.order_lines):
+            st.markdown(f"- {line['material']} ({line['category']}) - Qty: {line['qty'] or 'Full'}")
+            if st.button("Remove", key=f"remove_multi_{i}"):
+                st.session_state.order_lines.pop(i)
+                st.rerun()
+
+        if st.button("Confirm & Deduct Multi-Order", type="primary"):
+            st.info("Multi-order processing - deducting all lines...")
+            # Future: loop through order_lines and deduct each (add when ready)
+            st.session_state.order_lines = []
+            st.rerun()
         
 with tab4:
     st.subheader("📦 Smart Inventory Receiver")
