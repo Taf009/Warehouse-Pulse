@@ -1338,7 +1338,7 @@ with tab3:
     except Exception as e:
         st.error(f"Failed to fetch back orders: {e}")
     
-    elif not st.session_state.pick_cart:
+    if not st.session_state.pick_cart and not st.session_state.show_back_order:
         st.info("👆 Add items to start building your order")
         
 with tab4:
