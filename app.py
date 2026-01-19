@@ -784,7 +784,7 @@ with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates sync across all devices in real-time.")
 
-    # ── Local helper function - only for this tab (safe, no global changes) ─────
+    # ── Local helper function ───────────────────────────────────────────────────
     def normalize_pick_category(cat):
         if pd.isna(cat) or not isinstance(cat, str):
             return "Unknown"
@@ -812,96 +812,162 @@ with tab3:
             if key in cat_lower:
                 return value
         
-        # Fallback - make it plural-ish if it doesn't look plural
         return cat.strip().title() + 's' if not cat.strip().endswith(('s', 'wool')) else cat.strip().title()
 
-    # ── Work on a local copy AND sync with original df ─────────────────────────
+    # ── Work on a local copy ────────────────────────────────────────────────────
     pick_df = df.copy()
     if 'Category' in pick_df.columns:
         pick_df['Category'] = pick_df['Category'].apply(normalize_pick_category)
 
-    # Consistent plural category options
     category_options = ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"]
     
-    pick_cat = st.selectbox(
-        "What are you picking?",
-        category_options,
-        key="pick_cat_sales"
-    )
+    # ── Initialize Session State for Cart ───────────────────────────────────────
+    if 'pick_cart' not in st.session_state:
+        st.session_state.pick_cart = []
     
-    # Filter using the locally normalized copy
-    filtered_df = pick_df[pick_df['Category'] == pick_cat].copy()
-    
-    # Session state to persist back order UI after partial deduction
     if 'show_back_order' not in st.session_state:
         st.session_state.show_back_order = False
-        st.session_state.shortfall = 0
-        st.session_state.selected_mat_back = None
+        st.session_state.back_order_items = []
         st.session_state.last_customer = ""
         st.session_state.last_sales_order = ""
-        st.session_state.deducted_amount = 0
-        st.session_state.pick_cat_back = ""
 
-    with st.form("dedicated_pick_form", clear_on_submit=True):
+    # ── Order Information (Outside form so it persists) ─────────────────────────
+    st.markdown("#### 📋 Order & Customer Information")
+    
+    col_cust, col_order = st.columns(2, gap="medium")
+    
+    with col_cust:
+        st.markdown("""
+            <div style="background-color: #f0f7ff; padding: 20px; border-radius: 12px; 
+                        border: 1px solid #d1e3ff; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                <p style="font-weight: bold; margin: 0 0 12px 0; color: #1e40af;">Customer / Job</p>
+        """, unsafe_allow_html=True)
         
-        # ── Two separate panels for Customer & Sales Order ──────────────────────
-        st.markdown("#### 📋 Order & Customer Information")
+        customer = st.text_input(
+            "Customer / Job Name",
+            placeholder="e.g. John Doe / Site A",
+            key="pick_customer_persist"
+        )
         
-        col_cust, col_order = st.columns(2, gap="medium")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col_order:
+        st.markdown("""
+            <div style="background-color: #fff7e6; padding: 20px; border-radius: 12px; 
+                        border: 1px solid #ffe8c2; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                <p style="font-weight: bold; margin: 0 0 12px 0; color: #92400e;">Sales Order</p>
+        """, unsafe_allow_html=True)
         
-        with col_cust:
-            st.markdown("""
-                <div style="background-color: #f0f7ff; padding: 20px; border-radius: 12px; 
-                            border: 1px solid #d1e3ff; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                    <p style="font-weight: bold; margin: 0 0 12px 0; color: #1e40af;">Customer / Job</p>
-            """, unsafe_allow_html=True)
-            
-            customer = st.text_input(
-                "Customer / Job Name",
-                placeholder="e.g. John Doe / Site A",
-                key="pick_customer"
-            )
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+        sales_order = st.text_input(
+            "Sales Order Number",
+            placeholder="e.g. SO-2026-0456",
+            key="pick_sales_order_persist"
+        )
         
-        with col_order:
-            st.markdown("""
-                <div style="background-color: #fff7e6; padding: 20px; border-radius: 12px; 
-                            border: 1px solid #ffe8c2; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                    <p style="font-weight: bold; margin: 0 0 12px 0; color: #92400e;">Sales Order</p>
-            """, unsafe_allow_html=True)
-            
-            sales_order = st.text_input(
-                "Sales Order Number",
-                placeholder="e.g. SO-2026-0456",
-                key="pick_sales_order"
-            )
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.divider()
-        
-        # ── Material Selection ──────────────────────────────────────────────────
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.divider()
+
+    # ── Add Items to Cart Form ──────────────────────────────────────────────────
+    st.markdown("#### ➕ Add Items to Order")
+    
+    with st.form("add_to_cart_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
         with col1:
+            pick_cat = st.selectbox(
+                "Category",
+                category_options,
+                key="pick_cat_add"
+            )
+        
+        filtered_df = pick_df[pick_df['Category'] == pick_cat].copy()
+        
+        with col2:
             if filtered_df.empty:
-                st.warning(f"⚠️ No items currently in stock for {pick_cat}")
+                st.warning(f"⚠️ No items in stock for {pick_cat}")
                 selected_mat = None
             else:
                 mat_options = sorted(filtered_df['Material'].unique())
-                selected_mat = st.selectbox("Select Size / Material", mat_options)
+                selected_mat = st.selectbox("Size / Material", mat_options, key="mat_add")
 
-        with col2:
-            if selected_mat:
-                if pick_cat in ["Rolls", "Coils"]:
-                    specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
-                    pick_id = st.selectbox("Select Serial # to Sell", specific_ids or ["No items available"])
-                    pick_qty = 0
+        if selected_mat:
+            if pick_cat in ["Rolls", "Coils"]:
+                specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
+                pick_id = st.selectbox("Select Serial #", specific_ids or ["No items available"], key="id_add")
+                pick_qty = 1
+            else:
+                pick_id = "BULK"
+                pick_qty = st.number_input("Quantity", min_value=1, step=1, key="qty_add")
+
+        add_to_cart = st.form_submit_button("🛒 Add to Cart", use_container_width=True)
+
+    # ── Process Add to Cart ─────────────────────────────────────────────────────
+    if add_to_cart and selected_mat:
+        # Check current stock
+        if pick_cat in ["Rolls", "Coils"]:
+            available = pick_id in filtered_df['Item_ID'].values
+            if available:
+                st.session_state.pick_cart.append({
+                    'category': pick_cat,
+                    'material': selected_mat,
+                    'item_id': pick_id,
+                    'quantity': 1,
+                    'available': 1,
+                    'shortfall': 0
+                })
+                st.success(f"✅ Added {pick_cat[:-1]} {selected_mat} (#{pick_id})")
+                st.rerun()
+            else:
+                st.error("Item not available")
+        else:
+            mask = (pick_df['Category'] == pick_cat) & (pick_df['Material'] == selected_mat)
+            if mask.any():
+                current_stock = pick_df.loc[mask, 'Footage'].values[0]
+                bulk_item_id = pick_df.loc[mask, 'Item_ID'].values[0]
+                
+                # Calculate what's actually available
+                available = min(current_stock, pick_qty)
+                shortfall = max(0, pick_qty - current_stock)
+                
+                st.session_state.pick_cart.append({
+                    'category': pick_cat,
+                    'material': selected_mat,
+                    'item_id': bulk_item_id,
+                    'quantity': pick_qty,
+                    'available': available,
+                    'shortfall': shortfall
+                })
+                
+                if shortfall > 0:
+                    st.warning(f"⚠️ Added to cart: {available} available, {shortfall} will be back ordered")
                 else:
-                    pick_id = "BULK"
-                    pick_qty = st.number_input("Quantity to Remove", min_value=1, step=1)
+                    st.success(f"✅ Added {pick_qty} × {selected_mat}")
+                st.rerun()
 
+    # ── Display Cart ────────────────────────────────────────────────────────────
+    if st.session_state.pick_cart:
+        st.markdown("---")
+        st.markdown("#### 🛒 Current Order")
+        
+        for idx, item in enumerate(st.session_state.pick_cart):
+            col_item, col_remove = st.columns([5, 1])
+            
+            with col_item:
+                status = ""
+                if item['shortfall'] > 0:
+                    status = f" ⚠️ ({item['available']} available, {item['shortfall']} back order)"
+                
+                if item['category'] in ["Rolls", "Coils"]:
+                    st.write(f"**{item['category'][:-1]}** - {item['material']} (#{item['item_id']}){status}")
+                else:
+                    st.write(f"**{item['quantity']}x {item['material']}** ({item['category']}){status}")
+            
+            with col_remove:
+                if st.button("🗑️", key=f"remove_{idx}"):
+                    st.session_state.pick_cart.pop(idx)
+                    st.rerun()
+        
         st.divider()
         
         # Authorized By
@@ -910,126 +976,105 @@ with tab3:
             value=st.session_state.get("username", "Admin"),
             key="pick_authorized"
         )
-
-        submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True, type="primary")
-
-    # ── Processing logic with Back Order feature ────────────────────────────────
-    if submit_pick and selected_mat:
-        # Save last values for back order fallback
-        st.session_state.last_customer = customer.strip()
-        st.session_state.last_sales_order = sales_order.strip()
-        st.session_state.pick_cat_back = pick_cat
         
-        if not customer.strip():
-            st.error("⚠️ Please enter Customer / Job Name.")
-        elif not sales_order.strip():
-            st.error("⚠️ Please enter Sales Order Number.")
-        else:
-            success = False
-            partial_deduction = False
-            shortfall = 0
-            deducted_amount = 0
-            
-            action_suffix = f" (SO: {sales_order})"
-            
-            if pick_cat in ["Rolls", "Coils"]:
-                with st.spinner("Updating Cloud Database..."):
-                    success = update_stock(
-                        item_id=pick_id,
-                        new_footage=0,
-                        user_name=picker_name,
-                        action_type=f"Sold {pick_cat[:-1]} to {customer}{action_suffix}"
-                    )
-                    deducted_amount = 1  # One roll/coil removed
-            else:
-                # Use pick_df consistently for checking stock
-                mask = (pick_df['Category'] == pick_cat) & (pick_df['Material'] == selected_mat)
-                if mask.any():
-                    current_stock = pick_df.loc[mask, 'Footage'].values[0]
-                    bulk_item_id = pick_df.loc[mask, 'Item_ID'].values[0]
+        col_process, col_clear = st.columns(2)
+        
+        with col_process:
+            if st.button("📤 Process All Items", type="primary", use_container_width=True):
+                if not customer.strip():
+                    st.error("⚠️ Please enter Customer / Job Name.")
+                elif not sales_order.strip():
+                    st.error("⚠️ Please enter Sales Order Number.")
+                else:
+                    # Save for back orders
+                    st.session_state.last_customer = customer.strip()
+                    st.session_state.last_sales_order = sales_order.strip()
+                    st.session_state.back_order_items = []
                     
-                    if current_stock >= pick_qty:
-                        # Full deduction
-                        new_total = current_stock - pick_qty
-                        deducted_amount = pick_qty
-                        with st.spinner("Processing Bulk Removal..."):
-                            success = update_stock(
-                                item_id=bulk_item_id,
-                                new_footage=new_total,
-                                user_name=picker_name,
-                                action_type=f"Removed {pick_qty} {pick_cat[:-1]}(s) for {customer}{action_suffix}"
-                            )
-                    else:
-                        # Partial deduction - remove all available stock
-                        shortfall = pick_qty - current_stock
-                        deducted_amount = current_stock
-                        new_total = 0.0
-                        with st.spinner("Processing Partial Removal..."):
-                            success = update_stock(
-                                item_id=bulk_item_id,
-                                new_footage=new_total,
-                                user_name=picker_name,
-                                action_type=f"Partial removal: {deducted_amount} deducted (shortfall: {shortfall}) for {customer}{action_suffix}"
-                            )
-                        partial_deduction = True
+                    action_suffix = f" (SO: {sales_order})"
+                    all_success = True
+                    
+                    with st.spinner("Processing all items..."):
+                        for item in st.session_state.pick_cart:
+                            if item['category'] in ["Rolls", "Coils"]:
+                                success = update_stock(
+                                    item_id=item['item_id'],
+                                    new_footage=0,
+                                    user_name=picker_name,
+                                    action_type=f"Sold {item['category'][:-1]} to {customer}{action_suffix}"
+                                )
+                                all_success = all_success and success
+                            else:
+                                # Get current stock
+                                mask = (pick_df['Category'] == item['category']) & (pick_df['Item_ID'] == item['item_id'])
+                                if mask.any():
+                                    current_stock = pick_df.loc[mask, 'Footage'].values[0]
+                                    deduct_amount = min(current_stock, item['quantity'])
+                                    new_total = current_stock - deduct_amount
+                                    
+                                    action_msg = f"Removed {deduct_amount} {item['category'][:-1]}(s) - {item['material']} for {customer}{action_suffix}"
+                                    if item['shortfall'] > 0:
+                                        action_msg += f" (shortfall: {item['shortfall']})"
+                                    
+                                    success = update_stock(
+                                        item_id=item['item_id'],
+                                        new_footage=new_total,
+                                        user_name=picker_name,
+                                        action_type=action_msg
+                                    )
+                                    all_success = all_success and success
+                                    
+                                    # Track back orders
+                                    if item['shortfall'] > 0:
+                                        st.session_state.back_order_items.append(item)
+                    
+                    if all_success:
+                        st.success(f"✅ All items processed for {customer} ({sales_order})!")
                         
-                        # Store back order details in session state
-                        st.session_state.show_back_order = True
-                        st.session_state.shortfall = shortfall
-                        st.session_state.selected_mat_back = selected_mat
-                        st.session_state.deducted_amount = deducted_amount
-                else:
-                    st.error("Item not found in current data – try Sync Cloud Data.")
+                        if st.session_state.back_order_items:
+                            st.session_state.show_back_order = True
+                        else:
+                            st.balloons()
+                            st.snow()
+                            st.toast("Order complete! 🎉", icon="🎉")
+                            st.session_state.pick_cart = []
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                    else:
+                        st.error("Some items failed to process. Check logs.")
+        
+        with col_clear:
+            if st.button("🗑️ Clear Cart", use_container_width=True):
+                st.session_state.pick_cart = []
+                st.rerun()
 
-            # Show success message
-            if success:
-                if partial_deduction:
-                    st.warning(f"⚠️ Partial fulfillment: Only {deducted_amount} available – deducted all stock.\n\n**Shortfall: {shortfall}** units need to be back ordered.")
-                else:
-                    st.success(f"✅ Stock removed for {customer} ({sales_order})!")
-                    st.balloons()
-                    st.snow()
-                    st.toast("Another one bites the dust! 🦆", icon="🎉")
-                
-                # Only rerun if NO back order needed
-                if not partial_deduction:
-                    st.cache_data.clear()
-                    time.sleep(1)
-                    st.rerun()
-
-    # ── Back Order UI (outside form - persists across reruns) ────────────────────
-    if st.session_state.show_back_order:
+    # ── Back Order UI ───────────────────────────────────────────────────────────
+    if st.session_state.show_back_order and st.session_state.back_order_items:
         st.markdown("---")
-        st.markdown("### 📦 Back Order Required")
-        st.info(f"""
-        **Material:** {st.session_state.selected_mat_back}  
-        **Deducted:** {st.session_state.deducted_amount} units  
-        **Shortfall:** {st.session_state.shortfall} units  
-        **Customer:** {st.session_state.last_customer}  
-        **Order:** {st.session_state.last_sales_order}
-        """)
+        st.markdown("### 📦 Back Orders Required")
         
-        create_back_order = st.checkbox(
-            "Create back order for this shortfall",
-            value=True,
-            key="back_order_chk"
-        )
+        st.info(f"**Customer:** {st.session_state.last_customer}  \n**Order:** {st.session_state.last_sales_order}")
         
-        back_order_note = st.text_input(
-            "Optional note",
+        for item in st.session_state.back_order_items:
+            st.write(f"- **{item['material']}** ({item['category']}): {item['shortfall']} units short")
+        
+        back_order_note = st.text_area(
+            "Optional note for all back orders",
             placeholder="e.g. Urgent for client - ship when restocked",
             key="back_order_note"
         )
         
-        col_confirm, col_clear = st.columns(2)
+        col_confirm, col_skip = st.columns(2)
+        
         with col_confirm:
-            if st.button("✅ Confirm Back Order", type="primary", use_container_width=True):
-                if create_back_order:
-                    try:
+            if st.button("✅ Create Back Orders", type="primary", use_container_width=True):
+                try:
+                    for item in st.session_state.back_order_items:
                         back_order_data = {
-                            "material": st.session_state.selected_mat_back,
-                            "category": st.session_state.pick_cat_back,
-                            "shortfall_quantity": st.session_state.shortfall,
+                            "material": item['material'],
+                            "category": item['category'],
+                            "shortfall_quantity": item['shortfall'],
                             "client_name": st.session_state.last_customer,
                             "order_number": st.session_state.last_sales_order,
                             "status": "Open",
@@ -1037,22 +1082,30 @@ with tab3:
                             "created_at": datetime.now().isoformat()
                         }
                         supabase.table("back_orders").insert(back_order_data).execute()
-                        st.success(f"✅ Back order created for {st.session_state.shortfall} units!")
-                        st.balloons()
-                    except Exception as e:
-                        st.error(f"Failed to create back order: {e}")
+                    
+                    st.success(f"✅ Created {len(st.session_state.back_order_items)} back order(s)!")
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Failed to create back orders: {e}")
                 
-                # Clear state and rerun
+                # Clear everything
                 st.session_state.show_back_order = False
+                st.session_state.back_order_items = []
+                st.session_state.pick_cart = []
                 st.cache_data.clear()
                 time.sleep(1)
                 st.rerun()
         
-        with col_clear:
-            if st.button("❌ Skip Back Order", use_container_width=True):
+        with col_skip:
+            if st.button("❌ Skip Back Orders", use_container_width=True):
                 st.session_state.show_back_order = False
+                st.session_state.back_order_items = []
+                st.session_state.pick_cart = []
                 st.cache_data.clear()
                 st.rerun()
+    
+    elif not st.session_state.pick_cart:
+        st.info("👆 Add items to start building your order")
         
 with tab4:
     st.subheader("📦 Smart Inventory Receiver")
