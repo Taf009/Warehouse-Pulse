@@ -1735,6 +1735,8 @@ with tab4:
                     with st.spinner("☁️ Processing all items to Cloud Database..."):
                         try:
                             all_success = True
+                            items_added = 0
+                            items_skipped = 0
                             
                             for item in st.session_state.receiving_cart:
                                 if item['is_serialized']:
@@ -1749,6 +1751,13 @@ with tab4:
                                         else:
                                             unique_id = f"{item['id_preview']}-{i+1:04d}"
                                         
+                                        # Check if this ID already exists
+                                        existing = supabase.table("inventory").select("Item_ID").eq("Item_ID", unique_id).execute()
+                                        if existing.data:
+                                            st.warning(f"⚠️ Skipped {unique_id} - already exists in inventory")
+                                            items_skipped += 1
+                                            continue
+                                        
                                         new_rows.append({
                                             "Item_ID": unique_id,
                                             "Material": item['material'],
@@ -1759,7 +1768,9 @@ with tab4:
                                             "Purchase_Order_Num": st.session_state.current_po.strip()
                                         })
                                     
-                                    supabase.table("inventory").insert(new_rows).execute()
+                                    if new_rows:
+                                        supabase.table("inventory").insert(new_rows).execute()
+                                        items_added += len(new_rows)
                                 
                                 else:
                                     # Bulk item
@@ -1794,8 +1805,15 @@ with tab4:
                                 supabase.table("audit_log").insert(log_entry).execute()
                             
                             st.cache_data.clear()
-                            st.success(f"✅ Successfully received {len(st.session_state.receiving_cart)} item type(s) for PO: {st.session_state.current_po}!")
-                            st.balloons()
+                            
+                            # Summary message
+                            if items_added > 0 and items_skipped == 0:
+                                st.success(f"✅ Successfully received {items_added} item(s) for PO: {st.session_state.current_po}!")
+                                st.balloons()
+                            elif items_added > 0 and items_skipped > 0:
+                                st.warning(f"⚠️ Partially completed: {items_added} added, {items_skipped} skipped (duplicates)")
+                            else:
+                                st.error(f"❌ No items added - all {items_skipped} were duplicates!")
                             
                             # Clear cart
                             st.session_state.receiving_cart = []
