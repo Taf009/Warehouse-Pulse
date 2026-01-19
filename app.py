@@ -426,7 +426,7 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
     return True, total_footage_needed
 
 
-def generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage):
+def generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, coil_extra=0.5, roll_extra=0.5):
     """
     Generate a professional production order PDF with navy blue theme.
     
@@ -436,14 +436,16 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
         operator_name: Operator name
         deduction_details: List of deduction records
         box_usage: Dictionary of box types and quantities
+        coil_extra: Extra inch allowance for coils
+        roll_extra: Extra inch allowance for rolls
     
     Returns:
         BytesIO: PDF file buffer
     """
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, 
-                           rightMargin=0.75*inch, leftMargin=0.75*inch,
-                           topMargin=1*inch, bottomMargin=0.75*inch)
+                           rightMargin=0.5*inch, leftMargin=0.5*inch,
+                           topMargin=0.75*inch, bottomMargin=0.5*inch)
     
     elements = []
     styles = getSampleStyleSheet()
@@ -456,9 +458,9 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontSize=24,
+        fontSize=22,
         textColor=navy_blue,
-        spaceAfter=12,
+        spaceAfter=8,
         alignment=TA_CENTER,
         fontName='Helvetica-Bold'
     )
@@ -466,72 +468,74 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     subtitle_style = ParagraphStyle(
         'CustomSubtitle',
         parent=styles['Normal'],
-        fontSize=10,
+        fontSize=9,
         textColor=colors.HexColor('#64748b'),
-        spaceAfter=30,
+        spaceAfter=20,
         alignment=TA_CENTER
     )
     
     # Title
-    elements.append(Paragraph("📋 PRODUCTION ORDER REPORT", title_style))
-    elements.append(Paragraph("Manufacturing Documentation", subtitle_style))
+    elements.append(Paragraph("📋 MJP PRODUCTION ORDER LOG", title_style))
+    elements.append(Paragraph("Manufacturing & Stock Deduction Documentation", subtitle_style))
     
-    # Order metadata
+    # Order metadata with fillable production order number
     current_time = datetime.now().strftime('%B %d, %Y at %I:%M %p')
     
     metadata = [
-        ['Order Number:', order_number],
+        ['Internal Order #:', order_number],
+        ['Production Order #:', '____________________________'],  # Fillable space
         ['Client:', client_name],
         ['Operator:', operator_name],
-        ['Completed:', current_time],
-        ['Total Items:', str(len(deduction_details))]
+        ['Completed:', current_time]
     ]
     
-    meta_table = Table(metadata, colWidths=[2*inch, 4*inch])
+    meta_table = Table(metadata, colWidths=[1.8*inch, 4.7*inch])
     meta_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (0, -1), light_navy),
         ('TEXTCOLOR', (0, 0), (0, -1), navy_blue),
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
         ('ALIGN', (1, 0), (1, -1), 'LEFT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
-        ('LEFTPADDING', (0, 0), (-1, -1), 12),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
     ]))
     
     elements.append(meta_table)
-    elements.append(Spacer(1, 0.3*inch))
+    elements.append(Spacer(1, 0.2*inch))
     
-    # Production details table
+    # Production details table (compact for up to 10+ sizes)
     heading_style = ParagraphStyle(
         'CustomHeading',
         parent=styles['Heading2'],
-        fontSize=12,
+        fontSize=11,
         textColor=colors.HexColor('#1e293b'),
-        spaceAfter=12,
-        spaceBefore=12
+        spaceAfter=8,
+        spaceBefore=8
     )
     
     elements.append(Paragraph("Production Details", heading_style))
     
-    # Table data
-    table_data = [['Type', 'Source ID', 'Size', 'Pieces', 'Footage Used', 'Waste']]
+    # Table data - more compact columns
+    table_data = [['Type', 'Source ID', 'Size', 'Pcs', 'Footage', 'Waste', 'Extra"']]
     
     for detail in deduction_details:
+        extra_allowance = coil_extra if detail['material_type'] == 'Coil' else roll_extra
         table_data.append([
-            detail['material_type'],
-            str(detail['source_id'])[:20],
+            detail['material_type'][:4],  # Coil/Roll
+            str(detail['source_id'])[:15],  # Truncate if needed
             detail['size'],
             str(detail['pieces']),
-            f"{detail['footage_used']:.2f} ft",
-            f"{detail['waste']:.2f} ft"
+            f"{detail['footage_used']:.1f}",
+            f"{detail['waste']:.1f}",
+            f"{extra_allowance}"
         ])
     
-    col_widths = [0.8*inch, 1.5*inch, 0.8*inch, 0.8*inch, 1.2*inch, 0.8*inch]
+    col_widths = [0.5*inch, 1.3*inch, 0.6*inch, 0.5*inch, 0.8*inch, 0.6*inch, 0.6*inch]
     prod_table = Table(table_data, colWidths=col_widths, repeatRows=1)
     
     prod_table.setStyle(TableStyle([
@@ -539,64 +543,157 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
         ('BACKGROUND', (0, 0), (-1, 0), navy_blue),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('FONTSIZE', (0, 0), (-1, 0), 8),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
         ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-        ('TOPPADDING', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+        ('TOPPADDING', (0, 0), (-1, 0), 6),
         
         # Data rows
         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
         ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')]),
-        ('LEFTPADDING', (0, 0), (-1, -1), 8),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        ('TOPPADDING', (0, 1), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 1), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
     ]))
     
     elements.append(prod_table)
-    elements.append(Spacer(1, 0.3*inch))
+    elements.append(Spacer(1, 0.15*inch))
     
-    # Box usage section
-    if any(box_usage.values()):
-        elements.append(Paragraph("Box Usage", heading_style))
+    # TOTALS SECTION - Group by material
+    elements.append(Paragraph("📊 TOTALS BY MATERIAL", heading_style))
+    
+    # Calculate totals by material
+    material_totals = {}
+    for detail in deduction_details:
+        material_key = detail['material']
+        if material_key not in material_totals:
+            material_totals[material_key] = {
+                'footage': 0,
+                'waste': 0,
+                'pieces': 0,
+                'type': detail['material_type']
+            }
+        material_totals[material_key]['footage'] += detail['footage_used']
+        material_totals[material_key]['waste'] += detail['waste']
+        material_totals[material_key]['pieces'] += detail['pieces']
+    
+    # Create totals table
+    totals_data = [['Material', 'Type', 'Total Pieces', 'Total Footage Used', 'Total Waste']]
+    
+    grand_footage = 0
+    grand_waste = 0
+    grand_pieces = 0
+    
+    for material, totals in material_totals.items():
+        totals_data.append([
+            material[:35],  # Truncate long names
+            totals['type'],
+            str(totals['pieces']),
+            f"{totals['footage']:.2f} ft",
+            f"{totals['waste']:.2f} ft"
+        ])
+        grand_footage += totals['footage']
+        grand_waste += totals['waste']
+        grand_pieces += totals['pieces']
+    
+    # Grand total row
+    totals_data.append([
+        'GRAND TOTAL',
+        '',
+        str(grand_pieces),
+        f"{grand_footage:.2f} ft",
+        f"{grand_waste:.2f} ft"
+    ])
+    
+    totals_table = Table(totals_data, colWidths=[2*inch, 0.7*inch, 1.1*inch, 1.4*inch, 1.1*inch])
+    totals_table.setStyle(TableStyle([
+        # Header
+        ('BACKGROUND', (0, 0), (-1, 0), navy_blue),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
         
-        box_data = [['Box Type', 'Quantity']]
+        # Data rows
+        ('FONTNAME', (0, 1), (-1, -2), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -2), 9),
+        ('ALIGN', (0, 1), (0, -2), 'LEFT'),
+        ('ALIGN', (1, 1), (-1, -2), 'CENTER'),
+        
+        # Grand total row (last row)
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#fef3c7')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.HexColor('#92400e')),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, -1), (-1, -1), 10),
+        ('ALIGN', (0, -1), (-1, -1), 'CENTER'),
+        
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, light_navy]),
+        ('PADDING', (0, 0), (-1, -1), 6),
+    ]))
+    
+    elements.append(totals_table)
+    elements.append(Spacer(1, 0.15*inch))
+    
+    # Extra allowance summary
+    allowance_note = ParagraphStyle(
+        'AllowanceNote',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.HexColor('#64748b'),
+        alignment=TA_CENTER,
+        spaceAfter=10
+    )
+    
+    elements.append(Paragraph(
+        f"<b>Note:</b> Extra allowance included - Coils: {coil_extra}\" per piece | Rolls: {roll_extra}\" per piece",
+        allowance_note
+    ))
+    
+    # Box usage section (if any)
+    if any(box_usage.values()):
+        elements.append(Spacer(1, 0.1*inch))
+        elements.append(Paragraph("📦 Box Usage", heading_style))
+        
+        box_data = [['Box Type', 'Quantity Used']]
         for box_type, qty in box_usage.items():
             if qty > 0:
                 box_data.append([box_type, str(qty)])
         
-        box_table = Table(box_data, colWidths=[3*inch, 2*inch])
+        box_table = Table(box_data, colWidths=[3.5*inch, 1.5*inch])
         box_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), navy_blue),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_navy]),
-            ('PADDING', (0, 0), (-1, -1), 8),
+            ('PADDING', (0, 0), (-1, -1), 6),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
         ]))
         
         elements.append(box_table)
     
-    elements.append(Spacer(1, 0.5*inch))
+    elements.append(Spacer(1, 0.2*inch))
     
     # Footer
     footer_style = ParagraphStyle(
         'Footer',
         parent=styles['Normal'],
-        fontSize=8,
+        fontSize=7,
         textColor=colors.HexColor('#94a3b8'),
         alignment=TA_CENTER
     )
     
     elements.append(Paragraph(
-        "This report was automatically generated by the MJP Pulse Warehouse Management System.<br/>"
+        "This production log was automatically generated by the MJP Pulse Warehouse Management System.<br/>"
         "For questions or updates, please contact the production manager.",
         footer_style
     ))
@@ -686,7 +783,7 @@ def send_production_pdf(pdf_buffer, order_number, client_name):
     except Exception as e:
         print(f"Email error: {e}")
         return False
-
+        
 # --- MATERIALS FOR COILS ---
 COIL_MATERIALS = [
     ".010 Smooth Stainless Steel No Polythene",
