@@ -2154,6 +2154,15 @@ with tab4:
         </div>
     """, unsafe_allow_html=True)
     
+    # ── Safe DataFrame Check ────────────────────────────────────────────────────
+    # Create a safe working copy - even if df is empty
+    if df is not None and not df.empty:
+        safe_df = df.copy()
+    else:
+        # Create empty DataFrame with expected structure
+        safe_df = pd.DataFrame(columns=['Item_ID', 'Material', 'Footage', 'Location', 'Status', 'Category', 'Purchase_Order_Num'])
+        st.info("📦 No inventory data found. This is your first time receiving items - let's get started!")
+    
     # Category mapping (plural consistent)
     cat_mapping = {
         "Coils": "Coils", 
@@ -2578,15 +2587,31 @@ with tab4:
                                         items_added += len(new_rows)
                                 
                                 else:
-                                    # Bulk item
-                                    mask = (df['Category'] == item['category']) & (df['Material'] == item['material'])
-                                    if mask.any():
-                                        current_qty = df.loc[mask, 'Footage'].values[0]
-                                        new_qty = current_qty + item['total_added']
-                                        bulk_id = df.loc[mask, 'Item_ID'].values[0]
-                                        update_stock(bulk_id, new_qty, st.session_state.receiving_operator, 
-                                                   f"Received {item['total_added']} {item['unit_label'].lower()} (PO: {st.session_state.current_po})")
+                                    # Bulk item - check if exists in current inventory
+                                    if not safe_df.empty:
+                                        mask = (safe_df['Category'] == item['category']) & (safe_df['Material'] == item['material'])
+                                        if mask.any():
+                                            current_qty = safe_df.loc[mask, 'Footage'].values[0]
+                                            new_qty = current_qty + item['total_added']
+                                            bulk_id = safe_df.loc[mask, 'Item_ID'].values[0]
+                                            update_stock(bulk_id, new_qty, st.session_state.receiving_operator, 
+                                                       f"Received {item['total_added']} {item['unit_label'].lower()} (PO: {st.session_state.current_po})")
+                                        else:
+                                            # Create new bulk item
+                                            unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d')}"
+                                            new_data = {
+                                                "Item_ID": unique_id,
+                                                "Material": item['material'],
+                                                "Footage": item['total_added'],
+                                                "Location": item['location'],
+                                                "Status": "Active",
+                                                "Category": item['category'],
+                                                "Purchase_Order_Num": st.session_state.current_po.strip()
+                                            }
+                                            supabase.table("inventory").insert(new_data).execute()
+                                            items_added += 1
                                     else:
+                                        # No inventory yet - create first bulk item
                                         unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d')}"
                                         new_data = {
                                             "Item_ID": unique_id,
@@ -2598,6 +2623,7 @@ with tab4:
                                             "Purchase_Order_Num": st.session_state.current_po.strip()
                                         }
                                         supabase.table("inventory").insert(new_data).execute()
+                                        items_added += 1
                                 
                                 # Audit log for each item
                                 log_entry = {
@@ -2677,12 +2703,13 @@ with tab4:
 
     if submitted_report and report_po_num.strip():
         with st.spinner(f"🔍 Fetching items for PO: {report_po_num}..."):
-            response = supabase.table("inventory").select("*").eq("Purchase_Order_Num", report_po_num.strip()).execute()
-            report_df = pd.DataFrame(response.data)
-            
-            if report_df.empty:
-                st.warning(f"⚠️ No items found for PO: {report_po_num}")
-            else:
+            try:
+                response = supabase.table("inventory").select("*").eq("Purchase_Order_Num", report_po_num.strip()).execute()
+                
+                if not response.data:
+                    st.warning(f"⚠️ No items found for PO: {report_po_num}")
+                else:
+                    report_df = pd.DataFrame(response.data)
                 # Generate PDF
                 pdf_buffer = generate_receipt_pdf(
                     po_num=report_po_num,
@@ -2721,6 +2748,8 @@ with tab4:
                             st.warning("⚠️ PDF generated but email failed. Please check email configuration or use download button.")
                 else:
                     st.success("✅ PDF report generated successfully!")
+            except Exception as e:
+                st.error(f"❌ Error generating report: {e}")
                     
 import openai
 import plotly.express as px
