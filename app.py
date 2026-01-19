@@ -1463,7 +1463,7 @@ with tab4:
                 
                 material = f"{texture} {metal} {cat_choice[:-1]} - {gauge} Gauge"
                 qty_val = st.number_input("📐 Footage per Item", min_value=0.1, value=3000.0 if cat_choice == "Coils" else 100.0)
-                unit_label = "Footage"
+                unit_label = cat_choice  # "Coils" or "Rolls"
                 
                 id_prefix = f"{cat_choice[:-1]}-{metal_code}-{clean_gauge}-{texture_code}-{int(qty_val)}"
             
@@ -1479,7 +1479,7 @@ with tab4:
                 
                 material = f"Fiberglass {form_type} - {thickness} Thickness - {sq_ft_per_roll} sq ft/roll"
                 qty_val = sq_ft_per_roll
-                unit_label = "Sq Ft"
+                unit_label = form_type  # "Rolls", "Batts", etc.
                 is_serialized = form_type == "Rolls"
                 
                 id_prefix = f"FG-{thickness.replace(' ', '')}-{int(sq_ft_per_roll)}"
@@ -1496,7 +1496,7 @@ with tab4:
                 
                 material = f"{angle} Elbow - Size #{size_num} - {metal}"
                 qty_val = 1.0
-                unit_label = "Pieces"
+                unit_label = "Elbows"
                 id_prefix = f"ELB-{angle.replace('°', '')}-S{size_num}"
             
             elif cat_choice == "Mineral Wool":
@@ -1546,7 +1546,7 @@ with tab4:
                 
                 material = f"Wire - {gauge} Gauge - {rolls_count} Roll(s)"
                 qty_val = rolls_count if footage_per_roll == 0 else footage_per_roll * rolls_count
-                unit_label = "Rolls" if footage_per_roll == 0 else "Footage"
+                unit_label = "Rolls"  # Always "Rolls" for wire
                 
                 id_prefix = f"WIRE-{gauge}"
             
@@ -1561,7 +1561,7 @@ with tab4:
                 
                 material = f"{osc_type} Banding - {size} - {gauge} Gauge - {core}"
                 qty_val = st.number_input("📐 Footage per Item", min_value=0.1, value=100.0)
-                unit_label = "Footage"
+                unit_label = "Rolls"  # Changed from "Footage" to "Rolls"
                 is_serialized = True
                 
                 id_prefix = f"BAND-{osc_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
@@ -1576,7 +1576,7 @@ with tab4:
                 
                 material = f"Fab Strap {gauge} - #{size_num} - {metal}"
                 qty_val = 1.0
-                unit_label = "Bundles"
+                unit_label = "Fab Straps"  # More specific
                 id_prefix = f"FS-{gauge.replace('.', '')}-S{size_num}"
             
             elif cat_choice == "Other":
@@ -1720,7 +1720,7 @@ with tab4:
         col_process, col_clear = st.columns(2)
         
         with col_process:
-            if st.button("✅ Process All Items to Inventory", type="primary", use_container_width=True):
+            if st.button("✅ Process All Items to Inventory", type="primary", use_container_width=True, key="process_all_receiving"):
                 if not st.session_state.current_po.strip() or not st.session_state.receiving_operator.strip():
                     st.error("⚠️ PO Number and Operator are required!")
                 else:
@@ -1797,7 +1797,7 @@ with tab4:
                             st.error(f"❌ Failed to process items: {e}")
         
         with col_clear:
-            if st.button("🗑️ Clear Cart", use_container_width=True, key="clear_picking_cart"):
+            if st.button("🗑️ Clear Cart", use_container_width=True, key="clear_receiving_cart"):
                 st.session_state.receiving_cart = []
                 st.rerun()
     
