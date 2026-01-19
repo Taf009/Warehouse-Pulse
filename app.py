@@ -1342,7 +1342,12 @@ with tab3:
         st.info("👆 Add items to start building your order")
         
 with tab4:
-    st.subheader("📦 Smart Inventory Receiver")
+    st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h1 style="color: #1e40af; margin: 0;">📦 Smart Inventory Receiver</h1>
+            <p style="color: #64748b; margin-top: 8px;">Add new stock with intelligent tracking and automatic PO management</p>
+        </div>
+    """, unsafe_allow_html=True)
     
     # Category mapping (plural consistent)
     cat_mapping = {
@@ -1358,198 +1363,298 @@ with tab4:
         "Other": "Other"
     }
     
-    raw_cat = st.radio("What are you receiving?", list(cat_mapping.keys()), horizontal=True)
+    # ── STEP 1: Category Selection (Outside form for reactivity) ───────────────
+    st.markdown("### Step 1️⃣: Select Category")
+    
+    # Create visual category cards
+    cols = st.columns(5)
+    category_icons = {
+        "Coils": "🔄", "Rolls": "📜", "Elbows": "↩️", 
+        "Fab Straps": "🔗", "Mineral Wool": "🧶",
+        "Fiberglass Insulation": "🏠", "Wing Seals": "🔒", 
+        "Wire": "➰", "Banding": "📏", "Other": "📦"
+    }
+    
+    raw_cat = st.radio(
+        "What are you receiving?", 
+        list(cat_mapping.keys()), 
+        horizontal=True,
+        label_visibility="collapsed"
+    )
     cat_choice = cat_mapping[raw_cat]
-
+    
+    st.markdown("---")
+    
+    # ── STEP 2: Receive Form ────────────────────────────────────────────────────
     with st.form("smart_receive_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
         
-        # ── Dynamic Material Builder with Hierarchy ─────────────────────────────
+        # Dynamic Material Builder with Hierarchy
         material = ""
-        qty_val = 1.0  # Default per-item quantity (e.g., footage, rolls, pieces)
-        unit_label = "Items"  # Default
-        is_serialized = cat_choice in ["Coils", "Rolls", "Wire"]  # Wire still optional serialized
+        qty_val = 1.0
+        unit_label = "Items"
+        is_serialized = cat_choice in ["Coils", "Rolls", "Wire"]
         
-        with col1:
-            st.markdown("**Specs (Step 1)**")
-        with col2:
-            st.markdown("**Details (Step 2)**")
+        # Material Specifications Card
+        st.markdown(f"### Step 2️⃣: {category_icons.get(cat_choice, '📦')} {cat_choice} Specifications")
         
-        if cat_choice == "Coils" or cat_choice == "Rolls":
-            texture = st.radio("Texture", ["Stucco", "Smooth"], horizontal=True)
-            metal = st.radio("Metal Type", ["Aluminum", "Stainless Steel"], horizontal=True)
-            gauge = st.selectbox("Gauge", [".010", ".016", ".020", ".024", ".032", "Other"])
-            if gauge == "Other":
-                gauge = st.text_input("Custom Gauge (e.g. .040)")
+        with st.container():
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
+                            padding: 24px; border-radius: 12px; border-left: 4px solid #0284c7;">
+            """, unsafe_allow_html=True)
             
-            clean_gauge = gauge.replace('.', '')
-            texture_code = "SMP" if texture == "Smooth" else "STP"
-            metal_code = "AL" if metal == "Aluminum" else "SST"
+            if cat_choice == "Coils" or cat_choice == "Rolls":
+                col1, col2 = st.columns(2)
+                with col1:
+                    texture = st.radio("🎨 Texture", ["Stucco", "Smooth"], horizontal=True)
+                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel"], horizontal=True)
+                with col2:
+                    gauge = st.selectbox("📏 Gauge", [".010", ".016", ".020", ".024", ".032", "Other"])
+                    if gauge == "Other":
+                        gauge = st.text_input("Custom Gauge", placeholder="e.g. .040")
+                
+                clean_gauge = gauge.replace('.', '')
+                texture_code = "SMP" if texture == "Smooth" else "STP"
+                metal_code = "AL" if metal == "Aluminum" else "SST"
+                
+                material = f"{texture} {metal} {cat_choice[:-1]} - {gauge} Gauge"
+                qty_val = st.number_input("📐 Footage per Item", min_value=0.1, value=3000.0 if cat_choice == "Coils" else 100.0)
+                unit_label = "Footage"
+                
+                id_prefix = f"{cat_choice[:-1]}-{metal_code}-{clean_gauge}-{texture_code}-{int(qty_val)}"
             
-            material = f"{texture} {metal} {cat_choice[:-1]} - {gauge} Gauge"
-            qty_val = st.number_input("Footage per Item", min_value=0.1, value=3000.0 if cat_choice == "Coils" else 100.0)
-            unit_label = "Footage"
+            elif cat_choice == "Fiberglass Insulation":
+                col1, col2 = st.columns(2)
+                with col1:
+                    form_type = st.radio("📦 Form", ["Rolls", "Batts", "Pipe Wrap", "Other"])
+                    thickness = st.selectbox("📏 Thickness", ["0.25 in", "0.5 in", "1 in", "1.5 in", "2 in", "Other"])
+                    if thickness == "Other":
+                        thickness = st.text_input("Custom Thickness", placeholder="e.g. 3 in")
+                with col2:
+                    sq_ft_per_roll = st.number_input("📐 Sq Ft per Roll", min_value=1.0, value=150.0)
+                
+                material = f"Fiberglass {form_type} - {thickness} Thickness - {sq_ft_per_roll} sq ft/roll"
+                qty_val = sq_ft_per_roll
+                unit_label = "Sq Ft"
+                is_serialized = form_type == "Rolls"
+                
+                id_prefix = f"FG-{thickness.replace(' ', '')}-{int(sq_ft_per_roll)}"
             
-            id_prefix = f"{cat_choice[:-1]}-{metal_code}-{clean_gauge}-{texture_code}-{int(qty_val)}"
+            elif cat_choice == "Elbows":
+                col1, col2 = st.columns(2)
+                with col1:
+                    angle = st.radio("📐 Angle", ["45°", "90°", "Other"], horizontal=True)
+                    if angle == "Other":
+                        angle = st.text_input("Custom Angle", placeholder="e.g. 22.5°")
+                    size_num = st.number_input("🔢 Size Number", min_value=1, max_value=60, value=1)
+                with col2:
+                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel", "Galvanized", "Other"])
+                
+                material = f"{angle} Elbow - Size #{size_num} - {metal}"
+                qty_val = 1.0
+                unit_label = "Pieces"
+                id_prefix = f"ELB-{angle.replace('°', '')}-S{size_num}"
+            
+            elif cat_choice == "Mineral Wool":
+                col1, col2 = st.columns(2)
+                with col1:
+                    pipe_size = st.selectbox("🔧 Pipe Size", ["1 in", "2 in", "3 in", "4 in", "Other"])
+                    if pipe_size == "Other":
+                        pipe_size = st.text_input("Custom Pipe Size")
+                with col2:
+                    thickness = st.selectbox("📏 Thickness", ["0.5 in", "1 in", "1.5 in", "2 in", "Other"])
+                    if thickness == "Other":
+                        thickness = st.text_input("Custom Thickness")
+                
+                material = f"Mineral Wool - Pipe Size: {pipe_size} - Thickness: {thickness}"
+                qty_val = 1.0
+                unit_label = "Sections"
+                id_prefix = f"MW-PS{pipe_size.replace(' ', '')}-THK{thickness.replace(' ', '')}"
+            
+            elif cat_choice == "Wing Seals":
+                col1, col2 = st.columns(2)
+                with col1:
+                    seal_type = st.radio("🔐 Type", ["Open", "Closed"], horizontal=True)
+                    size = st.radio("📏 Size", ["1/2 in", "3/4 in"], horizontal=True)
+                    gauge = st.selectbox("📐 Gauge", [".028", ".032", "Other"])
+                    if gauge == "Other":
+                        gauge = st.text_input("Custom Gauge")
+                with col2:
+                    grooves = st.radio("〰️ Grooves", ["With Grooves (Center)", "Without Grooves"])
+                    joint_pos = st.radio("📍 Joint Position", ["Bottom", "Top", "N/A"])
+                    box_qty = st.number_input("📦 Pieces per Box", min_value=1, value=1000, step=100)
+                
+                material = f"{seal_type} Wing Seal - {size} - {gauge} Gauge - {grooves} - Joint at {joint_pos}"
+                qty_val = box_qty
+                unit_label = "Pieces"
+                id_prefix = f"WS-{seal_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
+            
+            elif cat_choice == "Wire":
+                col1, col2 = st.columns(2)
+                with col1:
+                    gauge = st.selectbox("📏 Gauge", ["14", "16", "18", "Other"])
+                    if gauge == "Other":
+                        gauge = st.text_input("Custom Gauge")
+                    rolls_count = st.number_input("🔢 Number of Rolls", min_value=1, value=1, step=1)
+                with col2:
+                    footage_per_roll = st.number_input("📐 Footage per Roll (optional)", min_value=0.0, value=0.0)
+                    is_serialized = st.checkbox("🏷️ Assign unique ID to each roll?", value=False)
+                
+                material = f"Wire - {gauge} Gauge - {rolls_count} Roll(s)"
+                qty_val = rolls_count if footage_per_roll == 0 else footage_per_roll * rolls_count
+                unit_label = "Rolls" if footage_per_roll == 0 else "Footage"
+                
+                id_prefix = f"WIRE-{gauge}"
+            
+            elif cat_choice == "Banding":
+                col1, col2 = st.columns(2)
+                with col1:
+                    osc_type = st.radio("🌀 Type", ["Oscillated", "Non-Oscillated"])
+                    size = st.radio("📏 Size", ["3/4 in", "1/2 in"])
+                with col2:
+                    gauge = st.selectbox("📐 Gauge", [".015", ".020"])
+                    core = st.radio("⚙️ Core", ["Metal Core", "Non-Metal Core"])
+                
+                material = f"{osc_type} Banding - {size} - {gauge} Gauge - {core}"
+                qty_val = st.number_input("📐 Footage per Item", min_value=0.1, value=100.0)
+                unit_label = "Footage"
+                is_serialized = True
+                
+                id_prefix = f"BAND-{osc_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
+            
+            elif cat_choice == "Fab Straps":
+                col1, col2 = st.columns(2)
+                with col1:
+                    gauge = st.selectbox("📏 Gauge", [".015", ".020"])
+                    size_num = st.number_input("🔢 Size Number", min_value=1, max_value=50, value=1)
+                with col2:
+                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel", "Other"])
+                
+                material = f"Fab Strap {gauge} - #{size_num} - {metal}"
+                qty_val = 1.0
+                unit_label = "Bundles"
+                id_prefix = f"FS-{gauge.replace('.', '')}-S{size_num}"
+            
+            elif cat_choice == "Other":
+                cat_choice = st.text_input("📝 New Category Name", placeholder="e.g. Accessories")
+                material = st.text_input("📦 Material Description", placeholder="e.g. Custom Gaskets")
+                qty_val = st.number_input("🔢 Qty/Footage per item", min_value=0.1, value=1.0)
+                unit_label = st.text_input("🏷️ Unit Label", value="Units")
+                id_prefix = f"OTH-{cat_choice.upper()[:3]}" if cat_choice else "OTH-UNK"
+            
+            st.markdown("</div>", unsafe_allow_html=True)
         
-        elif cat_choice == "Fiberglass Insulation":
-            form_type = st.radio("Form", ["Rolls", "Batts", "Pipe Wrap", "Other"])
-            thickness = st.selectbox("Thickness", ["0.25 in", "0.5 in", "1 in", "1.5 in", "2 in", "Other"])
-            if thickness == "Other":
-                thickness = st.text_input("Custom Thickness (e.g. 3 in)")
-            
-            sq_ft_per_roll = st.number_input("Sq Ft per Roll", min_value=1.0, value=150.0)
-            material = f"Fiberglass {form_type} - {thickness} Thickness - {sq_ft_per_roll} sq ft/roll"
-            qty_val = sq_ft_per_roll
-            unit_label = "Sq Ft"
-            is_serialized = form_type == "Rolls"
-            
-            id_prefix = f"FG-{thickness.replace(' ', '')}-{int(sq_ft_per_roll)}"
+        st.markdown("---")
         
-        elif cat_choice == "Elbows":
-            angle = st.radio("Angle", ["45°", "90°", "Other"], horizontal=True)
-            if angle == "Other":
-                angle = st.text_input("Custom Angle (e.g. 22.5°)")
-            size_num = st.number_input("Size Number", min_value=1, max_value=60, value=1)
-            metal = st.radio("Metal Type", ["Aluminum", "Stainless Steel", "Galvanized", "Other"])
-            
-            material = f"{angle} Elbow - Size #{size_num} - {metal}"
-            qty_val = 1.0
-            unit_label = "Pieces"
-            id_prefix = f"ELB-{angle.replace('°', '')}-S{size_num}"
+        # Purchase Order & Quantity Card
+        st.markdown("### Step 3️⃣: 📋 Order Details")
         
-        elif cat_choice == "Mineral Wool":
-            pipe_size = st.selectbox("Pipe Size", ["1 in", "2 in", "3 in", "4 in", "Other"])
-            if pipe_size == "Other":
-                pipe_size = st.text_input("Custom Pipe Size")
-            thickness = st.selectbox("Thickness", ["0.5 in", "1 in", "1.5 in", "2 in", "Other"])
-            if thickness == "Other":
-                thickness = st.text_input("Custom Thickness")
+        with st.container():
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%); 
+                            padding: 24px; border-radius: 12px; border-left: 4px solid #ca8a04;">
+            """, unsafe_allow_html=True)
             
-            material = f"Mineral Wool - Pipe Size: {pipe_size} - Thickness: {thickness}"
-            qty_val = 1.0
-            unit_label = "Sections"
-            id_prefix = f"MW-PS{pipe_size.replace(' ', '')}-THK{thickness.replace(' ', '')}"
+            col1, col2 = st.columns(2)
+            with col1:
+                purchase_order_num = st.text_input(
+                    "📄 Purchase Order Number",
+                    placeholder="e.g. PO-2026-001",
+                    help="Supplier PO# for batch/quality tracking"
+                )
+            with col2:
+                item_count = st.number_input(
+                    f"📦 How many {unit_label}?", 
+                    min_value=1, value=1, step=1
+                )
+            
+            total_added = item_count * qty_val
+            st.success(f"**📊 Summary:** {item_count} × '{material}' = **{total_added} total {unit_label.lower()}** | PO: **{purchase_order_num or 'N/A'}**")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
         
-        elif cat_choice == "Wing Seals":
-            seal_type = st.radio("Type", ["Open", "Closed"], horizontal=True)
-            size = st.radio("Size", ["1/2 in", "3/4 in"], horizontal=True)
-            gauge = st.selectbox("Gauge", [".028", ".032", "Other"])
-            if gauge == "Other":
-                gauge = st.text_input("Custom Gauge")
-            grooves = st.radio("Grooves", ["With Grooves (Center)", "Without Grooves"])
-            joint_pos = st.radio("Joint Position", ["Bottom", "Top", "N/A"])
-            
-            material = f"{seal_type} Wing Seal - {size} - {gauge} Gauge - {grooves} - Joint at {joint_pos}"
-            box_qty = st.number_input("Pieces per Box", min_value=1, value=1000, step=100)
-            qty_val = box_qty
-            unit_label = "Pieces"
-            id_prefix = f"WS-{seal_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
+        st.markdown("---")
         
-        elif cat_choice == "Wire":
-            gauge = st.selectbox("Gauge", ["14", "16", "18", "Other"])
-            if gauge == "Other":
-                gauge = st.text_input("Custom Gauge")
-            rolls_count = st.number_input("Number of Rolls per Batch", min_value=1, value=1, step=1)
-            footage_per_roll = st.number_input("Footage per Roll (optional)", min_value=0.0, value=0.0)  # If you track footage
-            
-            material = f"Wire - {gauge} Gauge - {rolls_count} Roll(s)"
-            qty_val = rolls_count if footage_per_roll == 0 else footage_per_roll * rolls_count
-            unit_label = "Rolls" if footage_per_roll == 0 else "Footage"
-            is_serialized = st.checkbox("Assign unique ID to each roll?", value=False)  # Optional serialization
-            
-            id_prefix = f"WIRE-{gauge}"  # Simple prefix if serialized
+        # Storage Location Card
+        st.markdown("### Step 4️⃣: 📍 Storage Location")
         
-        elif cat_choice == "Banding":
-            osc_type = st.radio("Type", ["Oscillated", "Non-Oscillated"])
-            size = st.radio("Size", ["3/4 in", "1/2 in"])
-            gauge = st.selectbox("Gauge", [".015", ".020"])
-            core = st.radio("Core", ["Metal Core", "Non-Metal Core"])
+        with st.container():
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); 
+                            padding: 24px; border-radius: 12px; border-left: 4px solid #16a34a;">
+            """, unsafe_allow_html=True)
             
-            material = f"{osc_type} Banding - {size} - {gauge} Gauge - {core}"
-            qty_val = st.number_input("Footage per Item", min_value=0.1, value=100.0)
-            unit_label = "Footage"
-            is_serialized = True
+            loc_type = st.radio("🏢 Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
             
-            id_prefix = f"BAND-{osc_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
-        
-        elif cat_choice == "Fab Straps":
-            gauge = st.selectbox("Gauge", [".015", ".020"])
-            size_num = st.number_input("Size Number", min_value=1, max_value=50, value=1)
-            metal = st.radio("Metal Type", ["Aluminum", "Stainless Steel", "Other"])
+            if loc_type == "Rack System":
+                col1, col2, col3 = st.columns(3)
+                bay = col1.number_input("🅱️ Bay", min_value=1, value=1)
+                sec = col2.selectbox("🔤 Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+                lvl = col3.number_input("⬆️ Level", min_value=1, value=1)
+                gen_loc = f"{bay}{sec}{lvl}"
+            else:
+                gen_loc = st.text_input("🗺️ Floor Zone Name", value="FLOOR").strip().upper()
             
-            material = f"Fab Strap {gauge} - #{size_num} - {metal}"
-            qty_val = 1.0
-            unit_label = "Bundles"
-            id_prefix = f"FS-{gauge.replace('.', '')}-S{size_num}"
+            st.info(f"📍 **Storage Location:** {gen_loc}")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
         
-        elif cat_choice == "Other":
-            cat_choice = st.text_input("New Category Name", placeholder="e.g. Accessories")
-            material = st.text_input("Material Description", placeholder="e.g. Custom Gaskets")
-            qty_val = st.number_input("Qty/Footage per item", min_value=0.1, value=1.0)
-            unit_label = st.text_input("Unit Label", value="Units")
-            id_prefix = f"OTH-{cat_choice.upper()[:3]}" if cat_choice else "OTH-UNK"
+        st.markdown("---")
         
-        # ── Purchase Order Number ───────────────────────────────────────────────
-        st.divider()
-        purchase_order_num = st.text_input(
-            "Purchase Order Number",
-            placeholder="e.g. PO-2026-001",
-            help="Supplier PO# for batch/quality tracking"
+        # ID Generation & Operator Card
+        st.markdown("### Step 5️⃣: 🏷️ Identification & Authorization")
+        
+        with st.container():
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #fdf4ff 0%, #fae8ff 100%); 
+                            padding: 24px; border-radius: 12px; border-left: 4px solid #9333ea;">
+            """, unsafe_allow_html=True)
+            
+            # ID Generation Logic
+            if cat_choice == "Coils" and is_serialized:
+                starting_num = st.number_input("🔢 Starting Identifier Number", min_value=1, value=1, step=1)
+                id_preview = f"{id_prefix}-{starting_num:02d}"
+                st.info(f"🏷️ **ID Preview (first item):** `{id_preview}`")
+            
+            elif cat_choice == "Rolls" and is_serialized:
+                pallet_num = st.number_input("📦 Pallet Number", min_value=1, value=1, step=1)
+                id_preview = f"{id_prefix}-{pallet_num:02d}"
+                st.info(f"🏷️ **Pallet ID Preview:** `{id_preview}` (Total Footage: {total_added})")
+                is_serialized = False
+            
+            elif is_serialized:
+                starting_id = st.text_input("🏷️ Starting ID", value=f"{id_prefix}-1001")
+                id_preview = starting_id
+                st.info(f"🏷️ **ID Preview (first item):** `{id_preview}`")
+            
+            else:
+                st.info("📦 **Bulk item** - No unique IDs needed (quantity will be added to existing or new row)")
+            
+            operator = st.text_input("👤 Receiving Operator", value=st.session_state.get("username", ""))
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Submit Button
+        submitted = st.form_submit_button(
+            "✅ Add to Cloud Inventory", 
+            use_container_width=True, 
+            type="primary"
         )
-        
-        # ── Quantity & Location ─────────────────────────────────────────────────
-        st.divider()
-        item_count = st.number_input(f"How many {unit_label} are you receiving?", min_value=1, value=1, step=1)
-        total_added = item_count * qty_val
-        st.info(f"**Preview:** Adding {item_count} × '{material}' ({total_added} total {unit_label.lower()}) | PO: {purchase_order_num or 'N/A'}")
-        
-        loc_type = st.radio("Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
-        if loc_type == "Rack System":
-            l1, l2, l3 = st.columns(3)
-            bay = l1.number_input("Bay", min_value=1, value=1)
-            sec = l2.selectbox("Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-            lvl = l3.number_input("Level", min_value=1, value=1)
-            gen_loc = f"{bay}{sec}{lvl}"
-        else:
-            gen_loc = st.text_input("Floor Zone Name", value="FLOOR").strip().upper()
 
-        operator = st.text_input("Receiving Operator", value=st.session_state.get("username", ""))
-
-        # ── ID Generation ───────────────────────────────────────────────────────
-        if cat_choice == "Coils" and is_serialized:
-            starting_num = st.number_input("Starting Identifier Number", min_value=1, value=1, step=1)
-            id_preview = f"{id_prefix}-{starting_num:02d}"
-            st.info(f"**ID Preview (first item):** {id_preview}")
-        
-        elif cat_choice == "Rolls" and is_serialized:
-            pallet_num = st.number_input("Pallet Number", min_value=1, value=1, step=1)
-            id_preview = f"{id_prefix}-{pallet_num:02d}"
-            st.info(f"**Pallet ID Preview:** {id_preview} (Total Footage: {total_added})")
-            is_serialized = False  # Pallet as bulk
-        
-        elif is_serialized:
-            starting_id = st.text_input("Starting ID", value=f"{id_prefix}-1001")
-            id_preview = starting_id
-            st.info(f"**ID Preview (first item):** {id_preview}")
-        
-        else:
-            st.info("Bulk item - no unique IDs needed (quantity will be added to existing or new row)")
-
-        submitted = st.form_submit_button("📥 Add to Cloud Inventory", use_container_width=True)
-
-    # ── Save Logic ──────────────────────────────────────────────────────────────
+    # ── Save Logic (unchanged) ─────────────────────────────────────────────────
     if submitted:
         if not operator or not material:
-            st.error("Operator and material details required.")
+            st.error("⚠️ Operator and material details required.")
         else:
-            with st.spinner("Syncing with Cloud..."):
+            with st.spinner("☁️ Syncing with Cloud Database..."):
                 try:
                     if is_serialized:
                         new_rows = []
                         for i in range(item_count):
                             if cat_choice == "Coils":
-                                unique_id = f"{id_prefix}-{ (starting_num + i):02d }"
+                                unique_id = f"{id_prefix}-{(starting_num + i):02d}"
                             else:
                                 parts = starting_id.split('-')
                                 base = '-'.join(parts[:-1])
@@ -1600,39 +1705,60 @@ with tab4:
                     supabase.table("audit_logs").insert(log_entry).execute()
                     
                     st.cache_data.clear()
-                    st.success(f"Added {item_count} × '{material}' ({total_added} {unit_label.lower()}) to {gen_loc}! PO: {purchase_order_num or 'N/A'}")
+                    st.success(f"✅ Added {item_count} × '{material}' ({total_added} {unit_label.lower()}) to {gen_loc}! PO: {purchase_order_num or 'N/A'}")
+                    st.balloons()
                     st.rerun()
                 
                 except Exception as e:
-                    st.error(f"Failed to add inventory: {e}")
+                    st.error(f"❌ Failed to add inventory: {e}")
 
-    # ── Receipt Report Section (PDF) ────────────────────────────────────────────
-    st.divider()
-    st.subheader("📄 Export Receipt Report (PDF)")
-    st.caption("Generate and email a PDF report for items received under a specific Purchase Order Number.")
+    # ── Receipt Report Section ─────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h2 style="color: #1e40af; margin: 0;">📄 Receipt Report Generator</h2>
+            <p style="color: #64748b; margin-top: 8px;">Generate professional PDF reports for items received under specific Purchase Orders</p>
+        </div>
+    """, unsafe_allow_html=True)
 
-    with st.form("export_report_form"):
-        report_po_num = st.text_input(
-            "Purchase Order Number",
-            placeholder="e.g. PO-2026-001",
-            key="report_po"
-        )
+    with st.container():
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); 
+                        padding: 24px; border-radius: 12px; border: 2px solid #fb923c;">
+        """, unsafe_allow_html=True)
         
-        export_mode = st.radio(
-            "Action",
-            ["Download Only", "Download & Email to Admin"],
-            horizontal=True
-        )
+        with st.form("export_report_form"):
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                report_po_num = st.text_input(
+                    "📄 Purchase Order Number",
+                    placeholder="e.g. PO-2026-001",
+                    key="report_po"
+                )
+            
+            with col2:
+                export_mode = st.radio(
+                    "📤 Action",
+                    ["Download Only", "Download & Email"],
+                    help="Choose whether to download or also email to admin"
+                )
+            
+            submitted_report = st.form_submit_button(
+                "🚀 Generate PDF Report", 
+                use_container_width=True, 
+                type="primary"
+            )
         
-        submitted_report = st.form_submit_button("Generate PDF Report", use_container_width=True, type="primary")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     if submitted_report and report_po_num.strip():
-        with st.spinner(f"Fetching items for PO: {report_po_num}..."):
+        with st.spinner(f"🔍 Fetching items for PO: {report_po_num}..."):
             response = supabase.table("inventory").select("*").eq("Purchase_Order_Num", report_po_num.strip()).execute()
             report_df = pd.DataFrame(response.data)
             
             if report_df.empty:
-                st.warning(f"No items found for PO: {report_po_num}")
+                st.warning(f"⚠️ No items found for PO: {report_po_num}")
             else:
                 pdf_buffer = generate_receipt_pdf(
                     po_num=report_po_num,
@@ -1647,14 +1773,15 @@ with tab4:
                     data=pdf_buffer.getvalue(),
                     file_name=file_name,
                     mime="application/pdf",
-                    key=f"dl_{report_po_num}"
+                    key=f"dl_{report_po_num}",
+                    type="secondary"
                 )
                 
-                if export_mode == "Download & Email to Admin":
+                if export_mode == "Download & Email":
                     if send_email_to_admin("tmilazi@gmail.com", report_po_num, pdf_buffer.getvalue(), file_name=file_name):
-                        st.success(f"PDF report for PO {report_po_num} emailed to admin!")
+                        st.success(f"✅ PDF report for PO {report_po_num} emailed to admin!")
                     else:
-                        st.warning("PDF generated, but email failed. Use the download button above.")            
+                        st.warning("⚠️ PDF generated, but email failed. Use the download button above.")            
 import google.generativeai as genai
 import plotly.express as px
 import plotly.graph_objects as go
