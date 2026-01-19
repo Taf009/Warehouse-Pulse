@@ -1623,9 +1623,10 @@ with tab4:
             else:
                 subcol1, subcol2, subcol3 = st.columns(3)
                 bay = subcol1.number_input("🅱️ Bay", min_value=1, value=1, key="floor_bay")
-                floor_letter = subcol2.selectbox("🔤 Floor Section", 
-                    [f"Floor {letter}" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"], 
-                    key="floor_sec")
+                floor_options = [f"Floor {letter}" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+                floor_selection = subcol2.selectbox("🔤 Floor Section", floor_options, key="floor_sec")
+                # Extract just the letter from "Floor A" -> "Floor A"
+                floor_letter = floor_selection  # Keep it as "Floor A" format
                 lvl = subcol3.number_input("⬆️ Level", min_value=1, value=1, key="floor_lvl")
                 gen_loc = f"{bay}-{floor_letter}-{lvl}"
             
