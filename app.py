@@ -871,34 +871,38 @@ with tab3:
     # ── Add Items to Cart Form ──────────────────────────────────────────────────
     st.markdown("#### ➕ Add Items to Order")
     
+    # Category selection OUTSIDE form so it can update dynamically
+    pick_cat = st.selectbox(
+        "Category",
+        category_options,
+        key="pick_cat_add"
+    )
+    
+    filtered_df = pick_df[pick_df['Category'] == pick_cat].copy()
+    
     with st.form("add_to_cart_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
         with col1:
-            pick_cat = st.selectbox(
-                "Category",
-                category_options,
-                key="pick_cat_add"
-            )
-        
-        filtered_df = pick_df[pick_df['Category'] == pick_cat].copy()
-        
-        with col2:
             if filtered_df.empty:
                 st.warning(f"⚠️ No items in stock for {pick_cat}")
                 selected_mat = None
             else:
                 mat_options = sorted(filtered_df['Material'].unique())
                 selected_mat = st.selectbox("Size / Material", mat_options, key="mat_add")
-
-        if selected_mat:
-            if pick_cat in ["Rolls", "Coils"]:
-                specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
-                pick_id = st.selectbox("Select Serial #", specific_ids or ["No items available"], key="id_add")
-                pick_qty = 1
+        
+        with col2:
+            if selected_mat:
+                if pick_cat in ["Rolls", "Coils"]:
+                    specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
+                    pick_id = st.selectbox("Select Serial #", specific_ids or ["No items available"], key="id_add")
+                    pick_qty = 1
+                else:
+                    pick_id = "BULK"
+                    pick_qty = st.number_input("Quantity", min_value=1, step=1, key="qty_add")
             else:
-                pick_id = "BULK"
-                pick_qty = st.number_input("Quantity", min_value=1, step=1, key="qty_add")
+                pick_id = None
+                pick_qty = 0
 
         add_to_cart = st.form_submit_button("🛒 Add to Cart", use_container_width=True)
 
