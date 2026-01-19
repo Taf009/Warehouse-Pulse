@@ -1611,18 +1611,25 @@ with tab4:
                 st.success(f"**📊 Total:** {total_added} {unit_label.lower()}")
             
             with col2:
-                loc_type = st.radio("🏢 Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
-                
-                if loc_type == "Rack System":
-                    subcol1, subcol2, subcol3 = st.columns(3)
-                    bay = subcol1.number_input("🅱️ Bay", min_value=1, value=1)
-                    sec = subcol2.selectbox("🔤 Sec", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-                    lvl = subcol3.number_input("⬆️ Lvl", min_value=1, value=1)
-                    gen_loc = f"{bay}{sec}{lvl}"
-                else:
-                    gen_loc = st.text_input("🗺️ Floor Zone", value="FLOOR").strip().upper()
-                
-                st.info(f"📍 **Location:** {gen_loc}")
+                loc_type = st.radio("🏢 Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True, key="storage_type_radio")
+            
+            # Storage location input (moved outside columns for better layout)
+            if loc_type == "Rack System":
+                subcol1, subcol2, subcol3 = st.columns(3)
+                bay = subcol1.number_input("🅱️ Bay", min_value=1, value=1, key="rack_bay")
+                sec = subcol2.selectbox("🔤 Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), key="rack_sec")
+                lvl = subcol3.number_input("⬆️ Level", min_value=1, value=1, key="rack_lvl")
+                gen_loc = f"{bay}{sec}{lvl}"
+            else:
+                subcol1, subcol2, subcol3 = st.columns(3)
+                bay = subcol1.number_input("🅱️ Bay", min_value=1, value=1, key="floor_bay")
+                floor_letter = subcol2.selectbox("🔤 Floor Section", 
+                    [f"Floor {letter}" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"], 
+                    key="floor_sec")
+                lvl = subcol3.number_input("⬆️ Level", min_value=1, value=1, key="floor_lvl")
+                gen_loc = f"{bay}-{floor_letter}-{lvl}"
+            
+            st.info(f"📍 **Location:** {gen_loc}")
             
             st.markdown("</div>", unsafe_allow_html=True)
         
