@@ -2247,9 +2247,10 @@ with tab4:
                 else:
                     st.success("✅ PDF report generated successfully!")
                     
-import google.generativeai as genai
+import openai
 import plotly.express as px
 import plotly.graph_objects as go
+from datetime import datetime
 
 with tab5:
     st.markdown("""
@@ -2259,15 +2260,28 @@ with tab5:
         </div>
     """, unsafe_allow_html=True)
     
-    # Configure Gemini AI
-    GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+    # Configure Grok AI (xAI) with better error handling
+    GROK_API_KEY = st.secrets.get("GROK_API_KEY", "")
+    ai_configured = False
     
-    if GEMINI_KEY:
+    if GROK_API_KEY and GROK_API_KEY.startswith("xai-"):
         try:
-            genai.configure(api_key=GEMINI_KEY, transport='rest')
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            import openai
+            
+            # Configure for Grok API
+            grok_client = openai.OpenAI(
+                api_key=GROK_API_KEY,
+                base_url="https://api.x.ai/v1"
+            )
+            ai_configured = True
         except Exception as e:
-            st.error(f"⚠️ AI Configuration Error: {e}")
+            st.warning(f"⚠️ AI Configuration Issue: {e}")
+            ai_configured = False
+    else:
+        if GROK_API_KEY:
+            st.warning("⚠️ API Key format looks incorrect. Grok keys should start with 'xai-'")
+        else:
+            st.info("💡 Add GROK_API_KEY to your secrets to enable AI features")
     
     if not df.empty:
         # ── Analytics Dashboard ─────────────────────────────────────────────────
@@ -2663,6 +2677,12 @@ with tab5:
             </div>
         """, unsafe_allow_html=True)
         
+        # Show AI status
+        if ai_configured:
+            st.success("✅ AI Assistant is ready!", icon="🤖")
+        else:
+            st.warning("⚠️ AI Assistant not configured - see instructions below", icon="⚙️")
+        
         with st.container():
             st.markdown("""
                 <div style="background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%); 
@@ -2699,10 +2719,27 @@ with tab5:
             if st.button("🚀 Ask AI Assistant", type="primary", use_container_width=True):
                 if not user_q:
                     st.warning("⚠️ Please enter a question!")
-                elif not GEMINI_KEY or not GEMINI_KEY.startswith("AIza"):
-                    st.error("⚠️ Invalid API Key. Please check your Gemini API configuration.")
+                elif not ai_configured:
+                    st.error("⚠️ AI Assistant is not configured. Please check your API key.")
+                    st.markdown("""
+                    **🔧 Setup Instructions for Grok:**
+                    1. Go to [xAI Console](https://console.x.ai/)
+                    2. Sign in and navigate to API Keys
+                    3. Click "Create API Key"
+                    4. Copy the key (starts with `xai-...`)
+                    5. Add to Streamlit secrets as `GROK_API_KEY`
+                    
+                    **In `.streamlit/secrets.toml`:**
+                    ```toml
+                    GROK_API_KEY = "xai-..."
+                    ```
+                    
+                    **Or in Streamlit Cloud:**
+                    - Go to App Settings → Secrets
+                    - Add: `GROK_API_KEY = "xai-..."`
+                    """)
                 else:
-                    with st.spinner("🤖 AI is analyzing your inventory data..."):
+                    with st.spinner("🤖 Grok AI is analyzing your inventory data..."):
                         try:
                             # Prepare inventory context
                             inventory_summary = df.groupby('Category').agg({
@@ -2711,14 +2748,14 @@ with tab5:
                             }).reset_index()
                             inventory_summary.columns = ['Category', 'Total_Footage', 'Item_Count']
                             
-                            material_details = df[['Material', 'Footage', 'Category', 'Location']].to_string()
+                            material_details = df[['Material', 'Footage', 'Category', 'Location']].head(50).to_string()
                             
                             prompt = f"""You are an intelligent warehouse management assistant for MJP Pulse.
 
 Current Inventory Summary:
 {inventory_summary.to_string()}
 
-Detailed Material List:
+Sample Material Details (first 50 items):
 {material_details}
 
 Business Rules:
@@ -2730,24 +2767,35 @@ User Question: {user_q}
 
 Please provide a clear, actionable response with specific recommendations and data-backed insights."""
                             
-                            response = model.generate_content(prompt)
+                            # Call Grok API
+                            response = grok_client.chat.completions.create(
+                                model="grok-beta",
+                                messages=[
+                                    {"role": "system", "content": "You are a helpful warehouse management AI assistant. Provide clear, actionable insights based on inventory data."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=0.7,
+                                max_tokens=1500
+                            )
                             
-                            if response.text:
-                                st.markdown("### 🎯 AI Response")
+                            if response.choices and response.choices[0].message.content:
+                                ai_response = response.choices[0].message.content
+                                
+                                st.markdown("### 🎯 Grok AI Response")
                                 st.markdown("""
                                     <div style="background: white; padding: 20px; border-radius: 8px; 
                                                 border-left: 4px solid #7c3aed; margin: 20px 0;">
                                 """, unsafe_allow_html=True)
                                 
-                                st.markdown(response.text)
+                                st.markdown(ai_response)
                                 
                                 st.markdown("</div>", unsafe_allow_html=True)
                                 
                                 # Download button
                                 st.download_button(
                                     "📥 Download AI Report",
-                                    response.text,
-                                    file_name=f"MJP_AI_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                                    ai_response,
+                                    file_name=f"MJP_Grok_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                                     mime="text/plain",
                                     key="download_ai_report"
                                 )
@@ -2755,12 +2803,13 @@ Please provide a clear, actionable response with specific recommendations and da
                                 st.success("✅ Analysis complete!")
                             
                         except Exception as e:
-                            st.error(f"❌ AI Error: {e}")
+                            st.error(f"❌ Grok AI Error: {e}")
                             st.markdown("""
                             **🔧 Troubleshooting:**
-                            1. Verify your API key at [Google AI Studio](https://aistudio.google.com/)
-                            2. Ensure Generative Language API is enabled
-                            3. Check API usage limits
+                            1. Verify your API key at [xAI Console](https://console.x.ai/)
+                            2. Ensure you have API credits/billing enabled
+                            3. Check if the key has proper permissions
+                            4. Try regenerating the API key
                             """)
             
             st.markdown("</div>", unsafe_allow_html=True)
