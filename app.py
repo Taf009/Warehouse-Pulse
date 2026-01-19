@@ -1044,7 +1044,6 @@ with tab3:
                             st.toast("Order complete! 🎉", icon="🎉")
                             st.session_state.pick_cart = []
                             st.cache_data.clear()
-                            time.sleep(1)
                             st.rerun()
                     else:
                         st.error("Some items failed to process. Check logs.")
@@ -1078,13 +1077,11 @@ with tab3:
                     for item in st.session_state.back_order_items:
                         back_order_data = {
                             "material": item['material'],
-                            "category": item['category'],
                             "shortfall_quantity": item['shortfall'],
                             "client_name": st.session_state.last_customer,
                             "order_number": st.session_state.last_sales_order,
                             "status": "Open",
-                            "note": back_order_note.strip() or None,
-                            "created_at": datetime.now().isoformat()
+                            "note": back_order_note.strip() or None
                         }
                         supabase.table("back_orders").insert(back_order_data).execute()
                     
@@ -1098,7 +1095,6 @@ with tab3:
                 st.session_state.back_order_items = []
                 st.session_state.pick_cart = []
                 st.cache_data.clear()
-                time.sleep(1)
                 st.rerun()
         
         with col_skip:
@@ -1108,6 +1104,239 @@ with tab3:
                 st.session_state.pick_cart = []
                 st.cache_data.clear()
                 st.rerun()
+    
+    # ── Back Order Report Section ──────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 📄 Back Order Reports")
+    
+    try:
+        # Fetch all open back orders
+        response = supabase.table("back_orders").select("*").eq("status", "Open").execute()
+        back_orders = response.data
+        
+        if back_orders:
+            st.info(f"📋 **{len(back_orders)}** open back order(s) in system")
+            
+            # Display back orders in expandable section
+            with st.expander("View Open Back Orders"):
+                for bo in back_orders:
+                    st.write(f"**{bo.get('material')}** - Qty: {bo.get('shortfall_quantity')} | Customer: {bo.get('client_name')} | Order: {bo.get('order_number')}")
+            
+            # Generate PDF Report Button
+            if st.button("📥 Generate PDF Report", type="secondary"):
+                from datetime import datetime
+                
+                # Create HTML report
+                current_time = datetime.now().strftime('%B %d, %Y at %I:%M %p')
+                
+                html_content = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Back Order Report</title>
+                    <style>
+                        @page {{
+                            size: A4;
+                            margin: 2cm;
+                        }}
+                        body {{
+                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                            margin: 0;
+                            padding: 40px;
+                            background: white;
+                            color: #333;
+                        }}
+                        .header {{
+                            text-align: center;
+                            border-bottom: 4px solid #2563eb;
+                            padding-bottom: 20px;
+                            margin-bottom: 30px;
+                        }}
+                        .header h1 {{
+                            margin: 0;
+                            color: #1e40af;
+                            font-size: 32px;
+                            font-weight: 700;
+                        }}
+                        .header .subtitle {{
+                            color: #64748b;
+                            font-size: 14px;
+                            margin-top: 8px;
+                        }}
+                        .meta-info {{
+                            background: #f1f5f9;
+                            padding: 15px 20px;
+                            border-radius: 8px;
+                            margin-bottom: 30px;
+                            display: flex;
+                            justify-content: space-between;
+                        }}
+                        .meta-info div {{
+                            font-size: 14px;
+                        }}
+                        .meta-info strong {{
+                            color: #1e40af;
+                        }}
+                        .order-card {{
+                            border: 2px solid #e2e8f0;
+                            border-radius: 10px;
+                            padding: 20px;
+                            margin-bottom: 20px;
+                            background: #ffffff;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                            page-break-inside: avoid;
+                        }}
+                        .order-header {{
+                            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+                            color: white;
+                            padding: 12px 16px;
+                            border-radius: 6px;
+                            margin: -20px -20px 15px -20px;
+                            font-size: 16px;
+                            font-weight: 600;
+                        }}
+                        .order-details {{
+                            display: grid;
+                            grid-template-columns: 1fr 1fr;
+                            gap: 12px;
+                        }}
+                        .detail-row {{
+                            padding: 8px 0;
+                            border-bottom: 1px solid #f1f5f9;
+                        }}
+                        .detail-label {{
+                            color: #64748b;
+                            font-size: 12px;
+                            font-weight: 600;
+                            text-transform: uppercase;
+                            letter-spacing: 0.5px;
+                        }}
+                        .detail-value {{
+                            color: #1e293b;
+                            font-size: 15px;
+                            font-weight: 500;
+                            margin-top: 4px;
+                        }}
+                        .quantity {{
+                            background: #fef3c7;
+                            color: #92400e;
+                            padding: 4px 12px;
+                            border-radius: 20px;
+                            font-weight: 700;
+                            display: inline-block;
+                        }}
+                        .note {{
+                            background: #eff6ff;
+                            border-left: 4px solid #2563eb;
+                            padding: 12px;
+                            margin-top: 15px;
+                            font-size: 13px;
+                            color: #1e40af;
+                            border-radius: 4px;
+                        }}
+                        .footer {{
+                            margin-top: 40px;
+                            text-align: center;
+                            color: #94a3b8;
+                            font-size: 12px;
+                            border-top: 2px solid #e2e8f0;
+                            padding-top: 20px;
+                        }}
+                        @media print {{
+                            body {{
+                                padding: 20px;
+                            }}
+                            .no-print {{
+                                display: none;
+                            }}
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>📦 BACK ORDER REPORT</h1>
+                        <div class="subtitle">Warehouse Management System</div>
+                    </div>
+                    
+                    <div class="meta-info">
+                        <div><strong>Generated:</strong> {current_time}</div>
+                        <div><strong>Total Open Orders:</strong> {len(back_orders)}</div>
+                        <div><strong>Status:</strong> Open</div>
+                    </div>
+                """
+                
+                # Add each back order
+                for idx, bo in enumerate(back_orders, 1):
+                    html_content += f"""
+                    <div class="order-card">
+                        <div class="order-header">Order #{idx}</div>
+                        <div class="order-details">
+                            <div class="detail-row">
+                                <div class="detail-label">Material / Item</div>
+                                <div class="detail-value">{bo.get('material', 'N/A')}</div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Quantity Needed</div>
+                                <div class="detail-value"><span class="quantity">{bo.get('shortfall_quantity', 'N/A')} units</span></div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Customer / Job</div>
+                                <div class="detail-value">{bo.get('client_name', 'N/A')}</div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Sales Order #</div>
+                                <div class="detail-value">{bo.get('order_number', 'N/A')}</div>
+                            </div>
+                        </div>
+                    """
+                    
+                    if bo.get('note'):
+                        html_content += f"""
+                        <div class="note">
+                            <strong>📝 Note:</strong> {bo.get('note')}
+                        </div>
+                        """
+                    
+                    html_content += """
+                    </div>
+                    """
+                
+                html_content += f"""
+                    <div class="footer">
+                        <p>This report was automatically generated by the Warehouse Management System.</p>
+                        <p>For questions or updates, please contact the warehouse administrator.</p>
+                    </div>
+                    
+                    <script>
+                        // Auto-print dialog on load (optional)
+                        // window.onload = function() {{ window.print(); }}
+                    </script>
+                </body>
+                </html>
+                """
+                
+                # Create download button for HTML
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                st.download_button(
+                    label="📄 Download HTML Report (Print to PDF)",
+                    data=html_content,
+                    file_name=f"back_orders_report_{timestamp}.html",
+                    mime="text/html",
+                    help="Download and open in browser, then use 'Print to PDF' (Ctrl+P)"
+                )
+                
+                # Preview the report
+                with st.expander("📋 Preview Report", expanded=True):
+                    st.components.v1.html(html_content, height=600, scrolling=True)
+                
+                st.success("✅ Report generated! Download the HTML file and print to PDF using your browser.")
+                st.info("💡 **Tip:** Open the downloaded HTML file → Press Ctrl+P (or Cmd+P on Mac) → Select 'Save as PDF'")
+        else:
+            st.success("✅ No open back orders at this time!")
+    
+    except Exception as e:
+        st.error(f"Failed to fetch back orders: {e}")
     
     elif not st.session_state.pick_cart:
         st.info("👆 Add items to start building your order")
