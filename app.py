@@ -815,7 +815,7 @@ with tab3:
         # Fallback - make it plural-ish if it doesn't look plural
         return cat.strip().title() + 's' if not cat.strip().endswith(('s', 'wool')) else cat.strip().title()
 
-    # ── Work on a local copy only ───────────────────────────────────────────────
+    # ── Work on a local copy AND sync with original df ─────────────────────────
     pick_df = df.copy()
     if 'Category' in pick_df.columns:
         pick_df['Category'] = pick_df['Category'].apply(normalize_pick_category)
@@ -839,6 +839,8 @@ with tab3:
         st.session_state.selected_mat_back = None
         st.session_state.last_customer = ""
         st.session_state.last_sales_order = ""
+        st.session_state.deducted_amount = 0
+        st.session_state.pick_cat_back = ""
 
     with st.form("dedicated_pick_form", clear_on_submit=True):
         
@@ -911,11 +913,12 @@ with tab3:
 
         submit_pick = st.form_submit_button("📤 Confirm Stock Removal", use_container_width=True, type="primary")
 
-    # ── Processing logic with Back Order feature (moved outside form for persistence) ─
+    # ── Processing logic with Back Order feature ────────────────────────────────
     if submit_pick and selected_mat:
         # Save last values for back order fallback
         st.session_state.last_customer = customer.strip()
         st.session_state.last_sales_order = sales_order.strip()
+        st.session_state.pick_cat_back = pick_cat
         
         if not customer.strip():
             st.error("⚠️ Please enter Customer / Job Name.")
@@ -925,6 +928,7 @@ with tab3:
             success = False
             partial_deduction = False
             shortfall = 0
+            deducted_amount = 0
             
             action_suffix = f" (SO: {sales_order})"
             
@@ -936,14 +940,18 @@ with tab3:
                         user_name=picker_name,
                         action_type=f"Sold {pick_cat[:-1]} to {customer}{action_suffix}"
                     )
+                    deducted_amount = 1  # One roll/coil removed
             else:
-                mask = (df['Category'] == pick_cat) & (df['Material'] == selected_mat)
+                # Use pick_df consistently for checking stock
+                mask = (pick_df['Category'] == pick_cat) & (pick_df['Material'] == selected_mat)
                 if mask.any():
-                    current_stock = df.loc[mask, 'Footage'].values[0]
-                    bulk_item_id = df.loc[mask, 'Item_ID'].values[0]
+                    current_stock = pick_df.loc[mask, 'Footage'].values[0]
+                    bulk_item_id = pick_df.loc[mask, 'Item_ID'].values[0]
                     
                     if current_stock >= pick_qty:
+                        # Full deduction
                         new_total = current_stock - pick_qty
+                        deducted_amount = pick_qty
                         with st.spinner("Processing Bulk Removal..."):
                             success = update_stock(
                                 item_id=bulk_item_id,
@@ -952,41 +960,54 @@ with tab3:
                                 action_type=f"Removed {pick_qty} {pick_cat[:-1]}(s) for {customer}{action_suffix}"
                             )
                     else:
+                        # Partial deduction - remove all available stock
                         shortfall = pick_qty - current_stock
+                        deducted_amount = current_stock
                         new_total = 0.0
                         with st.spinner("Processing Partial Removal..."):
                             success = update_stock(
                                 item_id=bulk_item_id,
                                 new_footage=new_total,
                                 user_name=picker_name,
-                                action_type=f"Partial removal: {current_stock} deducted (shortfall: {shortfall}) for {customer}{action_suffix}"
+                                action_type=f"Partial removal: {deducted_amount} deducted (shortfall: {shortfall}) for {customer}{action_suffix}"
                             )
                         partial_deduction = True
                         
-                        # Trigger back order UI
+                        # Store back order details in session state
                         st.session_state.show_back_order = True
                         st.session_state.shortfall = shortfall
                         st.session_state.selected_mat_back = selected_mat
+                        st.session_state.deducted_amount = deducted_amount
                 else:
                     st.error("Item not found in current data – try Sync Cloud Data.")
 
-            # Show success and celebration immediately
+            # Show success message
             if success:
-                msg = f"✅ Stock removed for {customer} ({sales_order})!"
                 if partial_deduction:
-                    msg += f"\n⚠️ Only {current_stock} available – deducted all. Shortfall: {shortfall}"
+                    st.warning(f"⚠️ Partial fulfillment: Only {deducted_amount} available – deducted all stock.\n\n**Shortfall: {shortfall}** units need to be back ordered.")
+                else:
+                    st.success(f"✅ Stock removed for {customer} ({sales_order})!")
+                    st.balloons()
+                    st.snow()
+                    st.toast("Another one bites the dust! 🦆", icon="🎉")
                 
-                st.success(msg)
-                st.balloons()
-                st.snow()
-                st.toast("Another one bites the dust! 🦆", icon="🎉")
-                st.cache_data.clear()
-                st.rerun()
+                # Only rerun if NO back order needed
+                if not partial_deduction:
+                    st.cache_data.clear()
+                    time.sleep(1)
+                    st.rerun()
 
     # ── Back Order UI (outside form - persists across reruns) ────────────────────
     if st.session_state.show_back_order:
-        st.markdown("### Back Order the Shortfall?")
-        st.info(f"Shortfall: **{st.session_state.shortfall}** of **{st.session_state.selected_mat_back}**")
+        st.markdown("---")
+        st.markdown("### 📦 Back Order Required")
+        st.info(f"""
+        **Material:** {st.session_state.selected_mat_back}  
+        **Deducted:** {st.session_state.deducted_amount} units  
+        **Shortfall:** {st.session_state.shortfall} units  
+        **Customer:** {st.session_state.last_customer}  
+        **Order:** {st.session_state.last_sales_order}
+        """)
         
         create_back_order = st.checkbox(
             "Create back order for this shortfall",
@@ -1002,26 +1023,35 @@ with tab3:
         
         col_confirm, col_clear = st.columns(2)
         with col_confirm:
-            if st.button("Confirm Back Order", type="primary"):
-                try:
-                    back_order_data = {
-                        "material": st.session_state.selected_mat_back,
-                        "shortfall_quantity": st.session_state.shortfall,
-                        "client_name": st.session_state.last_customer,
-                        "order_number": st.session_state.last_sales_order,
-                        "status": "Open",
-                        "note": back_order_note.strip() or None
-                    }
-                    supabase.table("back_orders").insert(back_order_data).execute()
-                    st.success(f"✅ Back order created!")
-                    st.session_state.show_back_order = False
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to create back order: {e}")
+            if st.button("✅ Confirm Back Order", type="primary", use_container_width=True):
+                if create_back_order:
+                    try:
+                        back_order_data = {
+                            "material": st.session_state.selected_mat_back,
+                            "category": st.session_state.pick_cat_back,
+                            "shortfall_quantity": st.session_state.shortfall,
+                            "client_name": st.session_state.last_customer,
+                            "order_number": st.session_state.last_sales_order,
+                            "status": "Open",
+                            "note": back_order_note.strip() or None,
+                            "created_at": datetime.now().isoformat()
+                        }
+                        supabase.table("back_orders").insert(back_order_data).execute()
+                        st.success(f"✅ Back order created for {st.session_state.shortfall} units!")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Failed to create back order: {e}")
+                
+                # Clear state and rerun
+                st.session_state.show_back_order = False
+                st.cache_data.clear()
+                time.sleep(1)
+                st.rerun()
         
         with col_clear:
-            if st.button("Clear Prompt"):
+            if st.button("❌ Skip Back Order", use_container_width=True):
                 st.session_state.show_back_order = False
+                st.cache_data.clear()
                 st.rerun()
         
 with tab4:
