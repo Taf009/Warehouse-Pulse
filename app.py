@@ -9,6 +9,7 @@ from email.mime.application import MIMEApplication
 import io
 from supabase import create_client, Client
 from collections import defaultdict
+import time
 
 # --- PAGE CONFIG (MUST BE FIRST) ---
 st.set_page_config(
