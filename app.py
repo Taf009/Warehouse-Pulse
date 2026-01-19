@@ -1639,14 +1639,16 @@ with tab4:
             
             # ID Generation Logic
             if cat_choice == "Coils" and is_serialized:
-                starting_num = st.number_input("🔢 Starting Identifier Number", min_value=1, value=1, step=1)
-                id_preview = f"{id_prefix}-{starting_num:02d}"
-                st.info(f"🏷️ **ID Preview (first item):** `{id_preview}`")
+                st.info(f"💡 **ID Format:** `{id_prefix}-##` (e.g. {id_prefix}-01)")
+                starting_id = st.text_input("🏷️ Starting Coil ID", value=f"{id_prefix}-01", placeholder=f"{id_prefix}-01")
+                id_preview = starting_id
+                st.success(f"🏷️ **First ID:** `{id_preview}`")
             
             elif cat_choice == "Rolls" and is_serialized:
-                pallet_num = st.number_input("📦 Pallet Number", min_value=1, value=1, step=1)
-                id_preview = f"{id_prefix}-{pallet_num:02d}"
-                st.info(f"🏷️ **Pallet ID:** `{id_preview}` (Total: {total_added} footage)")
+                st.info(f"💡 **ID Format:** `{id_prefix}-##` (e.g. {id_prefix}-01)")
+                starting_id = st.text_input("🏷️ Starting Roll/Pallet ID", value=f"{id_prefix}-01", placeholder=f"{id_prefix}-01")
+                id_preview = starting_id
+                st.success(f"🏷️ **Pallet ID:** `{id_preview}` (Total: {total_added} footage)")
                 is_serialized = False
             
             elif is_serialized:
@@ -1690,7 +1692,6 @@ with tab4:
                 'is_serialized': is_serialized,
                 'id_prefix': id_prefix if 'id_prefix' in locals() else cat_choice.upper(),
                 'id_preview': id_preview if 'id_preview' in locals() else f"{cat_choice}-BULK",
-                'starting_num': starting_num if 'starting_num' in locals() else None,
                 'starting_id': starting_id if 'starting_id' in locals() else None,
             })
             
@@ -1731,13 +1732,12 @@ with tab4:
                                 if item['is_serialized']:
                                     new_rows = []
                                     for i in range(item['item_count']):
-                                        if item['category'] == "Coils" and item['starting_num']:
-                                            unique_id = f"{item['id_prefix']}-{(item['starting_num'] + i):02d}"
-                                        elif item['starting_id']:
+                                        if item['starting_id']:
+                                            # Parse the starting ID and increment
                                             parts = item['starting_id'].split('-')
                                             base = '-'.join(parts[:-1])
                                             num = int(parts[-1]) + i
-                                            unique_id = f"{base}-{num:04d}"
+                                            unique_id = f"{base}-{num:02d}"
                                         else:
                                             unique_id = f"{item['id_preview']}-{i+1:04d}"
                                         
