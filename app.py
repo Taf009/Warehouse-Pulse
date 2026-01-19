@@ -1797,7 +1797,7 @@ with tab4:
                             st.error(f"❌ Failed to process items: {e}")
         
         with col_clear:
-            if st.button("🗑️ Clear Cart", use_container_width=True):
+            if st.button("🗑️ Clear Cart", use_container_width=True, key="clear_picking_cart"):
                 st.session_state.receiving_cart = []
                 st.rerun()
     
