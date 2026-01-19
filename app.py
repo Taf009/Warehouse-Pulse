@@ -1711,7 +1711,7 @@ with tab4:
                 st.write(f"**{idx+1}.** {item['item_count']} × {item['material']} = **{item['total_added']} {item['unit_label'].lower()}** → 📍 {item['location']}")
             
             with col_remove:
-                if st.button("🗑️", key=f"remove_receiving_{idx}"):
+                if st.button("🗑️", key=f"remove_receiving_item_{idx}_{item['material'][:10]}"):
                     st.session_state.receiving_cart.pop(idx)
                     st.rerun()
         
