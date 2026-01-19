@@ -2252,77 +2252,527 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 with tab5:
-    st.subheader("📈 Inventory Analytics & AI Assistant")
-
-    # 1. HARD-CODED CONFIGURATION TO BYPASS 404
-    GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "----")
+    st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h1 style="color: #7c3aed; margin: 0;">📈 Inventory Analytics & AI Insights</h1>
+            <p style="color: #64748b; margin-top: 8px;">Real-time analytics and intelligent recommendations powered by AI</p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    try:
-        # Force the library to use the stable 'v1' API instead of 'v1beta'
-        genai.configure(api_key=GEMINI_KEY, transport='rest')
-        
-        # Use the 'latest' alias which is the most reliable endpoint
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
-        
-    except Exception as e:
-        st.error(f"Configuration Error: {e}")
-
+    # Configure Gemini AI
+    GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+    
+    if GEMINI_KEY:
+        try:
+            genai.configure(api_key=GEMINI_KEY, transport='rest')
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        except Exception as e:
+            st.error(f"⚠️ AI Configuration Error: {e}")
+    
     if not df.empty:
-        # --- [SECTION: GAUGE & CHARTS CODE REMAINS THE SAME] ---
-        # (Keeping the charts here ensures they don't disappear)
-        total_ft = df['Footage'].sum()
-        target_capacity = 50000.0  
-        fig_gauge = go.Figure(go.Indicator(
-            mode = "gauge+number",
-            value = total_ft,
-            title = {'text': "Total Warehouse Footage"},
-            gauge = {'axis': {'range': [None, target_capacity]}, 'bar': {'color': "#1E3A8A"}}
-        ))
-        st.plotly_chart(fig_gauge, use_container_width=True)
-
-        col1, col2 = st.columns(2)
+        # ── Analytics Dashboard ─────────────────────────────────────────────────
+        st.markdown("### 📊 Warehouse Overview")
+        
+        # Key Metrics Cards
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_footage = df['Footage'].sum()
+        total_items = len(df)
+        total_categories = df['Category'].nunique()
+        active_items = len(df[df['Status'] == 'Active'])
+        
         with col1:
-            fig_pie = px.pie(df, names='Category', values='Footage', hole=0.4, color_discrete_sequence=px.colors.qualitative.Bold)
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                            padding: 20px; border-radius: 12px; text-align: center; color: white;">
+                    <h3 style="margin: 0; font-size: 32px; font-weight: bold;">{:,.0f}</h3>
+                    <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">Total Footage</p>
+                </div>
+            """.format(total_footage), unsafe_allow_html=True)
+        
         with col2:
-            mat_sum = df.groupby(['Material', 'Category'])['Footage'].sum().nlargest(10).reset_index()
-            fig_bar = px.bar(mat_sum, x='Footage', y='Material', orientation='h', color='Category', color_discrete_sequence=px.colors.qualitative.Bold)
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-        st.divider()
-
-        # --- 2. UPDATED AI ASSISTANT LOGIC ---
-        st.markdown("### 🤖 MJP Pulse AI Assistant")
-        user_q = st.text_input("Ask about stock levels, reorders, or trends:", key="final_ai_fix")
-
-        if user_q:
-            # Quick check: Is the key valid?
-            if not GEMINI_KEY.startswith("AIza"):
-                st.error("The API Key format looks incorrect. Please check Google AI Studio.")
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                            padding: 20px; border-radius: 12px; text-align: center; color: white;">
+                    <h3 style="margin: 0; font-size: 32px; font-weight: bold;">{}</h3>
+                    <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">Total Items</p>
+                </div>
+            """.format(total_items), unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                            padding: 20px; border-radius: 12px; text-align: center; color: white;">
+                    <h3 style="margin: 0; font-size: 32px; font-weight: bold;">{}</h3>
+                    <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">Categories</p>
+                </div>
+            """.format(total_categories), unsafe_allow_html=True)
+        
+        with col4:
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); 
+                            padding: 20px; border-radius: 12px; text-align: center; color: white;">
+                    <h3 style="margin: 0; font-size: 32px; font-weight: bold;">{}</h3>
+                    <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">Active Items</p>
+                </div>
+            """.format(active_items), unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # ── Capacity Gauge ──────────────────────────────────────────────────────
+        st.markdown("### 📏 Warehouse Capacity")
+        
+        with st.container():
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); 
+                            padding: 24px; border-radius: 12px; border-left: 4px solid #f97316;">
+            """, unsafe_allow_html=True)
+            
+            target_capacity = 50000.0
+            utilization_pct = (total_footage / target_capacity) * 100
+            
+            fig_gauge = go.Figure(go.Indicator(
+                mode="gauge+number+delta",
+                value=total_footage,
+                domain={'x': [0, 1], 'y': [0, 1]},
+                title={'text': "Total Warehouse Footage", 'font': {'size': 20, 'color': '#1e293b'}},
+                delta={'reference': target_capacity * 0.8, 'increasing': {'color': "#dc2626"}},
+                gauge={
+                    'axis': {'range': [None, target_capacity], 'tickwidth': 1, 'tickcolor': "#64748b"},
+                    'bar': {'color': "#7c3aed"},
+                    'bgcolor': "white",
+                    'borderwidth': 2,
+                    'bordercolor': "#e2e8f0",
+                    'steps': [
+                        {'range': [0, target_capacity * 0.5], 'color': '#dcfce7'},
+                        {'range': [target_capacity * 0.5, target_capacity * 0.8], 'color': '#fef9c3'},
+                        {'range': [target_capacity * 0.8, target_capacity], 'color': '#fee2e2'}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': target_capacity * 0.9
+                    }
+                }
+            ))
+            
+            fig_gauge.update_layout(
+                height=300,
+                margin=dict(l=20, r=20, t=60, b=20),
+                paper_bgcolor='rgba(0,0,0,0)',
+                font={'color': "#1e293b", 'family': "Arial"}
+            )
+            
+            st.plotly_chart(fig_gauge, use_container_width=True)
+            
+            # Capacity warning
+            if utilization_pct > 90:
+                st.error(f"⚠️ **Critical:** Warehouse at {utilization_pct:.1f}% capacity!")
+            elif utilization_pct > 80:
+                st.warning(f"⚠️ **Warning:** Warehouse at {utilization_pct:.1f}% capacity")
             else:
-                with st.spinner("🤖 Connecting to stable AI engine..."):
-                    inventory_text = df[['Material', 'Footage', 'Category']].to_string()
-                    prompt = f"Warehouse Data:\n{inventory_text}\n\nTask: {user_q}\nRules: RPR=200ft/roll, Others=100ft/roll."
+                st.success(f"✅ **Healthy:** Warehouse at {utilization_pct:.1f}% capacity")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # ── Visual Analytics (Flexible & User-Controlled) ──────────────────────
+        st.markdown("### 📊 Custom Analytics Dashboard")
+        st.caption("Customize your view to focus on what matters most")
+        
+        # Analytics Control Panel
+        with st.expander("⚙️ Customize Analytics View", expanded=False):
+            col_ctrl1, col_ctrl2 = st.columns(2)
+            
+            with col_ctrl1:
+                chart1_metric = st.selectbox(
+                    "📈 Left Chart - Group By:",
+                    ["Category", "Location", "Status", "Material Type"],
+                    key="chart1_metric"
+                )
+                chart1_type = st.radio(
+                    "Chart Type:",
+                    ["Pie Chart", "Bar Chart", "Treemap"],
+                    horizontal=True,
+                    key="chart1_type"
+                )
+            
+            with col_ctrl2:
+                chart2_metric = st.selectbox(
+                    "📊 Right Chart - Show:",
+                    ["Top 10 Materials", "Items by Location", "Low Stock Alert", "Recent Activity", "PO Summary"],
+                    key="chart2_metric"
+                )
+                show_value = st.checkbox("Show exact values on charts", value=True)
+        
+        col1, col2 = st.columns(2)
+        
+        # ── LEFT CHART (Dynamic) ────────────────────────────────────────────────
+        with col1:
+            st.markdown("""
+                <div style="background: white; padding: 20px; border-radius: 12px; 
+                            box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            """, unsafe_allow_html=True)
+            
+            # Prepare data based on selection
+            if chart1_metric == "Category":
+                chart1_data = df.groupby('Category')['Footage'].sum().reset_index()
+                chart1_title = "Inventory by Category"
+                names_col, values_col = 'Category', 'Footage'
+            
+            elif chart1_metric == "Location":
+                chart1_data = df.groupby('Location')['Footage'].sum().nlargest(10).reset_index()
+                chart1_title = "Top 10 Locations by Footage"
+                names_col, values_col = 'Location', 'Footage'
+            
+            elif chart1_metric == "Status":
+                chart1_data = df.groupby('Status')['Footage'].sum().reset_index()
+                chart1_title = "Inventory by Status"
+                names_col, values_col = 'Status', 'Footage'
+            
+            else:  # Material Type
+                # Extract material type (e.g., "Aluminum" from "Smooth Aluminum Coil")
+                df['Material_Type'] = df['Material'].str.extract(r'(Aluminum|Stainless Steel|Galvanized|Steel)')[0].fillna('Other')
+                chart1_data = df.groupby('Material_Type')['Footage'].sum().reset_index()
+                chart1_title = "Inventory by Material Type"
+                names_col, values_col = 'Material_Type', 'Footage'
+            
+            st.markdown(f"<h4 style='color: #1e293b; margin-top: 0;'>{chart1_title}</h4>", unsafe_allow_html=True)
+            
+            # Render selected chart type
+            if chart1_type == "Pie Chart":
+                fig1 = px.pie(
+                    chart1_data, 
+                    names=names_col, 
+                    values=values_col, 
+                    hole=0.5,
+                    color_discrete_sequence=px.colors.qualitative.Bold
+                )
+                fig1.update_traces(
+                    textposition='inside', 
+                    textinfo='percent+label' if show_value else 'label',
+                    hovertemplate=f'<b>%{{label}}</b><br>Footage: %{{value:,.0f}}<br>Percent: %{{percent}}<extra></extra>'
+                )
+            
+            elif chart1_type == "Bar Chart":
+                fig1 = px.bar(
+                    chart1_data.sort_values(values_col, ascending=True).tail(10),
+                    x=values_col,
+                    y=names_col,
+                    orientation='h',
+                    color=names_col,
+                    color_discrete_sequence=px.colors.qualitative.Bold
+                )
+                fig1.update_traces(
+                    texttemplate='%{x:,.0f}' if show_value else None,
+                    textposition='outside',
+                    hovertemplate=f'<b>%{{y}}</b><br>Footage: %{{x:,.0f}}<extra></extra>'
+                )
+            
+            else:  # Treemap
+                fig1 = px.treemap(
+                    chart1_data,
+                    path=[names_col],
+                    values=values_col,
+                    color=values_col,
+                    color_continuous_scale='Blues'
+                )
+                fig1.update_traces(
+                    texttemplate='<b>%{label}</b><br>%{value:,.0f} ft' if show_value else '<b>%{label}</b>',
+                    hovertemplate='<b>%{label}</b><br>Footage: %{value:,.0f}<extra></extra>'
+                )
+            
+            fig1.update_layout(
+                margin=dict(l=20, r=20, t=20, b=20),
+                height=400,
+                showlegend=chart1_type != "Treemap"
+            )
+            
+            st.plotly_chart(fig1, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        # ── RIGHT CHART (Dynamic) ───────────────────────────────────────────────
+        with col2:
+            st.markdown("""
+                <div style="background: white; padding: 20px; border-radius: 12px; 
+                            box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            """, unsafe_allow_html=True)
+            
+            if chart2_metric == "Top 10 Materials":
+                mat_sum = df.groupby(['Material', 'Category'])['Footage'].sum().nlargest(10).reset_index()
+                st.markdown("<h4 style='color: #1e293b; margin-top: 0;'>Top 10 Materials by Stock</h4>", unsafe_allow_html=True)
+                
+                fig2 = px.bar(
+                    mat_sum.sort_values('Footage'),
+                    x='Footage', 
+                    y='Material', 
+                    orientation='h', 
+                    color='Category',
+                    color_discrete_sequence=px.colors.qualitative.Bold
+                )
+                fig2.update_traces(
+                    texttemplate='%{x:,.0f}' if show_value else None,
+                    textposition='outside',
+                    hovertemplate='<b>%{y}</b><br>Footage: %{x:,.0f}<br>Category: %{fullData.name}<extra></extra>'
+                )
+                fig2.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=400)
+                st.plotly_chart(fig2, use_container_width=True)
+            
+            elif chart2_metric == "Items by Location":
+                loc_sum = df.groupby('Location').agg({'Item_ID': 'count', 'Footage': 'sum'}).reset_index()
+                loc_sum.columns = ['Location', 'Item_Count', 'Total_Footage']
+                loc_sum = loc_sum.nlargest(10, 'Total_Footage')
+                
+                st.markdown("<h4 style='color: #1e293b; margin-top: 0;'>Busiest Storage Locations</h4>", unsafe_allow_html=True)
+                
+                fig2 = px.scatter(
+                    loc_sum,
+                    x='Item_Count',
+                    y='Total_Footage',
+                    size='Total_Footage',
+                    color='Location',
+                    hover_data=['Location'],
+                    color_discrete_sequence=px.colors.qualitative.Bold
+                )
+                fig2.update_traces(
+                    hovertemplate='<b>%{customdata[0]}</b><br>Items: %{x}<br>Footage: %{y:,.0f}<extra></extra>'
+                )
+                fig2.update_layout(
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    height=400,
+                    xaxis_title="Number of Items",
+                    yaxis_title="Total Footage"
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+            
+            elif chart2_metric == "Low Stock Alert":
+                st.markdown("<h4 style='color: #1e293b; margin-top: 0;'>⚠️ Low Stock Items</h4>", unsafe_allow_html=True)
+                
+                # Define low stock threshold by category
+                low_stock_threshold = {
+                    'Coils': 5000,
+                    'Rolls': 1000,
+                    'Elbows': 50,
+                    'Fab Straps': 100,
+                    'Mineral Wool': 50,
+                    'Wing Seals': 500,
+                    'Wire': 200,
+                    'Banding': 500
+                }
+                
+                low_stock_items = []
+                for cat, threshold in low_stock_threshold.items():
+                    cat_data = df[df['Category'] == cat].groupby('Material')['Footage'].sum()
+                    low_items = cat_data[cat_data < threshold]
+                    for material, footage in low_items.items():
+                        low_stock_items.append({
+                            'Category': cat,
+                            'Material': material,
+                            'Current_Stock': footage,
+                            'Threshold': threshold,
+                            'Shortage': threshold - footage
+                        })
+                
+                if low_stock_items:
+                    low_df = pd.DataFrame(low_stock_items).nlargest(10, 'Shortage')
                     
-                    try:
-                        # Call the model
-                        response = model.generate_content(prompt)
-                        
-                        if response.text:
-                            st.info(response.text)
-                            st.download_button("📥 Download Report", response.text, file_name="MJP_Report.txt")
+                    fig2 = px.bar(
+                        low_df,
+                        x='Shortage',
+                        y='Material',
+                        orientation='h',
+                        color='Category',
+                        color_discrete_sequence=px.colors.qualitative.Set1,
+                        hover_data=['Current_Stock', 'Threshold']
+                    )
+                    fig2.update_traces(
+                        hovertemplate='<b>%{y}</b><br>Shortage: %{x:,.0f}<br>Current: %{customdata[0]:,.0f}<br>Target: %{customdata[1]:,.0f}<extra></extra>'
+                    )
+                    fig2.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=400)
+                    st.plotly_chart(fig2, use_container_width=True)
                     
-                    except Exception as e:
-                        # If it still fails, it's likely a key restriction/billing issue
-                        st.error(f"Final Attempt Failed: {e}")
-                        st.markdown("""
-                        **Possible fixes:**
-                        1. Go to [Google AI Studio](https://aistudio.google.com/)
-                        2. Create a **NEW** API Key.
-                        3. Ensure the **Generative Language API** is enabled in your Google Cloud Project.
-                        """)
+                    st.warning(f"⚠️ {len(low_stock_items)} items below threshold!")
+                else:
+                    st.success("✅ All items above minimum stock levels!")
+                    st.markdown("<div style='height: 300px; display: flex; align-items: center; justify-content: center;'><h3 style='color: #64748b;'>No low stock alerts</h3></div>", unsafe_allow_html=True)
+            
+            elif chart2_metric == "Recent Activity":
+                st.markdown("<h4 style='color: #1e293b; margin-top: 0;'>📅 Recent Inventory Changes</h4>", unsafe_allow_html=True)
+                
+                try:
+                    # Fetch recent audit logs
+                    recent_logs = supabase.table("audit_log").select("*").order("Timestamp", desc=True).limit(10).execute()
+                    
+                    if recent_logs.data:
+                        for log in recent_logs.data:
+                            action_color = "#16a34a" if log['Action'] == "Received" else "#dc2626"
+                            st.markdown(f"""
+                                <div style="padding: 12px; margin: 8px 0; background: #f9fafb; border-radius: 8px; border-left: 4px solid {action_color};">
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <strong style="color: {action_color};">{log['Action']}</strong>
+                                        <span style="color: #64748b; font-size: 12px;">{log.get('Timestamp', 'N/A')[:16]}</span>
+                                    </div>
+                                    <div style="color: #1e293b; margin-top: 4px;">{log.get('Details', 'No details')}</div>
+                                    <div style="color: #64748b; font-size: 12px; margin-top: 4px;">By: {log.get('User', 'Unknown')}</div>
+                                </div>
+                            """, unsafe_allow_html=True)
+                    else:
+                        st.info("No recent activity recorded")
+                except Exception as e:
+                    st.error(f"Could not load activity: {e}")
+            
+            else:  # PO Summary
+                st.markdown("<h4 style='color: #1e293b; margin-top: 0;'>📦 Purchase Order Summary</h4>", unsafe_allow_html=True)
+                
+                po_data = df[df['Purchase_Order_Num'].notna()].groupby('Purchase_Order_Num').agg({
+                    'Item_ID': 'count',
+                    'Footage': 'sum',
+                    'Category': lambda x: ', '.join(x.unique()[:3])
+                }).reset_index()
+                po_data.columns = ['PO_Number', 'Items', 'Total_Footage', 'Categories']
+                po_data = po_data.nlargest(10, 'Total_Footage')
+                
+                if not po_data.empty:
+                    fig2 = px.bar(
+                        po_data.sort_values('Total_Footage'),
+                        x='Total_Footage',
+                        y='PO_Number',
+                        orientation='h',
+                        color='Items',
+                        color_continuous_scale='Viridis',
+                        hover_data=['Categories']
+                    )
+                    fig2.update_traces(
+                        hovertemplate='<b>%{y}</b><br>Footage: %{x:,.0f}<br>Items: %{marker.color}<br>Categories: %{customdata[0]}<extra></extra>'
+                    )
+                    fig2.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=400)
+                    st.plotly_chart(fig2, use_container_width=True)
+                else:
+                    st.info("No PO data available")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # ── AI Assistant Section ────────────────────────────────────────────────
+        st.markdown("""
+            <div style="text-align: center; padding: 20px 0;">
+                <h2 style="color: #7c3aed; margin: 0;">🤖 MJP Pulse AI Assistant</h2>
+                <p style="color: #64748b; margin-top: 8px;">Ask intelligent questions about your inventory</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        with st.container():
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%); 
+                            padding: 30px; border-radius: 12px; border-left: 4px solid #7c3aed;">
+            """, unsafe_allow_html=True)
+            
+            # Example questions
+            st.markdown("**💡 Example Questions:**")
+            examples = [
+                "What items are running low and need reordering?",
+                "Show me a summary of all Coils in stock",
+                "Which category has the most inventory?",
+                "What's the total value of Aluminum items?",
+                "Recommend optimal reorder quantities"
+            ]
+            
+            cols = st.columns(3)
+            for idx, example in enumerate(examples):
+                with cols[idx % 3]:
+                    if st.button(f"💬 {example}", key=f"example_{idx}", use_container_width=True):
+                        st.session_state.ai_question = example
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # User input
+            user_q = st.text_area(
+                "✍️ Your Question:",
+                value=st.session_state.get('ai_question', ''),
+                placeholder="e.g., What materials need reordering based on current stock levels?",
+                height=100,
+                key="ai_input_final"
+            )
+            
+            if st.button("🚀 Ask AI Assistant", type="primary", use_container_width=True):
+                if not user_q:
+                    st.warning("⚠️ Please enter a question!")
+                elif not GEMINI_KEY or not GEMINI_KEY.startswith("AIza"):
+                    st.error("⚠️ Invalid API Key. Please check your Gemini API configuration.")
+                else:
+                    with st.spinner("🤖 AI is analyzing your inventory data..."):
+                        try:
+                            # Prepare inventory context
+                            inventory_summary = df.groupby('Category').agg({
+                                'Footage': 'sum',
+                                'Item_ID': 'count'
+                            }).reset_index()
+                            inventory_summary.columns = ['Category', 'Total_Footage', 'Item_Count']
+                            
+                            material_details = df[['Material', 'Footage', 'Category', 'Location']].to_string()
+                            
+                            prompt = f"""You are an intelligent warehouse management assistant for MJP Pulse.
+
+Current Inventory Summary:
+{inventory_summary.to_string()}
+
+Detailed Material List:
+{material_details}
+
+Business Rules:
+- RPR (Rolls Per Reel) = 200 ft/roll
+- Standard items = 100 ft/roll
+- Reorder threshold = 20% of normal capacity
+
+User Question: {user_q}
+
+Please provide a clear, actionable response with specific recommendations and data-backed insights."""
+                            
+                            response = model.generate_content(prompt)
+                            
+                            if response.text:
+                                st.markdown("### 🎯 AI Response")
+                                st.markdown("""
+                                    <div style="background: white; padding: 20px; border-radius: 8px; 
+                                                border-left: 4px solid #7c3aed; margin: 20px 0;">
+                                """, unsafe_allow_html=True)
+                                
+                                st.markdown(response.text)
+                                
+                                st.markdown("</div>", unsafe_allow_html=True)
+                                
+                                # Download button
+                                st.download_button(
+                                    "📥 Download AI Report",
+                                    response.text,
+                                    file_name=f"MJP_AI_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                                    mime="text/plain",
+                                    key="download_ai_report"
+                                )
+                                
+                                st.success("✅ Analysis complete!")
+                            
+                        except Exception as e:
+                            st.error(f"❌ AI Error: {e}")
+                            st.markdown("""
+                            **🔧 Troubleshooting:**
+                            1. Verify your API key at [Google AI Studio](https://aistudio.google.com/)
+                            2. Ensure Generative Language API is enabled
+                            3. Check API usage limits
+                            """)
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+    
     else:
-        st.info("No data available.")
+        st.info("📊 No inventory data available. Add items to view analytics.")
+        st.markdown("""
+            <div style="text-align: center; padding: 40px;">
+                <h3 style="color: #64748b;">Get Started</h3>
+                <p>Navigate to the <strong>Smart Inventory Receiver</strong> tab to add your first items!</p>
+            </div>
+        """, unsafe_allow_html=True)
         
 with tab6:
     st.subheader("📜 System Audit Log")
