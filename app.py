@@ -309,6 +309,384 @@ SIZE_DISPLAY = {
 }
 SIZE_MAP = {k.replace("#", "Size "): v for k, v in SIZE_DISPLAY.items()}
 
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER
+from io import BytesIO
+from datetime import datetime
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
+def process_production_line(line, extra_allowance, material_type, order_number, client_name, operator_name, feedback, deduction_details):
+    """
+    Process a single production line (coil or roll).
+    
+    Args:
+        line: Dictionary with production line details
+        extra_allowance: Extra inches per piece
+        material_type: "Coil" or "Roll"
+        order_number: Internal order number
+        client_name: Client name
+        operator_name: Operator name
+        feedback: List to append feedback messages
+        deduction_details: List to append deduction records
+    
+    Returns:
+        tuple: (success: bool, total_footage: float)
+    """
+    if line["pieces"] <= 0:
+        return True, 0.0  # Skip empty lines
+    
+    if not line["items"]:
+        feedback.append(f"✗ {material_type} line for {line['display_size']} has no source selected")
+        return False, 0.0
+    
+    # Calculate required footage
+    if line["use_custom"]:
+        inches_per_piece = line["custom_inches"]
+    else:
+        inches_per_piece = SIZE_DISPLAY.get(line["display_size"], 12.0)
+    
+    total_inches = (inches_per_piece + extra_allowance) * line["pieces"]
+    total_footage_needed = total_inches / 12.0
+    total_footage_needed += line["waste"]
+    
+    # Get source items
+    source_items = []
+    for item_str in line["items"]:
+        item_id = item_str.split(" - ")[0]
+        mask = df['Item_ID'] == item_id
+        if mask.any():
+            source_items.append({
+                'id': item_id,
+                'footage': df.loc[mask, 'Footage'].values[0],
+                'material': df.loc[mask, 'Material'].values[0]
+            })
+    
+    if not source_items:
+        feedback.append(f"✗ No valid sources found for {material_type} {line['display_size']}")
+        return False, 0.0
+    
+    # Calculate available footage
+    available_footage = sum(item['footage'] for item in source_items)
+    
+    if available_footage < total_footage_needed:
+        feedback.append(f"✗ Insufficient stock for {material_type} {line['display_size']}: need {total_footage_needed:.2f} ft, have {available_footage:.2f} ft")
+        return False, 0.0
+    
+    # Deduct from sources
+    remaining_needed = total_footage_needed
+    
+    for item in source_items:
+        if remaining_needed <= 0:
+            break
+        
+        deduct_amount = min(item['footage'], remaining_needed)
+        new_footage = item['footage'] - deduct_amount
+        
+        # Update database
+        try:
+            action_details = f"Production: {line['pieces']} pcs of {line['display_size']} ({deduct_amount:.2f} ft used) for {client_name} (Order: {order_number})"
+            
+            success_update = update_stock(
+                item_id=item['id'],
+                new_footage=new_footage,
+                user_name=operator_name,
+                action_type=action_details
+            )
+            
+            if not success_update:
+                feedback.append(f"✗ Failed to update {item['id']}")
+                return False, 0.0
+            
+            # Record for PDF
+            deduction_details.append({
+                'source_id': item['id'],
+                'material': item['material'],
+                'size': line['display_size'],
+                'pieces': line['pieces'],
+                'footage_used': deduct_amount,
+                'waste': line['waste'],
+                'material_type': material_type
+            })
+            
+            remaining_needed -= deduct_amount
+            
+        except Exception as e:
+            feedback.append(f"✗ Error updating {item['id']}: {e}")
+            return False, 0.0
+    
+    feedback.append(f"✓ {material_type} {line['display_size']}: {line['pieces']} pieces produced ({total_footage_needed:.2f} ft used)")
+    return True, total_footage_needed
+
+
+def generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage):
+    """
+    Generate a professional production order PDF with navy blue theme.
+    
+    Args:
+        order_number: Internal order number
+        client_name: Client name
+        operator_name: Operator name
+        deduction_details: List of deduction records
+        box_usage: Dictionary of box types and quantities
+    
+    Returns:
+        BytesIO: PDF file buffer
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, 
+                           rightMargin=0.75*inch, leftMargin=0.75*inch,
+                           topMargin=1*inch, bottomMargin=0.75*inch)
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Navy blue theme colors
+    navy_blue = colors.HexColor('#1e3a8a')
+    light_navy = colors.HexColor('#dbeafe')
+    
+    # Title style
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=navy_blue,
+        spaceAfter=12,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.HexColor('#64748b'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    # Title
+    elements.append(Paragraph("📋 PRODUCTION ORDER REPORT", title_style))
+    elements.append(Paragraph("Manufacturing Documentation", subtitle_style))
+    
+    # Order metadata
+    current_time = datetime.now().strftime('%B %d, %Y at %I:%M %p')
+    
+    metadata = [
+        ['Order Number:', order_number],
+        ['Client:', client_name],
+        ['Operator:', operator_name],
+        ['Completed:', current_time],
+        ['Total Items:', str(len(deduction_details))]
+    ]
+    
+    meta_table = Table(metadata, colWidths=[2*inch, 4*inch])
+    meta_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), light_navy),
+        ('TEXTCOLOR', (0, 0), (0, -1), navy_blue),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+        ('LEFTPADDING', (0, 0), (-1, -1), 12),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    
+    elements.append(meta_table)
+    elements.append(Spacer(1, 0.3*inch))
+    
+    # Production details table
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=12,
+        textColor=colors.HexColor('#1e293b'),
+        spaceAfter=12,
+        spaceBefore=12
+    )
+    
+    elements.append(Paragraph("Production Details", heading_style))
+    
+    # Table data
+    table_data = [['Type', 'Source ID', 'Size', 'Pieces', 'Footage Used', 'Waste']]
+    
+    for detail in deduction_details:
+        table_data.append([
+            detail['material_type'],
+            str(detail['source_id'])[:20],
+            detail['size'],
+            str(detail['pieces']),
+            f"{detail['footage_used']:.2f} ft",
+            f"{detail['waste']:.2f} ft"
+        ])
+    
+    col_widths = [0.8*inch, 1.5*inch, 0.8*inch, 0.8*inch, 1.2*inch, 0.8*inch]
+    prod_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    
+    prod_table.setStyle(TableStyle([
+        # Header
+        ('BACKGROUND', (0, 0), (-1, 0), navy_blue),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+        ('TOPPADDING', (0, 0), (-1, 0), 10),
+        
+        # Data rows
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')]),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+    ]))
+    
+    elements.append(prod_table)
+    elements.append(Spacer(1, 0.3*inch))
+    
+    # Box usage section
+    if any(box_usage.values()):
+        elements.append(Paragraph("Box Usage", heading_style))
+        
+        box_data = [['Box Type', 'Quantity']]
+        for box_type, qty in box_usage.items():
+            if qty > 0:
+                box_data.append([box_type, str(qty)])
+        
+        box_table = Table(box_data, colWidths=[3*inch, 2*inch])
+        box_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), navy_blue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, light_navy]),
+            ('PADDING', (0, 0), (-1, -1), 8),
+        ]))
+        
+        elements.append(box_table)
+    
+    elements.append(Spacer(1, 0.5*inch))
+    
+    # Footer
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.HexColor('#94a3b8'),
+        alignment=TA_CENTER
+    )
+    
+    elements.append(Paragraph(
+        "This report was automatically generated by the MJP Pulse Warehouse Management System.<br/>"
+        "For questions or updates, please contact the production manager.",
+        footer_style
+    ))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    
+    return buffer
+
+
+def send_production_pdf(pdf_buffer, order_number, client_name):
+    """
+    Send production PDF via email to admin.
+    
+    Args:
+        pdf_buffer (BytesIO): PDF file buffer
+        order_number: Order number
+        client_name: Client name
+    
+    Returns:
+        bool: True if email sent successfully
+    """
+    try:
+        # Get email config from secrets
+        smtp_server = st.secrets["email"]["smtp_server"]
+        smtp_port = st.secrets["email"]["smtp_port"]
+        sender_email = st.secrets["email"]["sender_email"]
+        sender_password = st.secrets["email"]["sender_password"]
+        admin_email = st.secrets["email"]["admin_email"]
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = admin_email
+        msg['Subject'] = f"📋 Production Order Complete - {order_number}"
+        
+        # Email body
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif;">
+            <h2 style="color: #1e3a8a;">Production Order Completed</h2>
+            <p>A new production order has been completed and is ready for review.</p>
+            
+            <table style="border-collapse: collapse; margin: 20px 0;">
+                <tr>
+                    <td style="padding: 8px; background: #dbeafe; font-weight: bold;">Order Number:</td>
+                    <td style="padding: 8px;">{order_number}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; background: #dbeafe; font-weight: bold;">Client:</td>
+                    <td style="padding: 8px;">{client_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; background: #dbeafe; font-weight: bold;">Completed:</td>
+                    <td style="padding: 8px;">{datetime.now().strftime('%B %d, %Y at %I:%M %p')}</td>
+                </tr>
+            </table>
+            
+            <p>Please find the detailed production report attached as a PDF.</p>
+            
+            <hr style="border: 1px solid #e5e7eb; margin: 20px 0;">
+            <p style="color: #64748b; font-size: 12px;">
+                This is an automated email from the MJP Pulse Warehouse Management System.
+            </p>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(body, 'html'))
+        
+        # Attach PDF
+        pdf_buffer.seek(0)
+        attachment = MIMEBase('application', 'pdf')
+        attachment.set_payload(pdf_buffer.read())
+        encoders.encode_base64(attachment)
+        attachment.add_header('Content-Disposition', f'attachment; filename=Production_Order_{order_number}.pdf')
+        msg.attach(attachment)
+        
+        # Send email
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+        
+        return True
+    
+    except Exception as e:
+        print(f"Email error: {e}")
+        return False
+
 # --- MATERIALS FOR COILS ---
 COIL_MATERIALS = [
     ".010 Smooth Stainless Steel No Polythene",
