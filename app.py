@@ -1345,7 +1345,7 @@ with tab4:
     st.markdown("""
         <div style="text-align: center; padding: 20px 0;">
             <h1 style="color: #1e40af; margin: 0;">📦 Smart Inventory Receiver</h1>
-            <p style="color: #64748b; margin-top: 8px;">Add new stock with intelligent tracking and automatic PO management</p>
+            <p style="color: #64748b; margin-top: 8px;">Multi-line receiving with intelligent tracking and automatic PO management</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -1363,11 +1363,6 @@ with tab4:
         "Other": "Other"
     }
     
-    # ── STEP 1: Category Selection (Outside form for reactivity) ───────────────
-    st.markdown("### Step 1️⃣: Select Category")
-    
-    # Create visual category cards
-    cols = st.columns(5)
     category_icons = {
         "Coils": "🔄", "Rolls": "📜", "Elbows": "↩️", 
         "Fab Straps": "🔗", "Mineral Wool": "🧶",
@@ -1375,20 +1370,69 @@ with tab4:
         "Wire": "➰", "Banding": "📏", "Other": "📦"
     }
     
-    raw_cat = st.radio(
+    # ── Initialize Session State for Receiving Cart ────────────────────────────
+    if 'receiving_cart' not in st.session_state:
+        st.session_state.receiving_cart = []
+    if 'current_po' not in st.session_state:
+        st.session_state.current_po = ""
+    if 'receiving_operator' not in st.session_state:
+        st.session_state.receiving_operator = st.session_state.get("username", "")
+    
+    # ── Purchase Order Header (Outside form for persistence) ───────────────────
+    st.markdown("### 📋 Purchase Order Information")
+    
+    col_po, col_op = st.columns([2, 1])
+    
+    with col_po:
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); 
+                        padding: 20px; border-radius: 12px; border-left: 4px solid #f59e0b;">
+        """, unsafe_allow_html=True)
+        
+        current_po = st.text_input(
+            "📄 Purchase Order Number",
+            value=st.session_state.current_po,
+            placeholder="e.g. PO-2026-001",
+            help="All items added will be tagged with this PO",
+            key="po_header"
+        )
+        st.session_state.current_po = current_po
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col_op:
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%); 
+                        padding: 20px; border-radius: 12px; border-left: 4px solid #6366f1;">
+        """, unsafe_allow_html=True)
+        
+        operator = st.text_input(
+            "👤 Receiving Operator",
+            value=st.session_state.receiving_operator,
+            key="op_header"
+        )
+        st.session_state.receiving_operator = operator
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # ── STEP 1: Category Selection (Outside form for reactivity) ───────────────
+    st.markdown("### Step 1️⃣: Select Category")
+    
+    raw_cat = st.selectbox(
         "What are you receiving?", 
-        list(cat_mapping.keys()), 
-        horizontal=True,
-        label_visibility="collapsed"
+        list(cat_mapping.keys()),
+        key="cat_select"
     )
     cat_choice = cat_mapping[raw_cat]
     
     st.markdown("---")
     
-    # ── STEP 2: Receive Form ────────────────────────────────────────────────────
-    with st.form("smart_receive_form", clear_on_submit=True):
+    # ── STEP 2: Add Item Form ──────────────────────────────────────────────────
+    with st.form("add_receiving_item_form", clear_on_submit=True):
         
-        # Dynamic Material Builder with Hierarchy
+        # Dynamic Material Builder
         material = ""
         qty_val = 1.0
         unit_label = "Items"
@@ -1546,37 +1590,8 @@ with tab4:
         
         st.markdown("---")
         
-        # Purchase Order & Quantity Card
-        st.markdown("### Step 3️⃣: 📋 Order Details")
-        
-        with st.container():
-            st.markdown("""
-                <div style="background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%); 
-                            padding: 24px; border-radius: 12px; border-left: 4px solid #ca8a04;">
-            """, unsafe_allow_html=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                purchase_order_num = st.text_input(
-                    "📄 Purchase Order Number",
-                    placeholder="e.g. PO-2026-001",
-                    help="Supplier PO# for batch/quality tracking"
-                )
-            with col2:
-                item_count = st.number_input(
-                    f"📦 How many {unit_label}?", 
-                    min_value=1, value=1, step=1
-                )
-            
-            total_added = item_count * qty_val
-            st.success(f"**📊 Summary:** {item_count} × '{material}' = **{total_added} total {unit_label.lower()}** | PO: **{purchase_order_num or 'N/A'}**")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Storage Location Card
-        st.markdown("### Step 4️⃣: 📍 Storage Location")
+        # Quantity & Storage
+        st.markdown("### Step 3️⃣: 📦 Quantity & Storage")
         
         with st.container():
             st.markdown("""
@@ -1584,25 +1599,37 @@ with tab4:
                             padding: 24px; border-radius: 12px; border-left: 4px solid #16a34a;">
             """, unsafe_allow_html=True)
             
-            loc_type = st.radio("🏢 Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
+            col1, col2 = st.columns(2)
             
-            if loc_type == "Rack System":
-                col1, col2, col3 = st.columns(3)
-                bay = col1.number_input("🅱️ Bay", min_value=1, value=1)
-                sec = col2.selectbox("🔤 Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-                lvl = col3.number_input("⬆️ Level", min_value=1, value=1)
-                gen_loc = f"{bay}{sec}{lvl}"
-            else:
-                gen_loc = st.text_input("🗺️ Floor Zone Name", value="FLOOR").strip().upper()
+            with col1:
+                item_count = st.number_input(
+                    f"📦 How many {unit_label}?", 
+                    min_value=1, value=1, step=1
+                )
+                
+                total_added = item_count * qty_val
+                st.success(f"**📊 Total:** {total_added} {unit_label.lower()}")
             
-            st.info(f"📍 **Storage Location:** {gen_loc}")
+            with col2:
+                loc_type = st.radio("🏢 Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True)
+                
+                if loc_type == "Rack System":
+                    subcol1, subcol2, subcol3 = st.columns(3)
+                    bay = subcol1.number_input("🅱️ Bay", min_value=1, value=1)
+                    sec = subcol2.selectbox("🔤 Sec", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+                    lvl = subcol3.number_input("⬆️ Lvl", min_value=1, value=1)
+                    gen_loc = f"{bay}{sec}{lvl}"
+                else:
+                    gen_loc = st.text_input("🗺️ Floor Zone", value="FLOOR").strip().upper()
+                
+                st.info(f"📍 **Location:** {gen_loc}")
             
             st.markdown("</div>", unsafe_allow_html=True)
         
         st.markdown("---")
         
-        # ID Generation & Operator Card
-        st.markdown("### Step 5️⃣: 🏷️ Identification & Authorization")
+        # ID Generation
+        st.markdown("### Step 4️⃣: 🏷️ Identification")
         
         with st.container():
             st.markdown("""
@@ -1619,99 +1646,164 @@ with tab4:
             elif cat_choice == "Rolls" and is_serialized:
                 pallet_num = st.number_input("📦 Pallet Number", min_value=1, value=1, step=1)
                 id_preview = f"{id_prefix}-{pallet_num:02d}"
-                st.info(f"🏷️ **Pallet ID Preview:** `{id_preview}` (Total Footage: {total_added})")
+                st.info(f"🏷️ **Pallet ID:** `{id_preview}` (Total: {total_added} footage)")
                 is_serialized = False
             
             elif is_serialized:
                 starting_id = st.text_input("🏷️ Starting ID", value=f"{id_prefix}-1001")
                 id_preview = starting_id
-                st.info(f"🏷️ **ID Preview (first item):** `{id_preview}`")
+                st.info(f"🏷️ **ID Preview:** `{id_preview}`")
             
             else:
-                st.info("📦 **Bulk item** - No unique IDs needed (quantity will be added to existing or new row)")
-            
-            operator = st.text_input("👤 Receiving Operator", value=st.session_state.get("username", ""))
+                id_preview = f"{cat_choice.upper()}-BULK"
+                st.info("📦 **Bulk item** - No unique IDs needed")
             
             st.markdown("</div>", unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Submit Button
-        submitted = st.form_submit_button(
-            "✅ Add to Cloud Inventory", 
+        # Add to Cart Button
+        add_item = st.form_submit_button(
+            "🛒 Add to Receiving Cart", 
             use_container_width=True, 
-            type="primary"
+            type="secondary"
         )
-
-    # ── Save Logic (unchanged) ─────────────────────────────────────────────────
-    if submitted:
-        if not operator or not material:
-            st.error("⚠️ Operator and material details required.")
+    
+    # ── Process Add to Cart ─────────────────────────────────────────────────────
+    if add_item:
+        if not current_po.strip():
+            st.error("⚠️ Please enter a Purchase Order Number first!")
+        elif not operator.strip():
+            st.error("⚠️ Please enter the Receiving Operator name!")
+        elif not material:
+            st.error("⚠️ Material details are required!")
         else:
-            with st.spinner("☁️ Syncing with Cloud Database..."):
-                try:
-                    if is_serialized:
-                        new_rows = []
-                        for i in range(item_count):
-                            if cat_choice == "Coils":
-                                unique_id = f"{id_prefix}-{(starting_num + i):02d}"
-                            else:
-                                parts = starting_id.split('-')
-                                base = '-'.join(parts[:-1])
-                                num = int(parts[-1]) + i
-                                unique_id = f"{base}-{num:04d}"
-                            
-                            new_rows.append({
-                                "Item_ID": unique_id,
-                                "Material": material,
-                                "Footage": qty_val,
-                                "Location": gen_loc,
-                                "Status": "Active",
-                                "Category": cat_choice,
-                                "Purchase_Order_Num": purchase_order_num.strip() or None
-                            })
-                        
-                        supabase.table("inventory").insert(new_rows).execute()
-                    
-                    else:
-                        mask = (df['Category'] == cat_choice) & (df['Material'] == material)
-                        if mask.any():
-                            current_qty = df.loc[mask, 'Footage'].values[0]
-                            new_qty = current_qty + total_added
-                            bulk_id = df.loc[mask, 'Item_ID'].values[0]
-                            update_stock(bulk_id, new_qty, operator, f"Received {total_added} {unit_label.lower()} (PO: {purchase_order_num or 'N/A'})")
-                        else:
-                            unique_id = id_preview if 'id_preview' in locals() else f"{cat_choice.upper()}-BULK-{datetime.now().strftime('%Y%m%d')}"
-                            new_data = {
-                                "Item_ID": unique_id,
-                                "Material": material,
-                                "Footage": total_added,
-                                "Location": gen_loc,
-                                "Status": "Active",
-                                "Category": cat_choice,
-                                "Purchase_Order_Num": purchase_order_num.strip() or None
-                            }
-                            supabase.table("inventory").insert(new_data).execute()
-                    
-                    # Audit log
-                    log_id = unique_id if 'unique_id' in locals() else bulk_id
-                    log_entry = {
-                        "Item_ID": log_id,
-                        "Action": "Received",
-                        "User": operator,
-                        "Timestamp": datetime.now().isoformat(),
-                        "Details": f"PO: {purchase_order_num or 'N/A'} | {item_count} × {material} ({total_added} {unit_label.lower()})"
-                    }
-                    supabase.table("audit_logs").insert(log_entry).execute()
-                    
-                    st.cache_data.clear()
-                    st.success(f"✅ Added {item_count} × '{material}' ({total_added} {unit_label.lower()}) to {gen_loc}! PO: {purchase_order_num or 'N/A'}")
-                    st.balloons()
+            # Add to cart
+            st.session_state.receiving_cart.append({
+                'category': cat_choice,
+                'material': material,
+                'qty_val': qty_val,
+                'item_count': item_count,
+                'total_added': total_added,
+                'unit_label': unit_label,
+                'location': gen_loc,
+                'is_serialized': is_serialized,
+                'id_prefix': id_prefix if 'id_prefix' in locals() else cat_choice.upper(),
+                'id_preview': id_preview if 'id_preview' in locals() else f"{cat_choice}-BULK",
+                'starting_num': starting_num if 'starting_num' in locals() else None,
+                'starting_id': starting_id if 'starting_id' in locals() else None,
+            })
+            
+            st.success(f"✅ Added: {item_count} × {material} ({total_added} {unit_label.lower()})")
+            st.rerun()
+    
+    # ── Display Receiving Cart ──────────────────────────────────────────────────
+    if st.session_state.receiving_cart:
+        st.markdown("---")
+        st.markdown("### 🛒 Current Receiving Batch")
+        st.info(f"📋 **PO:** {st.session_state.current_po} | 👤 **Operator:** {st.session_state.receiving_operator}")
+        
+        for idx, item in enumerate(st.session_state.receiving_cart):
+            col_item, col_remove = st.columns([5, 1])
+            
+            with col_item:
+                st.write(f"**{idx+1}.** {item['item_count']} × {item['material']} = **{item['total_added']} {item['unit_label'].lower()}** → 📍 {item['location']}")
+            
+            with col_remove:
+                if st.button("🗑️", key=f"remove_receiving_{idx}"):
+                    st.session_state.receiving_cart.pop(idx)
                     st.rerun()
-                
-                except Exception as e:
-                    st.error(f"❌ Failed to add inventory: {e}")
-
+        
+        st.markdown("---")
+        
+        col_process, col_clear = st.columns(2)
+        
+        with col_process:
+            if st.button("✅ Process All Items to Inventory", type="primary", use_container_width=True):
+                if not st.session_state.current_po.strip() or not st.session_state.receiving_operator.strip():
+                    st.error("⚠️ PO Number and Operator are required!")
+                else:
+                    with st.spinner("☁️ Processing all items to Cloud Database..."):
+                        try:
+                            all_success = True
+                            
+                            for item in st.session_state.receiving_cart:
+                                if item['is_serialized']:
+                                    new_rows = []
+                                    for i in range(item['item_count']):
+                                        if item['category'] == "Coils" and item['starting_num']:
+                                            unique_id = f"{item['id_prefix']}-{(item['starting_num'] + i):02d}"
+                                        elif item['starting_id']:
+                                            parts = item['starting_id'].split('-')
+                                            base = '-'.join(parts[:-1])
+                                            num = int(parts[-1]) + i
+                                            unique_id = f"{base}-{num:04d}"
+                                        else:
+                                            unique_id = f"{item['id_preview']}-{i+1:04d}"
+                                        
+                                        new_rows.append({
+                                            "Item_ID": unique_id,
+                                            "Material": item['material'],
+                                            "Footage": item['qty_val'],
+                                            "Location": item['location'],
+                                            "Status": "Active",
+                                            "Category": item['category'],
+                                            "Purchase_Order_Num": st.session_state.current_po.strip()
+                                        })
+                                    
+                                    supabase.table("inventory").insert(new_rows).execute()
+                                
+                                else:
+                                    # Bulk item
+                                    mask = (df['Category'] == item['category']) & (df['Material'] == item['material'])
+                                    if mask.any():
+                                        current_qty = df.loc[mask, 'Footage'].values[0]
+                                        new_qty = current_qty + item['total_added']
+                                        bulk_id = df.loc[mask, 'Item_ID'].values[0]
+                                        update_stock(bulk_id, new_qty, st.session_state.receiving_operator, 
+                                                   f"Received {item['total_added']} {item['unit_label'].lower()} (PO: {st.session_state.current_po})")
+                                    else:
+                                        unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d')}"
+                                        new_data = {
+                                            "Item_ID": unique_id,
+                                            "Material": item['material'],
+                                            "Footage": item['total_added'],
+                                            "Location": item['location'],
+                                            "Status": "Active",
+                                            "Category": item['category'],
+                                            "Purchase_Order_Num": st.session_state.current_po.strip()
+                                        }
+                                        supabase.table("inventory").insert(new_data).execute()
+                                
+                                # Audit log for each item
+                                log_entry = {
+                                    "Item_ID": item['id_preview'],
+                                    "Action": "Received",
+                                    "User": st.session_state.receiving_operator,
+                                    "Timestamp": datetime.now().isoformat(),
+                                    "Details": f"PO: {st.session_state.current_po} | {item['item_count']} × {item['material']} ({item['total_added']} {item['unit_label'].lower()})"
+                                }
+                                supabase.table("audit_logs").insert(log_entry).execute()
+                            
+                            st.cache_data.clear()
+                            st.success(f"✅ Successfully received {len(st.session_state.receiving_cart)} item type(s) for PO: {st.session_state.current_po}!")
+                            st.balloons()
+                            
+                            # Clear cart
+                            st.session_state.receiving_cart = []
+                            st.rerun()
+                        
+                        except Exception as e:
+                            st.error(f"❌ Failed to process items: {e}")
+        
+        with col_clear:
+            if st.button("🗑️ Clear Cart", use_container_width=True):
+                st.session_state.receiving_cart = []
+                st.rerun()
+    
+    elif not st.session_state.receiving_cart:
+        st.info("👆 Add items to start building your receiving batch")
+    
     # ── Receipt Report Section ─────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("""
