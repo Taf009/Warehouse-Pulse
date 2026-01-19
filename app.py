@@ -571,11 +571,11 @@ def send_receipt_email(admin_email, po_num, pdf_buffer, operator):
         bool: True if email sent successfully, False otherwise
     """
     try:
-        # Email configuration - UPDATE THESE WITH YOUR SMTP SETTINGS
-        smtp_server = "smtp.gmail.com"  # For Gmail
-        smtp_port = 587
-        sender_email = "your-email@gmail.com"  # Your email
-        sender_password = "your-app-password"  # Your app password (not regular password)
+        # Get email config from Streamlit secrets
+        smtp_server = st.secrets["email"]["smtp_server"]
+        smtp_port = st.secrets["email"]["smtp_port"]
+        sender_email = st.secrets["email"]["sender_email"]
+        sender_password = st.secrets["email"]["sender_password"]
         
         # Create message
         msg = MIMEMultipart()
@@ -693,7 +693,6 @@ def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
     except Exception as e:
         print(f"SendGrid error: {e}")
         return False
-
 # --- END OF PRE-TABS LAYOUT ---
 # Your tabs code starts right here:
 # tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
