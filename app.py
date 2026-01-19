@@ -2429,7 +2429,8 @@ GROK_API_KEY = "xai-your-key-here"
             with col_ctrl2:
                 chart2_metric = st.selectbox(
                     "📊 Right Chart - Show:",
-                    ["Top 10 Materials", "Items by Location", "Low Stock Alert", "Recent Activity", "PO Summary"],
+                    ["Top 10 Materials", "Items by Location", "Low Stock Alert", 
+                     "Recent Activity", "PO Summary", "Top 10 Clients", "Material Velocity"],
                     key="chart2_metric"
                 )
                 show_value = st.checkbox("Show exact values on charts", value=True)
@@ -2678,6 +2679,129 @@ GROK_API_KEY = "xai-your-key-here"
                     st.plotly_chart(fig2, use_container_width=True)
                 else:
                     st.info("No PO data available")
+            
+            # ── NEW: Top 10 Clients ────────────────────────────────────────────
+            if chart2_metric == "Top 10 Clients":
+                st.markdown("<h4 style='color: #1e293b; margin-top: 0;'>👥 Top 10 Clients by Sales</h4>", unsafe_allow_html=True)
+                
+                try:
+                    # Fetch sales data from audit logs
+                    sales_logs = supabase.table("audit_log").select("*").ilike("Action", "%Sold%").execute()
+                    
+                    if sales_logs.data:
+                        clients_data = []
+                        for log in sales_logs.data:
+                            details = log.get('Details', '')
+                            # Extract client name from details like "Removed X for ClientName (SO: ...)"
+                            if 'for ' in details and ' (SO:' in details:
+                                client = details.split('for ')[1].split(' (SO:')[0].strip()
+                                # Extract quantity
+                                if 'Removed' in details:
+                                    qty_str = details.split('Removed ')[1].split(' ')[0]
+                                    try:
+                                        qty = float(qty_str)
+                                        clients_data.append({'Client': client, 'Quantity': qty})
+                                    except:
+                                        pass
+                        
+                        if clients_data:
+                            clients_df = pd.DataFrame(clients_data)
+                            top_clients = clients_df.groupby('Client')['Quantity'].sum().nlargest(10).reset_index()
+                            top_clients.columns = ['Client', 'Total_Sold']
+                            
+                            fig2 = px.bar(
+                                top_clients.sort_values('Total_Sold'),
+                                x='Total_Sold',
+                                y='Client',
+                                orientation='h',
+                                color='Total_Sold',
+                                color_continuous_scale='Sunset',
+                                text='Total_Sold' if show_value else None
+                            )
+                            fig2.update_traces(
+                                texttemplate='%{text:,.0f}' if show_value else None,
+                                textposition='outside',
+                                hovertemplate='<b>%{y}</b><br>Total Sold: %{x:,.0f} units<extra></extra>'
+                            )
+                            fig2.update_layout(
+                                margin=dict(l=20, r=20, t=20, b=20),
+                                height=400,
+                                showlegend=False
+                            )
+                            st.plotly_chart(fig2, use_container_width=True)
+                            
+                            # Show stats
+                            total_sales = top_clients['Total_Sold'].sum()
+                            st.metric("Total Sales (Top 10)", f"{total_sales:,.0f} units")
+                        else:
+                            st.info("No client sales data found")
+                    else:
+                        st.info("No sales records available")
+                except Exception as e:
+                    st.error(f"Could not load client data: {e}")
+            
+            # ── NEW: Material Velocity (How fast items move) ───────────────────
+            elif chart2_metric == "Material Velocity":
+                st.markdown("<h4 style='color: #1e293b; margin-top: 0;'>⚡ Material Turnover Rate</h4>", unsafe_allow_html=True)
+                
+                try:
+                    # Get sales activity from last 30 days
+                    from datetime import timedelta
+                    thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+                    
+                    velocity_logs = supabase.table("audit_log").select("*").ilike("Action", "%Removed%").gte("Timestamp", thirty_days_ago).execute()
+                    
+                    if velocity_logs.data:
+                        material_moves = {}
+                        for log in velocity_logs.data:
+                            details = log.get('Details', '')
+                            # Extract quantity and material
+                            if 'Removed' in details:
+                                parts = details.split('(')
+                                if len(parts) > 0:
+                                    item_info = parts[0]
+                                    # Try to extract quantity
+                                    try:
+                                        qty = float(item_info.split('Removed ')[1].split(' ')[0])
+                                        # Get material type
+                                        for cat in ['Coil', 'Roll', 'Elbow', 'Fab Strap', 'Mineral Wool']:
+                                            if cat in item_info:
+                                                material_moves[cat] = material_moves.get(cat, 0) + qty
+                                    except:
+                                        pass
+                        
+                        if material_moves:
+                            velocity_df = pd.DataFrame(list(material_moves.items()), columns=['Material', 'Units_Moved'])
+                            velocity_df = velocity_df.sort_values('Units_Moved', ascending=True)
+                            
+                            fig2 = px.bar(
+                                velocity_df,
+                                x='Units_Moved',
+                                y='Material',
+                                orientation='h',
+                                color='Units_Moved',
+                                color_continuous_scale='Turbo',
+                                text='Units_Moved' if show_value else None
+                            )
+                            fig2.update_traces(
+                                texttemplate='%{text:,.0f}' if show_value else None,
+                                textposition='outside',
+                                hovertemplate='<b>%{y}</b><br>Moved in 30 days: %{x:,.0f} units<extra></extra>'
+                            )
+                            fig2.update_layout(
+                                margin=dict(l=20, r=20, t=20, b=20),
+                                height=400,
+                                showlegend=False
+                            )
+                            st.plotly_chart(fig2, use_container_width=True)
+                            
+                            st.caption("📊 Units sold/removed in the last 30 days")
+                        else:
+                            st.info("No movement data in last 30 days")
+                    else:
+                        st.info("No recent activity to analyze")
+                except Exception as e:
+                    st.error(f"Could not calculate velocity: {e}")
             
             st.markdown("</div>", unsafe_allow_html=True)
         
