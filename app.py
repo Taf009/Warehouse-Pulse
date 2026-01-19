@@ -10,6 +10,167 @@ import io
 from supabase import create_client, Client
 from collections import defaultdict
 import time
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from io import BytesIO
+from datetime import datetime
+
+def generate_receipt_pdf(po_num, df, operator):
+    """
+    Generate a professional PDF receipt report for received inventory items.
+    
+    Args:
+        po_num (str): Purchase Order Number
+        df (DataFrame): DataFrame containing inventory items
+        operator (str): Name of receiving operator
+    
+    Returns:
+        BytesIO: PDF file buffer
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, 
+                           rightMargin=0.75*inch, leftMargin=0.75*inch,
+                           topMargin=1*inch, bottomMargin=0.75*inch)
+    
+    # Container for PDF elements
+    elements = []
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#15803d'),
+        spaceAfter=12,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.HexColor('#64748b'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=12,
+        textColor=colors.HexColor('#1e293b'),
+        spaceAfter=12,
+        spaceBefore=12
+    )
+    
+    # Title
+    elements.append(Paragraph("📦 RECEIVING REPORT", title_style))
+    elements.append(Paragraph("Purchase Order Receipt Documentation", subtitle_style))
+    
+    # Metadata section
+    current_time = datetime.now().strftime('%B %d, %Y at %I:%M %p')
+    
+    metadata = [
+        ['Purchase Order:', po_num],
+        ['Generated:', current_time],
+        ['Operator:', operator],
+        ['Total Items:', str(len(df))]
+    ]
+    
+    meta_table = Table(metadata, colWidths=[2*inch, 4*inch])
+    meta_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0fdf4')),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#15803d')),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+        ('LEFTPADDING', (0, 0), (-1, -1), 12),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    
+    elements.append(meta_table)
+    elements.append(Spacer(1, 0.3*inch))
+    
+    # Items Table Header
+    elements.append(Paragraph("Received Items", heading_style))
+    
+    # Prepare table data
+    table_data = [['Item ID', 'Category', 'Material', 'Quantity', 'Location', 'Status']]
+    
+    for _, row in df.iterrows():
+        table_data.append([
+            str(row.get('Item_ID', 'N/A'))[:20],  # Truncate if too long
+            str(row.get('Category', 'N/A')),
+            str(row.get('Material', 'N/A'))[:30],  # Truncate if too long
+            str(row.get('Footage', 'N/A')),
+            str(row.get('Location', 'N/A')),
+            str(row.get('Status', 'N/A'))
+        ])
+    
+    # Create table with column widths
+    col_widths = [1.2*inch, 0.9*inch, 2*inch, 0.8*inch, 0.9*inch, 0.7*inch]
+    items_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    
+    # Table styling
+    items_table.setStyle(TableStyle([
+        # Header row
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16a34a')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+        ('TOPPADDING', (0, 0), (-1, 0), 10),
+        
+        # Data rows
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+        ('ALIGN', (1, 1), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')]),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+    ]))
+    
+    elements.append(items_table)
+    elements.append(Spacer(1, 0.5*inch))
+    
+    # Footer
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.HexColor('#94a3b8'),
+        alignment=TA_CENTER
+    )
+    
+    elements.append(Paragraph(
+        "This report was automatically generated by the Warehouse Management System.<br/>"
+        "For questions or updates, please contact the warehouse administrator.",
+        footer_style
+    ))
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    return buffer
 
 # --- PAGE CONFIG (MUST BE FIRST) ---
 st.set_page_config(
