@@ -458,21 +458,47 @@ def generate_receipt_pdf(po_num, df, operator):
     # Items Table Header
     elements.append(Paragraph("Received Items", heading_style))
     
-    # Prepare table data
-    table_data = [['Item ID', 'Category', 'Material', 'Quantity', 'Location', 'Status']]
+    # Group items by Material and Location to consolidate rows
+    grouped_data = df.groupby(['Category', 'Material', 'Location']).agg({
+        'Footage': 'sum',  # Sum quantities
+        'Item_ID': 'count'  # Count how many items
+    }).reset_index()
     
-    for _, row in df.iterrows():
+    grouped_data.columns = ['Category', 'Material', 'Location', 'Total_Qty', 'Item_Count']
+    
+    # Prepare table data with simplified columns
+    table_data = [['Category', 'Specifications', 'Quantity', 'Location']]
+    
+    for _, row in grouped_data.iterrows():
+        category = str(row['Category'])
+        material = str(row['Material'])
+        
+        # Extract key specs from material description
+        # e.g., "Smooth Aluminum Coil - .016 Gauge" -> ".016 Aluminum Smooth"
+        specs = material
+        if category in ['Coils', 'Rolls']:
+            # Try to extract gauge and key descriptors
+            parts = material.split(' - ')
+            if len(parts) > 1:
+                gauge_part = parts[-1].replace(' Gauge', '')  # ".016"
+                desc_parts = parts[0].split()  # ["Smooth", "Aluminum", "Coil"]
+                if len(desc_parts) >= 2:
+                    specs = f"{gauge_part} {desc_parts[1]} {desc_parts[0]}"  # ".016 Aluminum Smooth"
+        
+        # Format quantity with item count
+        qty_display = f"{int(row['Item_Count'])} items ({row['Total_Qty']} total)"
+        if category in ['Coils', 'Rolls']:
+            qty_display = f"{int(row['Item_Count'])} {category}"
+        
         table_data.append([
-            str(row.get('Item_ID', 'N/A'))[:20],  # Truncate if too long
-            str(row.get('Category', 'N/A')),
-            str(row.get('Material', 'N/A'))[:30],  # Truncate if too long
-            str(row.get('Footage', 'N/A')),
-            str(row.get('Location', 'N/A')),
-            str(row.get('Status', 'N/A'))
+            category,
+            specs,
+            qty_display,
+            str(row['Location'])
         ])
     
-    # Create table with column widths
-    col_widths = [1.2*inch, 0.9*inch, 2*inch, 0.8*inch, 0.9*inch, 0.7*inch]
+    # Create table with adjusted column widths
+    col_widths = [1.2*inch, 3*inch, 1.5*inch, 1*inch]
     items_table = Table(table_data, colWidths=col_widths, repeatRows=1)
     
     # Table styling
@@ -524,6 +550,149 @@ def generate_receipt_pdf(po_num, df, operator):
     buffer.seek(0)
     
     return buffer
+
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
+def send_receipt_email(admin_email, po_num, pdf_buffer, operator):
+    """
+    Send receipt PDF via email to admin.
+    
+    Args:
+        admin_email (str): Admin email address
+        po_num (str): Purchase Order Number
+        pdf_buffer (BytesIO): PDF file buffer
+        operator (str): Name of receiving operator
+    
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    try:
+        # Email configuration - UPDATE THESE WITH YOUR SMTP SETTINGS
+        smtp_server = "smtp.gmail.com"  # For Gmail
+        smtp_port = 587
+        sender_email = "your-email@gmail.com"  # Your email
+        sender_password = "your-app-password"  # Your app password (not regular password)
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = admin_email
+        msg['Subject'] = f"📦 Receipt Report - PO: {po_num}"
+        
+        # Email body
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif;">
+            <h2 style="color: #16a34a;">Receiving Report</h2>
+            <p>A new receipt report has been generated for your review.</p>
+            
+            <table style="border-collapse: collapse; margin: 20px 0;">
+                <tr>
+                    <td style="padding: 8px; background: #f0fdf4; font-weight: bold;">Purchase Order:</td>
+                    <td style="padding: 8px;">{po_num}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; background: #f0fdf4; font-weight: bold;">Received By:</td>
+                    <td style="padding: 8px;">{operator}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; background: #f0fdf4; font-weight: bold;">Generated:</td>
+                    <td style="padding: 8px;">{datetime.now().strftime('%B %d, %Y at %I:%M %p')}</td>
+                </tr>
+            </table>
+            
+            <p>Please find the detailed receipt report attached as a PDF.</p>
+            
+            <hr style="border: 1px solid #e5e7eb; margin: 20px 0;">
+            <p style="color: #64748b; font-size: 12px;">
+                This is an automated email from the Warehouse Management System.
+            </p>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(body, 'html'))
+        
+        # Attach PDF
+        pdf_buffer.seek(0)
+        attachment = MIMEBase('application', 'pdf')
+        attachment.set_payload(pdf_buffer.read())
+        encoders.encode_base64(attachment)
+        attachment.add_header('Content-Disposition', f'attachment; filename=Receipt_{po_num}.pdf')
+        msg.attach(attachment)
+        
+        # Send email
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+        
+        return True
+    
+    except Exception as e:
+        print(f"Email error: {e}")
+        return False
+
+
+# Alternative: Using SendGrid (if you prefer API-based email)
+def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
+    """
+    Send receipt PDF via SendGrid API.
+    Requires: pip install sendgrid
+    """
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+        import base64
+        
+        # Your SendGrid API key
+        SENDGRID_API_KEY = "your-sendgrid-api-key"
+        
+        # Encode PDF
+        pdf_buffer.seek(0)
+        encoded_pdf = base64.b64encode(pdf_buffer.read()).decode()
+        
+        # Create attachment
+        attachment = Attachment(
+            FileContent(encoded_pdf),
+            FileName(f'Receipt_{po_num}.pdf'),
+            FileType('application/pdf'),
+            Disposition('attachment')
+        )
+        
+        # Create email
+        message = Mail(
+            from_email='your-verified-sender@example.com',
+            to_emails=admin_email,
+            subject=f'📦 Receipt Report - PO: {po_num}',
+            html_content=f"""
+            <html>
+            <body style="font-family: Arial, sans-serif;">
+                <h2 style="color: #16a34a;">Receiving Report</h2>
+                <p>A new receipt report has been generated.</p>
+                <p><strong>PO:</strong> {po_num}<br>
+                <strong>Operator:</strong> {operator}<br>
+                <strong>Date:</strong> {datetime.now().strftime('%B %d, %Y')}</p>
+                <p>Please find the detailed report attached.</p>
+            </body>
+            </html>
+            """
+        )
+        message.attachment = attachment
+        
+        # Send
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        
+        return response.status_code == 202
+    
+    except Exception as e:
+        print(f"SendGrid error: {e}")
+        return False
 
 # --- END OF PRE-TABS LAYOUT ---
 # Your tabs code starts right here:
@@ -2049,6 +2218,7 @@ with tab4:
                 
                 file_name = f"Receipt_{report_po_num.replace(' ', '_')}.pdf"
                 
+                # Download button
                 st.download_button(
                     label="📥 Download PDF Report",
                     data=pdf_buffer.getvalue(),
@@ -2058,10 +2228,25 @@ with tab4:
                     type="secondary"
                 )
                 
-                st.success("✅ PDF report generated successfully!")
-                
+                # Email functionality
                 if export_mode == "Download & Email":
-                    st.info("📧 Email functionality can be added here if needed")
+                    with st.spinner("📧 Sending email to admin..."):
+                        # Reset buffer position before emailing
+                        pdf_buffer.seek(0)
+                        
+                        email_success = send_receipt_email(
+                            admin_email="tmilazi@gmail.com",
+                            po_num=report_po_num,
+                            pdf_buffer=pdf_buffer,
+                            operator=st.session_state.get('username', 'Operator')
+                        )
+                        
+                        if email_success:
+                            st.success(f"✅ PDF report emailed to admin (tmilazi@gmail.com)!")
+                        else:
+                            st.warning("⚠️ PDF generated but email failed. Please check email configuration or use download button.")
+                else:
+                    st.success("✅ PDF report generated successfully!")
                     
 import google.generativeai as genai
 import plotly.express as px
