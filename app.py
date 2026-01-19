@@ -2250,7 +2250,6 @@ with tab4:
 import openai
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
 
 with tab5:
     st.markdown("""
@@ -2264,6 +2263,18 @@ with tab5:
     GROK_API_KEY = st.secrets.get("GROK_API_KEY", "")
     ai_configured = False
     
+    # Debug info (remove after testing)
+    with st.expander("🔧 API Configuration Debug", expanded=False):
+        if GROK_API_KEY:
+            st.write(f"✅ Key found: `{GROK_API_KEY[:10]}...`")
+            st.write(f"Key starts with 'xai-': {GROK_API_KEY.startswith('xai-')}")
+        else:
+            st.error("❌ No GROK_API_KEY found in secrets")
+            st.code("""
+# Add to .streamlit/secrets.toml:
+GROK_API_KEY = "xai-your-key-here"
+            """)
+    
     if GROK_API_KEY and GROK_API_KEY.startswith("xai-"):
         try:
             import openai
@@ -2274,6 +2285,9 @@ with tab5:
                 base_url="https://api.x.ai/v1"
             )
             ai_configured = True
+        except ImportError:
+            st.error("❌ OpenAI library not installed. Add 'openai' to requirements.txt")
+            ai_configured = False
         except Exception as e:
             st.warning(f"⚠️ AI Configuration Issue: {e}")
             ai_configured = False
