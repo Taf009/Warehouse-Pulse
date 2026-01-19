@@ -1791,7 +1791,7 @@ with tab4:
                                     "Timestamp": datetime.now().isoformat(),
                                     "Details": f"PO: {st.session_state.current_po} | {item['item_count']} × {item['material']} ({item['total_added']} {item['unit_label'].lower()})"
                                 }
-                                supabase.table("audit_logs").insert(log_entry).execute()
+                                supabase.table("audit_log").insert(log_entry).execute()
                             
                             st.cache_data.clear()
                             st.success(f"✅ Successfully received {len(st.session_state.receiving_cart)} item type(s) for PO: {st.session_state.current_po}!")
