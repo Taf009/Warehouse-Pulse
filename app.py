@@ -218,6 +218,15 @@ with st.sidebar:
     except:
         st.markdown("<h1 style='text-align: center;'>⚡ MJP</h1>", unsafe_allow_html=True)
     
+    # ADD DEBUG HERE
+    st.write("---")
+    st.write("**DEBUG INFO:**")
+    st.write(f"Supabase: {supabase is not None}")
+    st.write(f"df shape: {df.shape if df is not None and hasattr(df, 'shape') else 'None'}")
+    st.write(f"df empty: {df.empty if df is not None and hasattr(df, 'empty') else 'N/A'}")
+    st.write(f"df columns: {list(df.columns) if df is not None and hasattr(df, 'columns') else 'N/A'}")
+    st.write("---")
+    
     try:
         supabase.table("inventory").select("count", count="exact").limit(1).execute()
         st.success("🛰️ Database: Online")
