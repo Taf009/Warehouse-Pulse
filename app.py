@@ -183,7 +183,8 @@ df_audit = st.session_state.df_audit
 # Normalize categories in the dataframe
 if df is not None and not df.empty and 'Category' in df.columns:
     df['Category'] = df['Category'].apply(normalize_category)
-
+    st.session_state.df = df  # ← ADD THIS LINE to save normalized data back
+    
 # Paste update_stock here
 def update_stock(item_id, new_footage, user_name, action_type):
     try:
