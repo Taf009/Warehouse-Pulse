@@ -1331,7 +1331,6 @@ with tab2:
     # Guard rails
     if df.empty:
         st.warning("⚠️ No inventory data found. Please add items first.")
-        st.stop()
 
     # Safe column name handling
     category_col = next((c for c in df.columns if c.lower() == 'category'), None)
