@@ -3394,53 +3394,45 @@ Please provide a clear, actionable response with specific recommendations and da
 with tab6:
     st.subheader("📜 System Audit Log")
     st.caption("Complete history of material movements, production runs, and admin submissions.")
-
+    
     try:
-        # 1. Access the Worksheet using your specific name
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-        sh = gc.open_by_url(st.secrets["SHEET_URL"])
+        # Fetch audit logs from Supabase
+        response = supabase.table("audit_log").select("*").order("Timestamp", desc=True).execute()
         
-        try:
-            audit_ws = sh.worksheet("Audit_Log")
-            audit_records = audit_ws.get_all_records()
-        except gspread.exceptions.WorksheetNotFound:
-            st.error("The worksheet 'Audit_Log' was not found. Please check your Google Sheet tabs.")
-           # st.stop()
-
-        if not audit_records:
+        if not response.data:
             st.info("No audit logs recorded yet. Logs will appear here as materials are picked or produced.")
         else:
-            audit_df = pd.DataFrame(audit_records)
+            audit_df = pd.DataFrame(response.data)
             
             # Ensure Timestamp is handled correctly
             audit_df['Timestamp'] = pd.to_datetime(audit_df['Timestamp'], errors='coerce')
             
-            # 2. FILTER & SEARCH BAR
+            # FILTER & SEARCH BAR
             search_col, filter_col = st.columns([2, 1])
             with search_col:
-                query = st.text_input("🔍 Search Logs", placeholder="Search Order #, Operator, or Action...")
+                query = st.text_input("🔍 Search Logs", placeholder="Search Order #, Operator, or Action...", key="audit_search")
             with filter_col:
                 # Allows you to quickly see only Production submissions
-                actions = ["All"] + sorted(audit_df['Action'].unique().tolist())
-                selected_action = st.selectbox("Filter by Action", actions)
-
+                actions = ["All"] + sorted(audit_df['Action'].dropna().unique().tolist())
+                selected_action = st.selectbox("Filter by Action", actions, key="audit_filter")
+            
             # Apply Filters
             if selected_action != "All":
                 audit_df = audit_df[audit_df['Action'] == selected_action]
             
             if query:
                 audit_df = audit_df[audit_df.astype(str).apply(lambda x: x.str.contains(query, case=False)).any(axis=1)]
-
-            # 3. DISPLAY THE LOG
+            
             # Sorting so newest is at the top
             audit_df = audit_df.sort_values('Timestamp', ascending=False)
-
-            # Styled Dataframe for a clean "Log" look
+            
+            # Display the log
             st.dataframe(
                 audit_df[['Timestamp', 'Action', 'User', 'Details']], 
                 use_container_width=True, 
                 hide_index=True
             )
-
+            
     except Exception as e:
+        st.error(f"Audit Log Display Error: {e}")
         st.error(f"Audit Log Display Error: {e}")
