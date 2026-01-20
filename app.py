@@ -94,24 +94,39 @@ def init_connection():
 supabase = init_connection()
 
 # --- DATA LOADER (Supabase only) ---
-@st.cache_data(ttl=30)  # Short TTL for quick testing - change to 300 later
+@st.cache_data(ttl=30)
 def load_all_tables():
     if supabase is None:
         st.error("Supabase not connected")
-        return pd.DataFrame(), pd.DataFrame()
+        # Return empty DataFrames WITH proper structure
+        empty_inv = pd.DataFrame(columns=['Item_ID', 'Material', 'Footage', 'Location', 'Status', 'Category', 'Purchase_Order_Num'])
+        empty_audit = pd.DataFrame(columns=['Item_ID', 'Action', 'User', 'Timestamp', 'Details'])
+        return empty_inv, empty_audit
     
     try:
         inv_res = supabase.table("inventory").select("*").execute()
-        df_inv = pd.DataFrame(inv_res.data)
-        
         audit_res = supabase.table("audit_log").select("*").execute()
-        df_audit = pd.DataFrame(audit_res.data)
+        
+        # Create DataFrames with proper structure even if empty
+        if inv_res.data:
+            df_inv = pd.DataFrame(inv_res.data)
+        else:
+            df_inv = pd.DataFrame(columns=['Item_ID', 'Material', 'Footage', 'Location', 'Status', 'Category', 'Purchase_Order_Num'])
+        
+        if audit_res.data:
+            df_audit = pd.DataFrame(audit_res.data)
+        else:
+            df_audit = pd.DataFrame(columns=['Item_ID', 'Action', 'User', 'Timestamp', 'Details'])
         
         return df_inv, df_audit
+        
     except Exception as e:
         st.error(f"Error loading from Supabase: {e}")
-        return pd.DataFrame(), pd.DataFrame()
-
+        # Return properly structured empty DataFrames
+        empty_inv = pd.DataFrame(columns=['Item_ID', 'Material', 'Footage', 'Location', 'Status', 'Category', 'Purchase_Order_Num'])
+        empty_audit = pd.DataFrame(columns=['Item_ID', 'Action', 'User', 'Timestamp', 'Details'])
+        return empty_inv, empty_audit
+        
 # Initialize df
 if 'df' not in st.session_state or 'df_audit' not in st.session_state:
     st.session_state.df, st.session_state.df_audit = load_all_tables()
