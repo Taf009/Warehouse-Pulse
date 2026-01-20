@@ -2095,16 +2095,15 @@ with tab4:
     st.write("---")
     # ===== DEBUG END =====
     
-    # Rest of your tab4 code continues here...
-    st.markdown("""
-        <div style="text-align: center; padding: 20px 0;">
-            <h1 style="color: #1e40af; margin: 0;">📦 Smart Inventory Receiver</h1>
     st.markdown("""
         <div style="text-align: center; padding: 20px 0;">
             <h1 style="color: #1e40af; margin: 0;">📦 Smart Inventory Receiver</h1>
             <p style="color: #64748b; margin-top: 8px;">Multi-line receiving with intelligent tracking and automatic PO management</p>
         </div>
     """, unsafe_allow_html=True)
+    
+    # ── Safe DataFrame Check ────────────────────────────────────────────────────
+    # ... rest of your code continues
     
     # ── Safe DataFrame Check ────────────────────────────────────────────────────
     # Create a safe working copy - even if df is empty
