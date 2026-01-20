@@ -2079,6 +2079,26 @@ with tab3:
             st.info("👆 Add items to start building your order")
         
 with tab4:
+    # ===== DEBUG START =====
+    st.write("🔍 **DEBUG: Tab 4 Starting...**")
+    
+    st.write(f"1. supabase is None: {supabase is None}")
+    st.write(f"2. df is None: {df is None}")
+    
+    if df is not None:
+        st.write(f"3. df type: {type(df)}")
+        st.write(f"4. df.empty: {df.empty}")
+        st.write(f"5. df.shape: {df.shape}")
+    else:
+        st.write("3. df is None - cannot check properties")
+    
+    st.write("---")
+    # ===== DEBUG END =====
+    
+    # Rest of your tab4 code continues here...
+    st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h1 style="color: #1e40af; margin: 0;">📦 Smart Inventory Receiver</h1>
     st.markdown("""
         <div style="text-align: center; padding: 20px 0;">
             <h1 style="color: #1e40af; margin: 0;">📦 Smart Inventory Receiver</h1>
