@@ -2642,44 +2642,45 @@ with tab4:
                     st.warning(f"⚠️ No items found for PO: {report_po_num}")
                 else:
                     report_df = pd.DataFrame(response.data)
-                # Generate PDF
-                pdf_buffer = generate_receipt_pdf(
-                    po_num=report_po_num,
-                    df=report_df,
-                    operator=st.session_state.get('username', 'Operator')
-                )
-                
-                file_name = f"Receipt_{report_po_num.replace(' ', '_')}.pdf"
-                
-                # Download button
-                st.download_button(
-                    label="📥 Download PDF Report",
-                    data=pdf_buffer.getvalue(),
-                    file_name=file_name,
-                    mime="application/pdf",
-                    key=f"dl_{report_po_num}",
-                    type="secondary"
-                )
-                
-                # Email functionality
-                if export_mode == "Download & Email":
-                    with st.spinner("📧 Sending email to admin..."):
-                        # Reset buffer position before emailing
-                        pdf_buffer.seek(0)
+                    
+                    # Generate PDF
+                    pdf_buffer = generate_receipt_pdf(
+                        po_num=report_po_num,
+                        df=report_df,
+                        operator=st.session_state.get('username', 'Operator')
+                    )
+                    
+                    file_name = f"Receipt_{report_po_num.replace(' ', '_')}.pdf"
+                    
+                    # Download button
+                    st.download_button(
+                        label="📥 Download PDF Report",
+                        data=pdf_buffer.getvalue(),
+                        file_name=file_name,
+                        mime="application/pdf",
+                        key=f"dl_{report_po_num}",
+                        type="secondary"
+                    )
+                    
+                    # Email functionality
+                    if export_mode == "Download & Email":
+                        with st.spinner("📧 Sending email to admin..."):
+                            pdf_buffer.seek(0)
+                            
+                            email_success = send_receipt_email(
+                                admin_email="tmilazi@gmail.com",
+                                po_num=report_po_num,
+                                pdf_buffer=pdf_buffer,
+                                operator=st.session_state.get('username', 'Operator')
+                            )
+                            
+                            if email_success:
+                                st.success(f"✅ PDF report emailed to admin!")
+                            else:
+                                st.warning("⚠️ PDF generated but email failed.")
+                    else:
+                        st.success("✅ PDF report generated successfully!")
                         
-                        email_success = send_receipt_email(
-                            admin_email="tmilazi@gmail.com",
-                            po_num=report_po_num,
-                            pdf_buffer=pdf_buffer,
-                            operator=st.session_state.get('username', 'Operator')
-                        )
-                        
-                        if email_success:
-                            st.success(f"✅ PDF report emailed to admin (tmilazi@gmail.com)!")
-                        else:
-                            st.warning("⚠️ PDF generated but email failed. Please check email configuration or use download button.")
-                else:
-                    st.success("✅ PDF report generated successfully!")
             except Exception as e:
                 st.error(f"❌ Error generating report: {e}")
                     
