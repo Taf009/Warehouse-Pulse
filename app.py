@@ -93,6 +93,52 @@ def init_connection():
 
 supabase = init_connection()
 
+# --- CATEGORY NORMALIZATION ---
+def normalize_category(cat):
+    """Normalize category names to handle singular/plural variations"""
+    if pd.isna(cat) or not isinstance(cat, str):
+        return "Other"
+    
+    cat_lower = str(cat).strip().lower()
+    
+    # Map all variations to standard plural form
+    mapping = {
+        'coil': 'Coils',
+        'coils': 'Coils',
+        'roll': 'Rolls',
+        'rolls': 'Rolls',
+        'elbow': 'Elbows',
+        'elbows': 'Elbows',
+        'fab strap': 'Fab Straps',
+        'fab straps': 'Fab Straps',
+        'fabstrap': 'Fab Straps',
+        'fabstraps': 'Fab Straps',
+        'strap': 'Fab Straps',
+        'straps': 'Fab Straps',
+        'mineral wool': 'Mineral Wool',
+        'mineralwool': 'Mineral Wool',
+        'fiberglass insulation': 'Fiberglass Insulation',
+        'fiberglass': 'Fiberglass Insulation',
+        'wing seal': 'Wing Seals',
+        'wing seals': 'Wing Seals',
+        'wingseals': 'Wing Seals',
+        'wire': 'Wire',
+        'banding': 'Banding',
+        'other': 'Other',
+    }
+    
+    # Check for exact match first
+    if cat_lower in mapping:
+        return mapping[cat_lower]
+    
+    # Check for partial match
+    for key, value in mapping.items():
+        if key in cat_lower:
+            return value
+    
+    # Return original with title case if no match
+    return cat.strip().title()
+
 # --- DATA LOADER (Supabase only) ---
 @st.cache_data(ttl=30)
 def load_all_tables():
@@ -134,9 +180,9 @@ if 'df' not in st.session_state or 'df_audit' not in st.session_state:
 df = st.session_state.df
 df_audit = st.session_state.df_audit
 
-# After this:
-df = st.session_state.df
-df_audit = st.session_state.df_audit
+# Normalize categories in the dataframe
+if df is not None and not df.empty and 'Category' in df.columns:
+    df['Category'] = df['Category'].apply(normalize_category)
 
 # Paste update_stock here
 def update_stock(item_id, new_footage, user_name, action_type):
@@ -1182,6 +1228,7 @@ def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
     except Exception as e:
         print(f"SendGrid error: {e}")
         return False
+
 # --- END OF PRE-TABS LAYOUT ---
 # Your tabs code starts right here:
 # tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
