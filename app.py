@@ -180,10 +180,16 @@ if 'df' not in st.session_state or 'df_audit' not in st.session_state:
 df = st.session_state.df
 df_audit = st.session_state.df_audit
 
+# DEBUG
+st.sidebar.write("**Categories in DB:**", df['Category'].unique().tolist() if df is not None and not df.empty else "Empty")
+
 # Normalize categories in the dataframe
 if df is not None and not df.empty and 'Category' in df.columns:
     df['Category'] = df['Category'].apply(normalize_category)
-    st.session_state.df = df  # ← ADD THIS LINE to save normalized data back
+    st.session_state.df = df
+
+# DEBUG after
+st.sidebar.write("**After normalize:**", df['Category'].unique().tolist() if df is not None and not df.empty else "Empty")
     
 # Paste update_stock here
 def update_stock(item_id, new_footage, user_name, action_type):
