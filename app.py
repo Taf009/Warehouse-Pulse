@@ -1611,6 +1611,13 @@ with tab2:
                     if msg.startswith("✗"):
                         st.error(msg)
 
+# ... end of tab2 code ...
+
+st.write("✅ DEBUG: Between tab2 and tab3")  # Add this line
+
+with tab3:
+    st.write("Tab 3 temporarily disabled for debugging")
+
 with tab3:
     st.write("Tab 3 disabled for testing")
     pass
