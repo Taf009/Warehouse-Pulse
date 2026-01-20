@@ -1336,7 +1336,7 @@ with tab2:
     category_col = next((c for c in df.columns if c.lower() == 'category'), None)
     if not category_col:
         st.error("Column 'Category' not found in inventory data.")
-        st.stop()
+       # st.stop()
 
     # Initialize session state - start with one default line each
     if "coil_lines" not in st.session_state:
@@ -1365,7 +1365,7 @@ with tab2:
 
     if available_coils.empty and available_rolls.empty:
         st.info("No available stock matching the selected texture.")
-        st.stop()
+       # st.stop()
 
     coil_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
     roll_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_rolls.iterrows()]
@@ -3442,7 +3442,7 @@ with tab6:
             audit_records = audit_ws.get_all_records()
         except gspread.exceptions.WorksheetNotFound:
             st.error("The worksheet 'Audit_Log' was not found. Please check your Google Sheet tabs.")
-            st.stop()
+           # st.stop()
 
         if not audit_records:
             st.info("No audit logs recorded yet. Logs will appear here as materials are picked or produced.")
