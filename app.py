@@ -1614,561 +1614,469 @@ with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates sync across all devices in real-time.")
 
-    # ── Local helper function ───────────────────────────────────────────────────
-    def normalize_pick_category(cat):
-        if pd.isna(cat) or not isinstance(cat, str):
-            return "Unknown"
-        
-        cat_lower = str(cat).strip().lower()
-        
-        mapping = {
-            'fab strap':     'Fab Straps',
-            'fabstraps':     'Fab Straps',
-            'fab straps':    'Fab Straps',
-            'strap':         'Fab Straps',
-            'straps':        'Fab Straps',
-            'coil':          'Coils',
-            'coils':         'Coils',
-            'roll':          'Rolls',
-            'rolls':         'Rolls',
-            'elbow':         'Elbows',
-            'elbows':        'Elbows',
-            'mineral wool':  'Mineral Wool',
-            'mineralwools':  'Mineral Wool',
-            'mineral wools': 'Mineral Wool',
-        }
-        
-        for key, value in mapping.items():
-            if key in cat_lower:
-                return value
-        
-        return cat.strip().title() + 's' if not cat.strip().endswith(('s', 'wool')) else cat.strip().title()
-
-    # ── Work on a local copy ────────────────────────────────────────────────────
-    pick_df = df.copy()
-    if 'Category' in pick_df.columns:
-        pick_df['Category'] = pick_df['Category'].apply(normalize_pick_category)
-
-    category_options = ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"]
-    
-    # ── Initialize Session State for Cart ───────────────────────────────────────
-    if 'pick_cart' not in st.session_state:
-        st.session_state.pick_cart = []
-    
-    if 'show_back_order' not in st.session_state:
-        st.session_state.show_back_order = False
-        st.session_state.back_order_items = []
-        st.session_state.last_customer = ""
-        st.session_state.last_sales_order = ""
-
-    # ── Order Information (Outside form so it persists) ─────────────────────────
-    st.markdown("#### 📋 Order & Customer Information")
-    
-    col_cust, col_order = st.columns(2, gap="medium")
-    
-    with col_cust:
-        st.markdown("""
-            <div style="background-color: #f0f7ff; padding: 20px; border-radius: 12px; 
-                        border: 1px solid #d1e3ff; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                <p style="font-weight: bold; margin: 0 0 12px 0; color: #1e40af;">Customer / Job</p>
-        """, unsafe_allow_html=True)
-        
-        customer = st.text_input(
-            "Customer / Job Name",
-            placeholder="e.g. John Doe / Site A",
-            key="pick_customer_persist"
-        )
-        
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col_order:
-        st.markdown("""
-            <div style="background-color: #fff7e6; padding: 20px; border-radius: 12px; 
-                        border: 1px solid #ffe8c2; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                <p style="font-weight: bold; margin: 0 0 12px 0; color: #92400e;">Sales Order</p>
-        """, unsafe_allow_html=True)
-        
-        sales_order = st.text_input(
-            "Sales Order Number",
-            placeholder="e.g. SO-2026-0456",
-            key="pick_sales_order_persist"
-        )
-        
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    st.divider()
-
-    # ── Add Items to Cart Form ──────────────────────────────────────────────────
-    st.markdown("#### ➕ Add Items to Order")
-    
-    # Category selection OUTSIDE form so it can update dynamically
-    pick_cat = st.selectbox(
-        "Category",
-        category_options,
-        key="pick_cat_add"
-    )
-    
-    filtered_df = pick_df[pick_df['Category'] == pick_cat].copy()
-    
-    with st.form("add_to_cart_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if filtered_df.empty:
-                st.warning(f"⚠️ No items in stock for {pick_cat}")
-                selected_mat = None
-            else:
-                mat_options = sorted(filtered_df['Material'].unique())
-                selected_mat = st.selectbox("Size / Material", mat_options, key="mat_add")
-        
-        with col2:
-            if selected_mat:
-                if pick_cat in ["Rolls", "Coils"]:
-                    specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
-                    pick_id = st.selectbox("Select Serial #", specific_ids or ["No items available"], key="id_add")
-                    pick_qty = 1
-                else:
-                    pick_id = "BULK"
-                    pick_qty = st.number_input("Quantity", min_value=1, step=1, key="qty_add")
-            else:
-                pick_id = None
-                pick_qty = 0
-
-        add_to_cart = st.form_submit_button("🛒 Add to Cart", use_container_width=True)
-
-    # ── Process Add to Cart ─────────────────────────────────────────────────────
-    if add_to_cart and selected_mat:
-        # Check current stock
-        if pick_cat in ["Rolls", "Coils"]:
-            available = pick_id in filtered_df['Item_ID'].values
-            if available:
-                st.session_state.pick_cart.append({
-                    'category': pick_cat,
-                    'material': selected_mat,
-                    'item_id': pick_id,
-                    'quantity': 1,
-                    'available': 1,
-                    'shortfall': 0
-                })
-                st.success(f"✅ Added {pick_cat[:-1]} {selected_mat} (#{pick_id})")
-                st.rerun()
-            else:
-                st.error("Item not available")
-        else:
-            mask = (pick_df['Category'] == pick_cat) & (pick_df['Material'] == selected_mat)
-            if mask.any():
-                current_stock = pick_df.loc[mask, 'Footage'].values[0]
-                bulk_item_id = pick_df.loc[mask, 'Item_ID'].values[0]
-                
-                # Calculate what's actually available
-                available = min(current_stock, pick_qty)
-                shortfall = max(0, pick_qty - current_stock)
-                
-                st.session_state.pick_cart.append({
-                    'category': pick_cat,
-                    'material': selected_mat,
-                    'item_id': bulk_item_id,
-                    'quantity': pick_qty,
-                    'available': available,
-                    'shortfall': shortfall
-                })
-                
-                if shortfall > 0:
-                    st.warning(f"⚠️ Added to cart: {available} available, {shortfall} will be back ordered")
-                else:
-                    st.success(f"✅ Added {pick_qty} × {selected_mat}")
-                st.rerun()
-
-    # ── Display Cart ────────────────────────────────────────────────────────────
-    if st.session_state.pick_cart:
+    # ── Safety check for empty database ─────────────────────────────────────────
+    if df is None or df.empty:
+        st.info("📦 No inventory available for picking. Please add items in the 'Manage' tab first.")
         st.markdown("---")
-        st.markdown("#### 🛒 Current Order")
+        st.markdown("### Getting Started")
+        st.markdown("""
+        1. Go to the **Manage** tab
+        2. Receive your first inventory items
+        3. Return here to start picking orders
+        """)
+    else:
+        # ── Local helper function ───────────────────────────────────────────────────
+        def normalize_pick_category(cat):
+            if pd.isna(cat) or not isinstance(cat, str):
+                return "Unknown"
+            
+            cat_lower = str(cat).strip().lower()
+            
+            mapping = {
+                'fab strap':     'Fab Straps',
+                'fabstraps':     'Fab Straps',
+                'fab straps':    'Fab Straps',
+                'strap':         'Fab Straps',
+                'straps':        'Fab Straps',
+                'coil':          'Coils',
+                'coils':         'Coils',
+                'roll':          'Rolls',
+                'rolls':         'Rolls',
+                'elbow':         'Elbows',
+                'elbows':        'Elbows',
+                'mineral wool':  'Mineral Wool',
+                'mineralwools':  'Mineral Wool',
+                'mineral wools': 'Mineral Wool',
+            }
+            
+            for key, value in mapping.items():
+                if key in cat_lower:
+                    return value
+            
+            return cat.strip().title() + 's' if not cat.strip().endswith(('s', 'wool')) else cat.strip().title()
+
+        # ── Work on a local copy ────────────────────────────────────────────────────
+        pick_df = df.copy()
+        if 'Category' in pick_df.columns and not pick_df.empty:
+            pick_df['Category'] = pick_df['Category'].apply(normalize_pick_category)
+
+        category_options = ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"]
         
-        for idx, item in enumerate(st.session_state.pick_cart):
-            col_item, col_remove = st.columns([5, 1])
+        # ── Initialize Session State for Cart ───────────────────────────────────────
+        if 'pick_cart' not in st.session_state:
+            st.session_state.pick_cart = []
+        
+        if 'show_back_order' not in st.session_state:
+            st.session_state.show_back_order = False
+            st.session_state.back_order_items = []
+            st.session_state.last_customer = ""
+            st.session_state.last_sales_order = ""
+
+        # ── Order Information (Outside form so it persists) ─────────────────────────
+        st.markdown("#### 📋 Order & Customer Information")
+        
+        col_cust, col_order = st.columns(2, gap="medium")
+        
+        with col_cust:
+            st.markdown("""
+                <div style="background-color: #f0f7ff; padding: 20px; border-radius: 12px; 
+                            border: 1px solid #d1e3ff; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                    <p style="font-weight: bold; margin: 0 0 12px 0; color: #1e40af;">Customer / Job</p>
+            """, unsafe_allow_html=True)
             
-            with col_item:
-                status = ""
-                if item['shortfall'] > 0:
-                    status = f" ⚠️ ({item['available']} available, {item['shortfall']} back order)"
-                
-                if item['category'] in ["Rolls", "Coils"]:
-                    st.write(f"**{item['category'][:-1]}** - {item['material']} (#{item['item_id']}){status}")
-                else:
-                    st.write(f"**{item['quantity']}x {item['material']}** ({item['category']}){status}")
+            customer = st.text_input(
+                "Customer / Job Name",
+                placeholder="e.g. John Doe / Site A",
+                key="pick_customer_persist"
+            )
             
-            with col_remove:
-                if st.button("🗑️", key=f"remove_{idx}"):
-                    st.session_state.pick_cart.pop(idx)
-                    st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        with col_order:
+            st.markdown("""
+                <div style="background-color: #fff7e6; padding: 20px; border-radius: 12px; 
+                            border: 1px solid #ffe8c2; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                    <p style="font-weight: bold; margin: 0 0 12px 0; color: #92400e;">Sales Order</p>
+            """, unsafe_allow_html=True)
+            
+            sales_order = st.text_input(
+                "Sales Order Number",
+                placeholder="e.g. SO-2026-0456",
+                key="pick_sales_order_persist"
+            )
+            
+            st.markdown("</div>", unsafe_allow_html=True)
         
         st.divider()
+
+        # ── Add Items to Cart Form ──────────────────────────────────────────────────
+        st.markdown("#### ➕ Add Items to Order")
         
-        # Authorized By
-        picker_name = st.text_input(
-            "Authorized By",
-            value=st.session_state.get("username", "Admin"),
-            key="pick_authorized"
+        # Category selection OUTSIDE form so it can update dynamically
+        pick_cat = st.selectbox(
+            "Category",
+            category_options,
+            key="pick_cat_add"
         )
         
-        col_process, col_clear = st.columns(2)
+        filtered_df = pick_df[pick_df['Category'] == pick_cat].copy() if not pick_df.empty else pd.DataFrame()
         
-        with col_process:
-            if st.button("📤 Process All Items", type="primary", use_container_width=True):
-                if not customer.strip():
-                    st.error("⚠️ Please enter Customer / Job Name.")
-                elif not sales_order.strip():
-                    st.error("⚠️ Please enter Sales Order Number.")
+        with st.form("add_to_cart_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if filtered_df.empty:
+                    st.warning(f"⚠️ No items in stock for {pick_cat}")
+                    selected_mat = None
                 else:
-                    # Save for back orders
-                    st.session_state.last_customer = customer.strip()
-                    st.session_state.last_sales_order = sales_order.strip()
-                    st.session_state.back_order_items = []
+                    mat_options = sorted(filtered_df['Material'].unique())
+                    selected_mat = st.selectbox("Size / Material", mat_options, key="mat_add")
+            
+            with col2:
+                if selected_mat:
+                    if pick_cat in ["Rolls", "Coils"]:
+                        specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
+                        pick_id = st.selectbox("Select Serial #", specific_ids or ["No items available"], key="id_add")
+                        pick_qty = 1
+                    else:
+                        pick_id = "BULK"
+                        pick_qty = st.number_input("Quantity", min_value=1, step=1, key="qty_add")
+                else:
+                    pick_id = None
+                    pick_qty = 0
+
+            add_to_cart = st.form_submit_button("🛒 Add to Cart", use_container_width=True)
+
+        # ── Process Add to Cart ─────────────────────────────────────────────────────
+        if add_to_cart and selected_mat:
+            # Check current stock
+            if pick_cat in ["Rolls", "Coils"]:
+                available = pick_id in filtered_df['Item_ID'].values
+                if available:
+                    st.session_state.pick_cart.append({
+                        'category': pick_cat,
+                        'material': selected_mat,
+                        'item_id': pick_id,
+                        'quantity': 1,
+                        'available': 1,
+                        'shortfall': 0
+                    })
+                    st.success(f"✅ Added {pick_cat[:-1]} {selected_mat} (#{pick_id})")
+                    st.rerun()
+                else:
+                    st.error("Item not available")
+            else:
+                mask = (pick_df['Category'] == pick_cat) & (pick_df['Material'] == selected_mat)
+                if mask.any():
+                    current_stock = pick_df.loc[mask, 'Footage'].values[0]
+                    bulk_item_id = pick_df.loc[mask, 'Item_ID'].values[0]
                     
-                    action_suffix = f" (SO: {sales_order})"
-                    all_success = True
+                    # Calculate what's actually available
+                    available = min(current_stock, pick_qty)
+                    shortfall = max(0, pick_qty - current_stock)
                     
-                    with st.spinner("Processing all items..."):
-                        for item in st.session_state.pick_cart:
-                            if item['category'] in ["Rolls", "Coils"]:
-                                success = update_stock(
-                                    item_id=item['item_id'],
-                                    new_footage=0,
-                                    user_name=picker_name,
-                                    action_type=f"Sold {item['category'][:-1]} to {customer}{action_suffix}"
-                                )
-                                all_success = all_success and success
-                            else:
-                                # Get current stock
-                                mask = (pick_df['Category'] == item['category']) & (pick_df['Item_ID'] == item['item_id'])
-                                if mask.any():
-                                    current_stock = pick_df.loc[mask, 'Footage'].values[0]
-                                    deduct_amount = min(current_stock, item['quantity'])
-                                    new_total = current_stock - deduct_amount
-                                    
-                                    action_msg = f"Removed {deduct_amount} {item['category'][:-1]}(s) - {item['material']} for {customer}{action_suffix}"
-                                    if item['shortfall'] > 0:
-                                        action_msg += f" (shortfall: {item['shortfall']})"
-                                    
+                    st.session_state.pick_cart.append({
+                        'category': pick_cat,
+                        'material': selected_mat,
+                        'item_id': bulk_item_id,
+                        'quantity': pick_qty,
+                        'available': available,
+                        'shortfall': shortfall
+                    })
+                    
+                    if shortfall > 0:
+                        st.warning(f"⚠️ Added to cart: {available} available, {shortfall} will be back ordered")
+                    else:
+                        st.success(f"✅ Added {pick_qty} × {selected_mat}")
+                    st.rerun()
+
+        # ── Display Cart ────────────────────────────────────────────────────────────
+        if st.session_state.pick_cart:
+            st.markdown("---")
+            st.markdown("#### 🛒 Current Order")
+            
+            for idx, item in enumerate(st.session_state.pick_cart):
+                col_item, col_remove = st.columns([5, 1])
+                
+                with col_item:
+                    status = ""
+                    if item['shortfall'] > 0:
+                        status = f" ⚠️ ({item['available']} available, {item['shortfall']} back order)"
+                    
+                    if item['category'] in ["Rolls", "Coils"]:
+                        st.write(f"**{item['category'][:-1]}** - {item['material']} (#{item['item_id']}){status}")
+                    else:
+                        st.write(f"**{item['quantity']}x {item['material']}** ({item['category']}){status}")
+                
+                with col_remove:
+                    if st.button("🗑️", key=f"remove_{idx}"):
+                        st.session_state.pick_cart.pop(idx)
+                        st.rerun()
+            
+            st.divider()
+            
+            # Authorized By
+            picker_name = st.text_input(
+                "Authorized By",
+                value=st.session_state.get("username", "Admin"),
+                key="pick_authorized"
+            )
+            
+            col_process, col_clear = st.columns(2)
+            
+            with col_process:
+                if st.button("📤 Process All Items", type="primary", use_container_width=True):
+                    if not customer.strip():
+                        st.error("⚠️ Please enter Customer / Job Name.")
+                    elif not sales_order.strip():
+                        st.error("⚠️ Please enter Sales Order Number.")
+                    else:
+                        # Save for back orders
+                        st.session_state.last_customer = customer.strip()
+                        st.session_state.last_sales_order = sales_order.strip()
+                        st.session_state.back_order_items = []
+                        
+                        action_suffix = f" (SO: {sales_order})"
+                        all_success = True
+                        
+                        with st.spinner("Processing all items..."):
+                            for item in st.session_state.pick_cart:
+                                if item['category'] in ["Rolls", "Coils"]:
                                     success = update_stock(
                                         item_id=item['item_id'],
-                                        new_footage=new_total,
+                                        new_footage=0,
                                         user_name=picker_name,
-                                        action_type=action_msg
+                                        action_type=f"Sold {item['category'][:-1]} to {customer}{action_suffix}"
                                     )
                                     all_success = all_success and success
-                                    
-                                    # Track back orders
-                                    if item['shortfall'] > 0:
-                                        st.session_state.back_order_items.append(item)
-                    
-                    if all_success:
-                        st.success(f"✅ All items processed for {customer} ({sales_order})!")
+                                else:
+                                    # Get current stock
+                                    mask = (pick_df['Category'] == item['category']) & (pick_df['Item_ID'] == item['item_id'])
+                                    if mask.any():
+                                        current_stock = pick_df.loc[mask, 'Footage'].values[0]
+                                        deduct_amount = min(current_stock, item['quantity'])
+                                        new_total = current_stock - deduct_amount
+                                        
+                                        action_msg = f"Removed {deduct_amount} {item['category'][:-1]}(s) - {item['material']} for {customer}{action_suffix}"
+                                        if item['shortfall'] > 0:
+                                            action_msg += f" (shortfall: {item['shortfall']})"
+                                        
+                                        success = update_stock(
+                                            item_id=item['item_id'],
+                                            new_footage=new_total,
+                                            user_name=picker_name,
+                                            action_type=action_msg
+                                        )
+                                        all_success = all_success and success
+                                        
+                                        # Track back orders
+                                        if item['shortfall'] > 0:
+                                            st.session_state.back_order_items.append(item)
                         
-                        if st.session_state.back_order_items:
-                            st.session_state.show_back_order = True
+                        if all_success:
+                            st.success(f"✅ All items processed for {customer} ({sales_order})!")
+                            
+                            if st.session_state.back_order_items:
+                                st.session_state.show_back_order = True
+                            else:
+                                st.balloons()
+                                st.snow()
+                                st.toast("Order complete! 🎉", icon="🎉")
+                                st.session_state.pick_cart = []
+                                st.cache_data.clear()
+                                st.rerun()
                         else:
-                            st.balloons()
-                            st.snow()
-                            st.toast("Order complete! 🎉", icon="🎉")
-                            st.session_state.pick_cart = []
-                            st.cache_data.clear()
-                            st.rerun()
-                    else:
-                        st.error("Some items failed to process. Check logs.")
-        
-        with col_clear:
-            if st.button("🗑️ Clear Cart", use_container_width=True):
-                st.session_state.pick_cart = []
-                st.rerun()
+                            st.error("Some items failed to process. Check logs.")
+            
+            with col_clear:
+                if st.button("🗑️ Clear Cart", use_container_width=True, key="clear_pick_cart"):
+                    st.session_state.pick_cart = []
+                    st.rerun()
 
-    # ── Back Order UI ───────────────────────────────────────────────────────────
-    if st.session_state.show_back_order and st.session_state.back_order_items:
+        # ── Back Order UI ───────────────────────────────────────────────────────────
+        if st.session_state.show_back_order and st.session_state.back_order_items:
+            st.markdown("---")
+            st.markdown("### 📦 Back Orders Required")
+            
+            st.info(f"**Customer:** {st.session_state.last_customer}  \n**Order:** {st.session_state.last_sales_order}")
+            
+            for item in st.session_state.back_order_items:
+                st.write(f"- **{item['material']}** ({item['category']}): {item['shortfall']} units short")
+            
+            back_order_note = st.text_area(
+                "Optional note for all back orders",
+                placeholder="e.g. Urgent for client - ship when restocked",
+                key="back_order_note"
+            )
+            
+            col_confirm, col_skip = st.columns(2)
+            
+            with col_confirm:
+                if st.button("✅ Create Back Orders", type="primary", use_container_width=True):
+                    try:
+                        for item in st.session_state.back_order_items:
+                            back_order_data = {
+                                "material": item['material'],
+                                "shortfall_quantity": item['shortfall'],
+                                "client_name": st.session_state.last_customer,
+                                "order_number": st.session_state.last_sales_order,
+                                "status": "Open",
+                                "note": back_order_note.strip() or None
+                            }
+                            supabase.table("back_orders").insert(back_order_data).execute()
+                        
+                        st.success(f"✅ Created {len(st.session_state.back_order_items)} back order(s)!")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Failed to create back orders: {e}")
+                    
+                    # Clear everything
+                    st.session_state.show_back_order = False
+                    st.session_state.back_order_items = []
+                    st.session_state.pick_cart = []
+                    st.cache_data.clear()
+                    st.rerun()
+            
+            with col_skip:
+                if st.button("❌ Skip Back Orders", use_container_width=True):
+                    st.session_state.show_back_order = False
+                    st.session_state.back_order_items = []
+                    st.session_state.pick_cart = []
+                    st.cache_data.clear()
+                    st.rerun()
+        
+        # ── Back Order Report Section ──────────────────────────────────────────────
         st.markdown("---")
-        st.markdown("### 📦 Back Orders Required")
+        st.markdown("#### 📄 Back Order Reports")
         
-        st.info(f"**Customer:** {st.session_state.last_customer}  \n**Order:** {st.session_state.last_sales_order}")
-        
-        for item in st.session_state.back_order_items:
-            st.write(f"- **{item['material']}** ({item['category']}): {item['shortfall']} units short")
-        
-        back_order_note = st.text_area(
-            "Optional note for all back orders",
-            placeholder="e.g. Urgent for client - ship when restocked",
-            key="back_order_note"
-        )
-        
-        col_confirm, col_skip = st.columns(2)
-        
-        with col_confirm:
-            if st.button("✅ Create Back Orders", type="primary", use_container_width=True):
-                try:
-                    for item in st.session_state.back_order_items:
-                        back_order_data = {
-                            "material": item['material'],
-                            "shortfall_quantity": item['shortfall'],
-                            "client_name": st.session_state.last_customer,
-                            "order_number": st.session_state.last_sales_order,
-                            "status": "Open",
-                            "note": back_order_note.strip() or None
-                        }
-                        supabase.table("back_orders").insert(back_order_data).execute()
-                    
-                    st.success(f"✅ Created {len(st.session_state.back_order_items)} back order(s)!")
-                    st.balloons()
-                except Exception as e:
-                    st.error(f"Failed to create back orders: {e}")
-                
-                # Clear everything
-                st.session_state.show_back_order = False
-                st.session_state.back_order_items = []
-                st.session_state.pick_cart = []
-                st.cache_data.clear()
-                st.rerun()
-        
-        with col_skip:
-            if st.button("❌ Skip Back Orders", use_container_width=True):
-                st.session_state.show_back_order = False
-                st.session_state.back_order_items = []
-                st.session_state.pick_cart = []
-                st.cache_data.clear()
-                st.rerun()
-    
-    # ── Back Order Report Section ──────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("#### 📄 Back Order Reports")
-    
-    try:
-        # Fetch all open back orders
-        response = supabase.table("back_orders").select("*").eq("status", "Open").execute()
-        back_orders = response.data
-        
-        if back_orders:
-            st.info(f"📋 **{len(back_orders)}** open back order(s) in system")
+        try:
+            # Fetch all open back orders
+            response = supabase.table("back_orders").select("*").eq("status", "Open").execute()
+            back_orders = response.data
             
-            # Display back orders in expandable section
-            with st.expander("View Open Back Orders"):
-                for bo in back_orders:
-                    st.write(f"**{bo.get('material')}** - Qty: {bo.get('shortfall_quantity')} | Customer: {bo.get('client_name')} | Order: {bo.get('order_number')}")
-            
-            # Generate PDF Report Button
-            if st.button("📥 Generate PDF Report", type="secondary"):
-                from datetime import datetime
+            if back_orders:
+                st.info(f"📋 **{len(back_orders)}** open back order(s) in system")
                 
-                # Create HTML report
-                current_time = datetime.now().strftime('%B %d, %Y at %I:%M %p')
+                # Display back orders in expandable section
+                with st.expander("View Open Back Orders"):
+                    for bo in back_orders:
+                        st.write(f"**{bo.get('material')}** - Qty: {bo.get('shortfall_quantity')} | Customer: {bo.get('client_name')} | Order: {bo.get('order_number')}")
                 
-                html_content = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="UTF-8">
-                    <title>Back Order Report</title>
-                    <style>
-                        @page {{
-                            size: A4;
-                            margin: 2cm;
-                        }}
-                        body {{
-                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                            margin: 0;
-                            padding: 40px;
-                            background: white;
-                            color: #333;
-                        }}
-                        .header {{
-                            text-align: center;
-                            border-bottom: 4px solid #2563eb;
-                            padding-bottom: 20px;
-                            margin-bottom: 30px;
-                        }}
-                        .header h1 {{
-                            margin: 0;
-                            color: #1e40af;
-                            font-size: 32px;
-                            font-weight: 700;
-                        }}
-                        .header .subtitle {{
-                            color: #64748b;
-                            font-size: 14px;
-                            margin-top: 8px;
-                        }}
-                        .meta-info {{
-                            background: #f1f5f9;
-                            padding: 15px 20px;
-                            border-radius: 8px;
-                            margin-bottom: 30px;
-                            display: flex;
-                            justify-content: space-between;
-                        }}
-                        .meta-info div {{
-                            font-size: 14px;
-                        }}
-                        .meta-info strong {{
-                            color: #1e40af;
-                        }}
-                        .order-card {{
-                            border: 2px solid #e2e8f0;
-                            border-radius: 10px;
-                            padding: 20px;
-                            margin-bottom: 20px;
-                            background: #ffffff;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-                            page-break-inside: avoid;
-                        }}
-                        .order-header {{
-                            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
-                            color: white;
-                            padding: 12px 16px;
-                            border-radius: 6px;
-                            margin: -20px -20px 15px -20px;
-                            font-size: 16px;
-                            font-weight: 600;
-                        }}
-                        .order-details {{
-                            display: grid;
-                            grid-template-columns: 1fr 1fr;
-                            gap: 12px;
-                        }}
-                        .detail-row {{
-                            padding: 8px 0;
-                            border-bottom: 1px solid #f1f5f9;
-                        }}
-                        .detail-label {{
-                            color: #64748b;
-                            font-size: 12px;
-                            font-weight: 600;
-                            text-transform: uppercase;
-                            letter-spacing: 0.5px;
-                        }}
-                        .detail-value {{
-                            color: #1e293b;
-                            font-size: 15px;
-                            font-weight: 500;
-                            margin-top: 4px;
-                        }}
-                        .quantity {{
-                            background: #fef3c7;
-                            color: #92400e;
-                            padding: 4px 12px;
-                            border-radius: 20px;
-                            font-weight: 700;
-                            display: inline-block;
-                        }}
-                        .note {{
-                            background: #eff6ff;
-                            border-left: 4px solid #2563eb;
-                            padding: 12px;
-                            margin-top: 15px;
-                            font-size: 13px;
-                            color: #1e40af;
-                            border-radius: 4px;
-                        }}
-                        .footer {{
-                            margin-top: 40px;
-                            text-align: center;
-                            color: #94a3b8;
-                            font-size: 12px;
-                            border-top: 2px solid #e2e8f0;
-                            padding-top: 20px;
-                        }}
-                        @media print {{
-                            body {{
-                                padding: 20px;
-                            }}
-                            .no-print {{
-                                display: none;
-                            }}
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <h1>📦 BACK ORDER REPORT</h1>
-                        <div class="subtitle">Warehouse Management System</div>
-                    </div>
+                # Generate PDF Report Button
+                if st.button("📥 Generate PDF Report", type="secondary", key="generate_backorder_pdf"):
+                    from datetime import datetime
                     
-                    <div class="meta-info">
-                        <div><strong>Generated:</strong> {current_time}</div>
-                        <div><strong>Total Open Orders:</strong> {len(back_orders)}</div>
-                        <div><strong>Status:</strong> Open</div>
-                    </div>
-                """
-                
-                # Add each back order
-                for idx, bo in enumerate(back_orders, 1):
-                    html_content += f"""
-                    <div class="order-card">
-                        <div class="order-header">Order #{idx}</div>
-                        <div class="order-details">
-                            <div class="detail-row">
-                                <div class="detail-label">Material / Item</div>
-                                <div class="detail-value">{bo.get('material', 'N/A')}</div>
-                            </div>
-                            <div class="detail-row">
-                                <div class="detail-label">Quantity Needed</div>
-                                <div class="detail-value"><span class="quantity">{bo.get('shortfall_quantity', 'N/A')} units</span></div>
-                            </div>
-                            <div class="detail-row">
-                                <div class="detail-label">Customer / Job</div>
-                                <div class="detail-value">{bo.get('client_name', 'N/A')}</div>
-                            </div>
-                            <div class="detail-row">
-                                <div class="detail-label">Sales Order #</div>
-                                <div class="detail-value">{bo.get('order_number', 'N/A')}</div>
-                            </div>
+                    # Create HTML report
+                    current_time = datetime.now().strftime('%B %d, %Y at %I:%M %p')
+                    
+                    html_content = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>Back Order Report</title>
+                        <style>
+                            @page {{ size: A4; margin: 2cm; }}
+                            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 40px; background: white; color: #333; }}
+                            .header {{ text-align: center; border-bottom: 4px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }}
+                            .header h1 {{ margin: 0; color: #1e40af; font-size: 32px; font-weight: 700; }}
+                            .header .subtitle {{ color: #64748b; font-size: 14px; margin-top: 8px; }}
+                            .meta-info {{ background: #f1f5f9; padding: 15px 20px; border-radius: 8px; margin-bottom: 30px; display: flex; justify-content: space-between; }}
+                            .meta-info div {{ font-size: 14px; }}
+                            .meta-info strong {{ color: #1e40af; }}
+                            .order-card {{ border: 2px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px; background: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); page-break-inside: avoid; }}
+                            .order-header {{ background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: white; padding: 12px 16px; border-radius: 6px; margin: -20px -20px 15px -20px; font-size: 16px; font-weight: 600; }}
+                            .order-details {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+                            .detail-row {{ padding: 8px 0; border-bottom: 1px solid #f1f5f9; }}
+                            .detail-label {{ color: #64748b; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }}
+                            .detail-value {{ color: #1e293b; font-size: 15px; font-weight: 500; margin-top: 4px; }}
+                            .quantity {{ background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 20px; font-weight: 700; display: inline-block; }}
+                            .note {{ background: #eff6ff; border-left: 4px solid #2563eb; padding: 12px; margin-top: 15px; font-size: 13px; color: #1e40af; border-radius: 4px; }}
+                            .footer {{ margin-top: 40px; text-align: center; color: #94a3b8; font-size: 12px; border-top: 2px solid #e2e8f0; padding-top: 20px; }}
+                            @media print {{ body {{ padding: 20px; }} .no-print {{ display: none; }} }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="header">
+                            <h1>📦 BACK ORDER REPORT</h1>
+                            <div class="subtitle">Warehouse Management System</div>
+                        </div>
+                        <div class="meta-info">
+                            <div><strong>Generated:</strong> {current_time}</div>
+                            <div><strong>Total Open Orders:</strong> {len(back_orders)}</div>
+                            <div><strong>Status:</strong> Open</div>
                         </div>
                     """
                     
-                    if bo.get('note'):
+                    # Add each back order
+                    for idx, bo in enumerate(back_orders, 1):
                         html_content += f"""
-                        <div class="note">
-                            <strong>📝 Note:</strong> {bo.get('note')}
+                        <div class="order-card">
+                            <div class="order-header">Order #{idx}</div>
+                            <div class="order-details">
+                                <div class="detail-row">
+                                    <div class="detail-label">Material / Item</div>
+                                    <div class="detail-value">{bo.get('material', 'N/A')}</div>
+                                </div>
+                                <div class="detail-row">
+                                    <div class="detail-label">Quantity Needed</div>
+                                    <div class="detail-value"><span class="quantity">{bo.get('shortfall_quantity', 'N/A')} units</span></div>
+                                </div>
+                                <div class="detail-row">
+                                    <div class="detail-label">Customer / Job</div>
+                                    <div class="detail-value">{bo.get('client_name', 'N/A')}</div>
+                                </div>
+                                <div class="detail-row">
+                                    <div class="detail-label">Sales Order #</div>
+                                    <div class="detail-value">{bo.get('order_number', 'N/A')}</div>
+                                </div>
+                            </div>
+                        """
+                        
+                        if bo.get('note'):
+                            html_content += f"""
+                            <div class="note">
+                                <strong>📝 Note:</strong> {bo.get('note')}
+                            </div>
+                            """
+                        
+                        html_content += """
                         </div>
                         """
                     
                     html_content += """
-                    </div>
+                        <div class="footer">
+                            <p>This report was automatically generated by the Warehouse Management System.</p>
+                            <p>For questions or updates, please contact the warehouse administrator.</p>
+                        </div>
+                    </body>
+                    </html>
                     """
-                
-                html_content += f"""
-                    <div class="footer">
-                        <p>This report was automatically generated by the Warehouse Management System.</p>
-                        <p>For questions or updates, please contact the warehouse administrator.</p>
-                    </div>
                     
-                    <script>
-                        // Auto-print dialog on load (optional)
-                        // window.onload = function() {{ window.print(); }}
-                    </script>
-                </body>
-                </html>
-                """
-                
-                # Create download button for HTML
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                st.download_button(
-                    label="📄 Download HTML Report (Print to PDF)",
-                    data=html_content,
-                    file_name=f"back_orders_report_{timestamp}.html",
-                    mime="text/html",
-                    help="Download and open in browser, then use 'Print to PDF' (Ctrl+P)"
-                )
-                
-                # Preview the report
-                with st.expander("📋 Preview Report", expanded=True):
-                    st.components.v1.html(html_content, height=600, scrolling=True)
-                
-                st.success("✅ Report generated! Download the HTML file and print to PDF using your browser.")
-                st.info("💡 **Tip:** Open the downloaded HTML file → Press Ctrl+P (or Cmd+P on Mac) → Select 'Save as PDF'")
-        else:
-            st.success("✅ No open back orders at this time!")
-    
-    except Exception as e:
-        st.error(f"Failed to fetch back orders: {e}")
-    
-    if not st.session_state.pick_cart and not st.session_state.show_back_order:
-        st.info("👆 Add items to start building your order")
+                    # Create download button for HTML
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    st.download_button(
+                        label="📄 Download HTML Report (Print to PDF)",
+                        data=html_content,
+                        file_name=f"back_orders_report_{timestamp}.html",
+                        mime="text/html",
+                        help="Download and open in browser, then use 'Print to PDF' (Ctrl+P)"
+                    )
+                    
+                    # Preview the report
+                    with st.expander("📋 Preview Report", expanded=True):
+                        st.components.v1.html(html_content, height=600, scrolling=True)
+                    
+                    st.success("✅ Report generated! Download the HTML file and print to PDF using your browser.")
+                    st.info("💡 **Tip:** Open the downloaded HTML file → Press Ctrl+P (or Cmd+P on Mac) → Select 'Save as PDF'")
+            else:
+                st.success("✅ No open back orders at this time!")
+        
+        except Exception as e:
+            st.error(f"Failed to fetch back orders: {e}")
+        
+        if not st.session_state.pick_cart and not st.session_state.show_back_order:
+            st.info("👆 Add items to start building your order")
         
 with tab4:
     st.markdown("""
