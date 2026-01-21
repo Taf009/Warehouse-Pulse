@@ -1406,8 +1406,8 @@ with tab2:
             return df_subset[df_subset['Material'].str.contains("Stucco", case=False)]
         return df_subset
 
-    available_coils = filter_materials(df[(df[category_col] == "Coil") & (df['Footage'] > 0)])
-    available_rolls = filter_materials(df[(df[category_col] == "Roll") & (df['Footage'] > 0)])
+    available_coils = filter_materials(df[(df[category_col] == "Coils") & (df['Footage'] > 0)])
+    available_rolls = filter_materials(df[(df[category_col] == "Rolls") & (df['Footage'] > 0)])
 
     if available_coils.empty and available_rolls.empty:
         st.info("No available stock matching the selected texture.")
