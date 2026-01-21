@@ -1659,6 +1659,12 @@ with tab2:
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates sync across all devices in real-time.")
+    
+    # DEBUG
+    if df is not None and not df.empty:
+        st.write("**Categories available:**", df['Category'].unique().tolist())
+        st.write("**Sample data:**")
+        st.dataframe(df[['Item_ID', 'Category', 'Material', 'Footage']].head())
 
     # ── Safety check for empty database ─────────────────────────────────────────
     if df is None or df.empty:
