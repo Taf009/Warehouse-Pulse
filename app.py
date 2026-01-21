@@ -101,6 +101,8 @@ def normalize_category(cat):
     
     cat_lower = str(cat).strip().lower()
     
+    st.sidebar.write(f"DEBUG normalizing: '{cat}' -> '{cat_lower}'")  # ADD THIS DEBUG
+    
     # Map all variations to standard plural form
     mapping = {
         'coil': 'Coils',
