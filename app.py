@@ -1231,11 +1231,8 @@ def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
         return False
 
 # --- END OF PRE-TABS LAYOUT ---
-# Your tabs code starts right here:
-# tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
-# --- TABS ---
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Insights", "Audit Trail"])
 
+# tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Admin Actions", "Insights", "Audit Trail"])
 with tab1:
     # Refresh button (optional but super useful)
     col_refresh, _ = st.columns([1, 3])
@@ -2724,12 +2721,373 @@ with tab4:
                         
             except Exception as e:
                 st.error(f"❌ Error generating report: {e}")
+
+with tab5:
+    st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h1 style="color: #dc2626; margin: 0;">⚙️ Admin Actions</h1>
+            <p style="color: #64748b; margin-top: 8px;">Edit footage, locations, Item IDs, or remove items from inventory</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Check if user is admin (optional - add your admin usernames here)
+    admin_users = ["admin", "manager", "tmilazi"]  # Add your admin usernames
+    current_user = st.session_state.get('username', '')
+    
+    # For now, allow all logged-in users (remove this if you want admin-only)
+    is_admin = True  # Change to: current_user.lower() in [u.lower() for u in admin_users]
+    
+    if not is_admin:
+        st.error("🔒 Access Denied. Admin privileges required.")
+    else:
+        # Safe DataFrame check
+        if df is not None and not df.empty:
+            
+            # Search/Filter Section
+            st.markdown("### 🔍 Find Item to Edit")
+            
+            col_search, col_cat_filter = st.columns([2, 1])
+            
+            with col_search:
+                search_term = st.text_input(
+                    "Search by Item ID or Material",
+                    placeholder="e.g. Coil-AL-016 or Stucco Aluminum",
+                    key="admin_search"
+                )
+            
+            with col_cat_filter:
+                admin_categories = ["All"] + sorted(df['Category'].unique().tolist())
+                selected_cat = st.selectbox("Filter by Category", admin_categories, key="admin_cat_filter")
+            
+            # Filter the dataframe
+            admin_df = df.copy()
+            
+            if selected_cat != "All":
+                admin_df = admin_df[admin_df['Category'] == selected_cat]
+            
+            if search_term:
+                mask = (
+                    admin_df['Item_ID'].str.contains(search_term, case=False, na=False) |
+                    admin_df['Material'].str.contains(search_term, case=False, na=False)
+                )
+                admin_df = admin_df[mask]
+            
+            # Display filtered inventory
+            if not admin_df.empty:
+                st.markdown(f"### 📋 Inventory Items ({len(admin_df)} found)")
+                
+                # Show the data
+                st.dataframe(
+                    admin_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location', 'Status']],
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                st.markdown("---")
+                
+                # Select item to edit
+                st.markdown("### ✏️ Edit Item")
+                
+                item_options = admin_df['Item_ID'].tolist()
+                selected_item = st.selectbox(
+                    "Select Item to Edit",
+                    item_options,
+                    key="admin_select_item"
+                )
+                
+                if selected_item:
+                    # Get current item data
+                    item_data = admin_df[admin_df['Item_ID'] == selected_item].iloc[0]
+                    
+                    st.markdown(f"""
+                        <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #3b82f6;">
+                            <strong>📦 Current Item Details:</strong><br><br>
+                            <strong>Item ID:</strong> {selected_item}<br>
+                            <strong>Material:</strong> {item_data['Material']}<br>
+                            <strong>Category:</strong> {item_data['Category']}<br>
+                            <strong>Current Footage:</strong> {item_data['Footage']}<br>
+                            <strong>Current Location:</strong> {item_data['Location']}<br>
+                            <strong>Status:</strong> {item_data.get('Status', 'N/A')}
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Edit options in tabs
+                    edit_tab1, edit_tab2, edit_tab3, edit_tab4 = st.tabs(["🏷️ Edit Item ID", "📏 Edit Footage", "📍 Edit Location", "🗑️ Remove Item"])
+                    
+                    # ── Edit Item ID Tab ────────────────────────────────────────────
+                    with edit_tab1:
+                        st.markdown("#### 🏷️ Change Item ID")
+                        
+                        st.warning("⚠️ Changing Item IDs affects tracking and audit history. Use with caution!")
+                        
+                        with st.form("edit_item_id_form", clear_on_submit=True):
+                            
+                            # Show current ID format info
+                            if item_data['Category'] == 'Coils':
+                                st.info("💡 **Coil ID Format:** `Coil-[Metal]-[Gauge]-[Texture]-[Footage]-[Number]`\n\nExample: `Coil-AL-016-STP-3000-01`")
+                            elif item_data['Category'] == 'Rolls':
+                                st.info("💡 **Roll ID Format:** `Roll-[Metal]-[Gauge]-[Texture]-[Footage]-[Number]`\n\nExample: `Roll-AL-020-SMP-100-01`")
+                            
+                            new_item_id = st.text_input(
+                                "New Item ID",
+                                value=selected_item,
+                                placeholder="Enter new Item ID",
+                                key="new_item_id_input"
+                            )
+                            
+                            # Check if new ID already exists
+                            if new_item_id != selected_item:
+                                existing_ids = df['Item_ID'].tolist()
+                                if new_item_id in existing_ids:
+                                    st.error(f"❌ Item ID '{new_item_id}' already exists! Choose a different ID.")
+                                    id_is_valid = False
+                                else:
+                                    st.success(f"✅ Item ID '{new_item_id}' is available.")
+                                    id_is_valid = True
+                            else:
+                                st.info("No change to Item ID")
+                                id_is_valid = True
+                            
+                            id_change_reason = st.text_input(
+                                "Reason for ID Change *",
+                                placeholder="e.g. Correcting typo, updating format, label reprint",
+                                key="id_change_reason"
+                            )
+                            
+                            submit_item_id = st.form_submit_button("🏷️ Update Item ID", type="primary", use_container_width=True)
+                        
+                        if submit_item_id:
+                            if new_item_id == selected_item:
+                                st.info("No changes made - Item ID is the same.")
+                            elif not id_change_reason.strip():
+                                st.error("⚠️ Please provide a reason for the ID change.")
+                            elif not id_is_valid:
+                                st.error("⚠️ Cannot use an Item ID that already exists.")
+                            elif not new_item_id.strip():
+                                st.error("⚠️ Item ID cannot be empty.")
+                            else:
+                                try:
+                                    # Update Item ID in inventory table
+                                    supabase.table("inventory").update({
+                                        "Item_ID": new_item_id.strip()
+                                    }).eq("Item_ID", selected_item).execute()
+                                    
+                                    # Log the change
+                                    log_entry = {
+                                        "Item_ID": new_item_id.strip(),
+                                        "Action": "Admin Edit - Item ID Changed",
+                                        "User": st.session_state.get('username', 'Admin'),
+                                        "Timestamp": datetime.now().isoformat(),
+                                        "Details": f"Item ID changed from '{selected_item}' to '{new_item_id.strip()}'. Reason: {id_change_reason}"
+                                    }
+                                    supabase.table("audit_log").insert(log_entry).execute()
+                                    
+                                    st.success(f"✅ Item ID updated: {selected_item} → {new_item_id.strip()}")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Failed to update Item ID: {e}")
+                    
+                    # ── Edit Footage Tab ────────────────────────────────────────────
+                    with edit_tab2:
+                        st.markdown("#### 📏 Adjust Stock Quantity")
+                        
+                        with st.form("edit_footage_form", clear_on_submit=True):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                new_footage = st.number_input(
+                                    "New Footage Value",
+                                    min_value=0.0,
+                                    value=float(item_data['Footage']),
+                                    step=0.5,
+                                    key="new_footage_input"
+                                )
+                            
+                            with col2:
+                                footage_diff = new_footage - float(item_data['Footage'])
+                                if footage_diff > 0:
+                                    st.success(f"📈 Adding {footage_diff:.1f} ft")
+                                elif footage_diff < 0:
+                                    st.warning(f"📉 Removing {abs(footage_diff):.1f} ft")
+                                else:
+                                    st.info("No change")
+                            
+                            footage_reason = st.text_input(
+                                "Reason for Change *",
+                                placeholder="e.g. Physical count adjustment, damaged material, inventory correction",
+                                key="footage_reason"
+                            )
+                            
+                            submit_footage = st.form_submit_button("💾 Update Footage", type="primary", use_container_width=True)
+                        
+                        if submit_footage:
+                            if not footage_reason.strip():
+                                st.error("⚠️ Please provide a reason for the change.")
+                            else:
+                                try:
+                                    # Update footage in database
+                                    supabase.table("inventory").update({
+                                        "Footage": new_footage
+                                    }).eq("Item_ID", selected_item).execute()
+                                    
+                                    # Log the change
+                                    log_entry = {
+                                        "Item_ID": selected_item,
+                                        "Action": "Admin Edit - Footage",
+                                        "User": st.session_state.get('username', 'Admin'),
+                                        "Timestamp": datetime.now().isoformat(),
+                                        "Details": f"Changed footage from {item_data['Footage']} to {new_footage}. Reason: {footage_reason}"
+                                    }
+                                    supabase.table("audit_log").insert(log_entry).execute()
+                                    
+                                    st.success(f"✅ Footage updated: {item_data['Footage']} → {new_footage}")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Failed to update: {e}")
+                    
+                    # ── Edit Location Tab ───────────────────────────────────────────
+                    with edit_tab3:
+                        st.markdown("#### 📍 Move Item to New Location")
+                        
+                        with st.form("edit_location_form", clear_on_submit=True):
+                            
+                            loc_type = st.radio(
+                                "🏢 Storage Type",
+                                ["Rack System", "Floor / Open Space"],
+                                horizontal=True,
+                                key="edit_loc_type"
+                            )
+                            
+                            if loc_type == "Rack System":
+                                col1, col2, col3 = st.columns(3)
+                                bay = col1.number_input("🅱️ Bay", min_value=1, value=1, key="edit_rack_bay")
+                                sec = col2.selectbox("🔤 Section", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), key="edit_rack_sec")
+                                lvl = col3.number_input("⬆️ Level", min_value=1, value=1, key="edit_rack_lvl")
+                                new_location = f"{bay}{sec}{lvl}"
+                            else:
+                                col1, col2, col3 = st.columns(3)
+                                bay = col1.number_input("🅱️ Bay", min_value=1, value=1, key="edit_floor_bay")
+                                floor_options = [f"Floor {letter}" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+                                floor_selection = col2.selectbox("🔤 Floor Section", floor_options, key="edit_floor_sec")
+                                lvl = col3.number_input("⬆️ Level", min_value=1, value=1, key="edit_floor_lvl")
+                                new_location = f"{bay}-{floor_selection}-{lvl}"
+                            
+                            st.info(f"📍 **New Location:** {new_location} (Currently: {item_data['Location']})")
+                            
+                            location_reason = st.text_input(
+                                "Reason for Move *",
+                                placeholder="e.g. Reorganizing warehouse, better accessibility, consolidation",
+                                key="location_reason"
+                            )
+                            
+                            submit_location = st.form_submit_button("📍 Update Location", type="primary", use_container_width=True)
+                        
+                        if submit_location:
+                            if not location_reason.strip():
+                                st.error("⚠️ Please provide a reason for the move.")
+                            else:
+                                try:
+                                    # Update location in database
+                                    supabase.table("inventory").update({
+                                        "Location": new_location
+                                    }).eq("Item_ID", selected_item).execute()
+                                    
+                                    # Log the change
+                                    log_entry = {
+                                        "Item_ID": selected_item,
+                                        "Action": "Admin Edit - Location",
+                                        "User": st.session_state.get('username', 'Admin'),
+                                        "Timestamp": datetime.now().isoformat(),
+                                        "Details": f"Moved from {item_data['Location']} to {new_location}. Reason: {location_reason}"
+                                    }
+                                    supabase.table("audit_log").insert(log_entry).execute()
+                                    
+                                    st.success(f"✅ Location updated: {item_data['Location']} → {new_location}")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Failed to update: {e}")
+                    
+                    # ── Remove Item Tab ─────────────────────────────────────────────
+                    with edit_tab4:
+                        st.markdown("#### 🗑️ Permanently Remove Item")
+                        
+                        st.error("⚠️ **Warning:** This action cannot be undone!")
+                        
+                        with st.form("remove_item_form"):
+                            st.markdown(f"""
+                                <div style="background: #fef2f2; padding: 15px; border-radius: 8px; border-left: 4px solid #dc2626;">
+                                    <strong>🚨 You are about to permanently delete:</strong><br><br>
+                                    <table style="width: 100%;">
+                                        <tr><td><strong>Item ID:</strong></td><td>{selected_item}</td></tr>
+                                        <tr><td><strong>Material:</strong></td><td>{item_data['Material']}</td></tr>
+                                        <tr><td><strong>Footage:</strong></td><td>{item_data['Footage']}</td></tr>
+                                        <tr><td><strong>Location:</strong></td><td>{item_data['Location']}</td></tr>
+                                    </table>
+                                </div>
+                            """, unsafe_allow_html=True)
+                            
+                            removal_reason = st.text_input(
+                                "Reason for Removal *",
+                                placeholder="e.g. Damaged beyond use, incorrect entry, sold externally",
+                                key="removal_reason"
+                            )
+                            
+                            confirm_text = st.text_input(
+                                f"Type '{selected_item}' to confirm deletion",
+                                placeholder="Type the Item ID exactly to confirm",
+                                key="confirm_delete_text"
+                            )
+                            
+                            submit_remove = st.form_submit_button("🗑️ Permanently Remove Item", type="primary", use_container_width=True)
+                        
+                        if submit_remove:
+                            if not removal_reason.strip():
+                                st.error("⚠️ Please provide a reason for removal.")
+                            elif confirm_text != selected_item:
+                                st.error(f"⚠️ Please type '{selected_item}' exactly to confirm deletion.")
+                            else:
+                                try:
+                                    # Log BEFORE deleting
+                                    log_entry = {
+                                        "Item_ID": selected_item,
+                                        "Action": "Admin - Item Removed",
+                                        "User": st.session_state.get('username', 'Admin'),
+                                        "Timestamp": datetime.now().isoformat(),
+                                        "Details": f"Permanently removed {selected_item} ({item_data['Material']}, {item_data['Footage']} ft at {item_data['Location']}). Reason: {removal_reason}"
+                                    }
+                                    supabase.table("audit_log").insert(log_entry).execute()
+                                    
+                                    # Delete from database
+                                    supabase.table("inventory").delete().eq("Item_ID", selected_item).execute()
+                                    
+                                    st.success(f"✅ Item {selected_item} has been permanently removed.")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Failed to remove: {e}")
+            
+            else:
+                st.info("🔍 No items match your search criteria.")
+        
+        else:
+            st.info("📦 No inventory to manage yet. Add items in the Receive tab first.")
                     
 import openai
 import plotly.express as px
 import plotly.graph_objects as go
 
-with tab5:
+with tab6:
     st.markdown("""
         <div style="text-align: center; padding: 20px 0;">
             <h1 style="color: #7c3aed; margin: 0;">📈 Inventory Analytics & AI Insights</h1>
@@ -3439,7 +3797,7 @@ Please provide a clear, actionable response with specific recommendations and da
             </div>
         """, unsafe_allow_html=True)
         
-with tab6:
+with tab7:
     st.subheader("📜 System Audit Log")
     st.caption("Complete history of material movements, production runs, and admin submissions.")
     
