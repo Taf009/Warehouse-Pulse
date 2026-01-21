@@ -101,8 +101,6 @@ def normalize_category(cat):
     
     cat_lower = str(cat).strip().lower()
     
-    st.sidebar.write(f"DEBUG normalizing: '{cat}' -> '{cat_lower}'")  # ADD THIS DEBUG
-    
     # Map all variations to standard plural form
     mapping = {
         'coil': 'Coils',
@@ -182,16 +180,10 @@ if 'df' not in st.session_state or 'df_audit' not in st.session_state:
 df = st.session_state.df
 df_audit = st.session_state.df_audit
 
-# DEBUG
-st.sidebar.write("**Categories in DB:**", df['Category'].unique().tolist() if df is not None and not df.empty else "Empty")
-
 # Normalize categories in the dataframe
 if df is not None and not df.empty and 'Category' in df.columns:
     df['Category'] = df['Category'].apply(normalize_category)
     st.session_state.df = df
-
-# DEBUG after
-st.sidebar.write("**After normalize:**", df['Category'].unique().tolist() if df is not None and not df.empty else "Empty")
     
 # Paste update_stock here
 def update_stock(item_id, new_footage, user_name, action_type):
@@ -1659,12 +1651,6 @@ with tab2:
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates sync across all devices in real-time.")
-    
-    # DEBUG
-    if df is not None and not df.empty:
-        st.write("**Categories available:**", df['Category'].unique().tolist())
-        st.write("**Sample data:**")
-        st.dataframe(df[['Item_ID', 'Category', 'Material', 'Footage']].head())
 
     # ── Safety check for empty database ─────────────────────────────────────────
     if df is None or df.empty:
