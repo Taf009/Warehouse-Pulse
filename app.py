@@ -1232,7 +1232,7 @@ def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
 
 # --- END OF PRE-TABS LAYOUT ---
 
-# tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Admin Actions", "Insights", "Audit Trail"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Admin Actions", "Insights", "Audit Trail"])
 with tab1:
     # Refresh button (optional but super useful)
     col_refresh, _ = st.columns([1, 3])
