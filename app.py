@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -101,6 +102,8 @@ def normalize_category(cat):
     
     cat_lower = str(cat).strip().lower()
     
+    st.sidebar.write(f"DEBUG normalizing: '{cat}' -> '{cat_lower}'")  # ADD THIS DEBUG
+    
     # Map all variations to standard plural form
     mapping = {
         'coil': 'Coils',
@@ -180,10 +183,16 @@ if 'df' not in st.session_state or 'df_audit' not in st.session_state:
 df = st.session_state.df
 df_audit = st.session_state.df_audit
 
+# DEBUG
+st.sidebar.write("**Categories in DB:**", df['Category'].unique().tolist() if df is not None and not df.empty else "Empty")
+
 # Normalize categories in the dataframe
 if df is not None and not df.empty and 'Category' in df.columns:
     df['Category'] = df['Category'].apply(normalize_category)
     st.session_state.df = df
+
+# DEBUG after
+st.sidebar.write("**After normalize:**", df['Category'].unique().tolist() if df is not None and not df.empty else "Empty")
     
 # Paste update_stock here
 def update_stock(item_id, new_footage, user_name, action_type):
@@ -1398,8 +1407,10 @@ with tab2:
             return df_subset[df_subset['Material'].str.contains("Stucco", case=False)]
         return df_subset
 
-    available_coils = filter_materials(df[(df[category_col] == "Coils") & (df['Footage'] > 0)])
-    available_rolls = filter_materials(df[(df[category_col] == "Rolls") & (df['Footage'] > 0)])    if available_coils.empty and available_rolls.empty:
+    available_coils = filter_materials(df[(df[category_col] == "Coil") & (df['Footage'] > 0)])
+    available_rolls = filter_materials(df[(df[category_col] == "Roll") & (df['Footage'] > 0)])
+
+    if available_coils.empty and available_rolls.empty:
         st.info("No available stock matching the selected texture.")
        # st.stop()
 
