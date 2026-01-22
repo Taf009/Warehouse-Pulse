@@ -1597,68 +1597,139 @@ with tab2:
         key="coil_extra_allowance"
     )
 
+    # Add "Custom" to size options
+    COIL_SIZE_OPTIONS = list(SIZE_DISPLAY.keys()) + ["Custom (Inches)", "Custom (Feet)"]
+
     last_coil_selected = None
-    for i, line in enumerate(st.session_state.coil_lines):
+    
+    for i in range(len(st.session_state.coil_lines)):
+        line = st.session_state.coil_lines[i]  # Reference to the actual dict
+        
         with st.container(border=True):
-            c1, c2, c3, c4 = st.columns([3, 1.2, 1.2, 0.4])
-            with c1:
-                line["display_size"] = st.selectbox(
-                    "Size", list(SIZE_DISPLAY.keys()),
+            col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1, 1, 0.4])
+            
+            with col1:
+                # Get current index for the selectbox
+                current_size = line.get("display_size", "#2")
+                if current_size in COIL_SIZE_OPTIONS:
+                    default_index = COIL_SIZE_OPTIONS.index(current_size)
+                else:
+                    default_index = 0
+                
+                size_selection = st.selectbox(
+                    "📐 Size",
+                    COIL_SIZE_OPTIONS,
+                    index=default_index,
                     key=f"c_size_{i}"
                 )
-            with c2:
-                line["pieces"] = st.number_input(
-                    "Pieces", min_value=0, step=1,
+                # IMPORTANT: Save back to session state
+                st.session_state.coil_lines[i]["display_size"] = size_selection
+            
+            with col2:
+                if size_selection == "Custom (Inches)":
+                    custom_val = st.number_input(
+                        "📏 Inches per piece",
+                        min_value=0.1,
+                        value=float(line.get("custom_inches", 12.0)),
+                        step=0.25,
+                        key=f"c_custom_in_{i}"
+                    )
+                    # IMPORTANT: Save back to session state
+                    st.session_state.coil_lines[i]["custom_inches"] = custom_val
+                    st.session_state.coil_lines[i]["use_custom"] = True
+                    st.session_state.coil_lines[i]["custom_unit"] = "inches"
+                    
+                elif size_selection == "Custom (Feet)":
+                    custom_val = st.number_input(
+                        "📏 Feet per piece",
+                        min_value=0.1,
+                        value=float(line.get("custom_feet", 1.0)),
+                        step=0.5,
+                        key=f"c_custom_ft_{i}"
+                    )
+                    # IMPORTANT: Save back to session state
+                    st.session_state.coil_lines[i]["custom_feet"] = custom_val
+                    st.session_state.coil_lines[i]["custom_inches"] = custom_val * 12
+                    st.session_state.coil_lines[i]["use_custom"] = True
+                    st.session_state.coil_lines[i]["custom_unit"] = "feet"
+                    
+                else:
+                    # Standard size - save the standard inches value
+                    st.session_state.coil_lines[i]["use_custom"] = False
+                    st.session_state.coil_lines[i]["custom_inches"] = SIZE_DISPLAY.get(size_selection, 12.0)
+            
+            with col3:
+                pieces_val = st.number_input(
+                    "🔢 Pieces",
+                    min_value=0,
+                    value=int(line.get("pieces", 0)),
+                    step=1,
                     key=f"c_pcs_{i}"
                 )
-            with c3:
-                line["waste"] = st.number_input(
-                    "Waste (ft)", min_value=0.0, step=0.5,
+                # IMPORTANT: Save back to session state
+                st.session_state.coil_lines[i]["pieces"] = pieces_val
+            
+            with col4:
+                waste_val = st.number_input(
+                    "🗑️ Waste (ft)",
+                    min_value=0.0,
+                    value=float(line.get("waste", 0.0)),
+                    step=0.5,
                     key=f"c_waste_{i}"
                 )
-            with c4:
+                # IMPORTANT: Save back to session state
+                st.session_state.coil_lines[i]["waste"] = waste_val
+                
+                # Show calculated footage
+                if pieces_val > 0:
+                    if size_selection in ["Custom (Inches)", "Custom (Feet)"]:
+                        calc_inches = (st.session_state.coil_lines[i]["custom_inches"] + coil_extra) * pieces_val
+                    else:
+                        std_inches = SIZE_DISPLAY.get(size_selection, 12.0)
+                        calc_inches = (std_inches + coil_extra) * pieces_val
+                    
+                    calc_footage = calc_inches / 12.0 + waste_val
+                    st.metric("Total FT", f"{calc_footage:.2f}")
+            
+            with col5:
                 if st.button("🗑", key=f"del_coil_{i}", help="Remove this line"):
                     st.session_state.coil_lines.pop(i)
                     st.rerun()
-
-            line["use_custom"] = st.checkbox(
-                "Use custom inches instead of standard size",
-                value=line.get("use_custom", False),
-                key=f"c_custom_chk_{i}"
-            )
-
-            current_custom = line.get("custom_inches")
-            safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
-
-            if line["use_custom"]:
-                line["custom_inches"] = st.number_input(
-                    "Custom length per piece (inches)",
-                    min_value=0.1,
-                    value=safe_custom_value,
-                    step=0.25,
-                    key=f"c_custom_in_{i}"
-                )
-            else:
-                line["custom_inches"] = 0.0
-
-            current_defaults = [opt for opt in line["items"] if opt in coil_options]
+            
+            # Source selection
+            current_defaults = [opt for opt in line.get("items", []) if opt in coil_options]
             if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
                 current_defaults = [last_coil_selected]
 
-            line["items"] = st.multiselect(
-                "Select source coil(s)",
+            selected_items = st.multiselect(
+                "🎯 Select source coil(s)",
                 options=coil_options,
                 default=current_defaults,
                 key=f"c_source_{i}"
             )
+            # IMPORTANT: Save back to session state
+            st.session_state.coil_lines[i]["items"] = selected_items
 
-            if line["items"]:
-                last_coil_selected = line["items"][0]
+            if selected_items:
+                last_coil_selected = selected_items[0]
+            
+            # Show summary for custom sizes
+            if size_selection in ["Custom (Inches)", "Custom (Feet)"] and pieces_val > 0:
+                if st.session_state.coil_lines[i].get("custom_unit") == "feet":
+                    st.caption(f"📋 {pieces_val} pieces × {st.session_state.coil_lines[i].get('custom_feet', 0)} ft + {coil_extra}\" allowance + {waste_val} ft waste")
+                else:
+                    st.caption(f"📋 {pieces_val} pieces × {st.session_state.coil_lines[i].get('custom_inches', 0)} in + {coil_extra}\" allowance + {waste_val} ft waste")
 
-    if st.button("➕ Add another coil size", use_container_width=True):
+    if st.button("➕ Add another coil size", use_container_width=True, key="add_coil_line"):
         st.session_state.coil_lines.append({
-            "display_size": "#2", "pieces": 0, "waste": 0.0,
-            "items": [], "use_custom": False, "custom_inches": 12.0
+            "display_size": "#2", 
+            "pieces": 0, 
+            "waste": 0.0,
+            "items": [], 
+            "use_custom": False, 
+            "custom_inches": 12.0, 
+            "custom_feet": 1.0,
+            "custom_unit": "inches"
         })
         st.rerun()
 
