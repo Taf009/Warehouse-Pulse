@@ -277,7 +277,7 @@ if not st.session_state.logged_in:
             st.success(f"Welcome, {username}!")
             
             # Check low stock after login (df now exists)
-            check_and_alert_low_stock()
+           # check_and_alert_low_stock()
             
             st.rerun()
         else:
