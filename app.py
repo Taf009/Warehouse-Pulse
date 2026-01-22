@@ -140,7 +140,7 @@ def normalize_category(cat):
     return cat.strip().title()
 
 # --- DATA LOADER (Supabase only) ---
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=5)
 def load_all_tables():
     if supabase is None:
         st.error("Supabase not connected")
@@ -173,9 +173,10 @@ def load_all_tables():
         empty_audit = pd.DataFrame(columns=['Item_ID', 'Action', 'User', 'Timestamp', 'Details'])
         return empty_inv, empty_audit
         
-# Initialize df
-if 'df' not in st.session_state or 'df_audit' not in st.session_state:
+# Initialize df - reload if not present or if force refresh flag is set
+if 'df' not in st.session_state or 'df_audit' not in st.session_state or st.session_state.get('force_refresh', False):
     st.session_state.df, st.session_state.df_audit = load_all_tables()
+    st.session_state.force_refresh = False
 
 df = st.session_state.df
 df_audit = st.session_state.df_audit
@@ -188,8 +189,10 @@ if df is not None and not df.empty and 'Category' in df.columns:
 # Paste update_stock here
 def update_stock(item_id, new_footage, user_name, action_type):
     try:
+        # Update the inventory
         supabase.table("inventory").update({"Footage": new_footage}).eq("Item_ID", item_id).execute()
         
+        # Log the action
         log_entry = {
             "Item_ID": item_id,
             "Action": action_type,
@@ -199,7 +202,15 @@ def update_stock(item_id, new_footage, user_name, action_type):
         }
         supabase.table("audit_log").insert(log_entry).execute()
         
+        # Clear ALL caches and session state to force fresh data
         st.cache_data.clear()
+        
+        # Force refresh session state data
+        if 'df' in st.session_state:
+            del st.session_state['df']
+        if 'df_audit' in st.session_state:
+            del st.session_state['df_audit']
+        
         return True
     except Exception as e:
         st.error(f"Failed to update database: {e}")
@@ -322,8 +333,14 @@ st.markdown("""
 
 # --- GLOBAL SYNC BUTTON ---
 if st.button("🔄 Sync Cloud Data", use_container_width=True):
+    # Clear everything
     st.cache_data.clear()
-    st.toast("Pulling fresh data from Supabase...")
+    if 'df' in st.session_state:
+        del st.session_state['df']
+    if 'df_audit' in st.session_state:
+        del st.session_state['df_audit']
+    st.session_state.force_refresh = True
+    st.toast("Pulling fresh data from Supabase...", icon="🛰️")
     st.rerun()
 
 # --- MAIN PAGE HEADER ---
@@ -410,35 +427,51 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
     
     # Calculate required footage
     if line["use_custom"]:
+        # Custom inches mode
         inches_per_piece = line["custom_inches"]
+        size_label = f"Custom {inches_per_piece}in"
     else:
+        # Standard size mode
         inches_per_piece = SIZE_DISPLAY.get(line["display_size"], 12.0)
+        size_label = line["display_size"]
     
+    # Calculate total inches needed (pieces × inches per piece + extra allowance per piece)
     total_inches = (inches_per_piece + extra_allowance) * line["pieces"]
+    
+    # Convert to footage
     total_footage_needed = total_inches / 12.0
+    
+    # Add waste
     total_footage_needed += line["waste"]
     
-    # Get source items
+    # Get source items - refresh from database to get current values
     source_items = []
     for item_str in line["items"]:
         item_id = item_str.split(" - ")[0]
-        mask = df['Item_ID'] == item_id
-        if mask.any():
-            source_items.append({
-                'id': item_id,
-                'footage': df.loc[mask, 'Footage'].values[0],
-                'material': df.loc[mask, 'Material'].values[0]
-            })
+        
+        # Fetch current footage from database
+        try:
+            response = supabase.table("inventory").select("*").eq("Item_ID", item_id).execute()
+            if response.data:
+                item_data = response.data[0]
+                source_items.append({
+                    'id': item_id,
+                    'footage': float(item_data['Footage']),
+                    'material': item_data['Material']
+                })
+        except Exception as e:
+            feedback.append(f"✗ Error fetching {item_id}: {e}")
+            return False, 0.0
     
     if not source_items:
-        feedback.append(f"✗ No valid sources found for {material_type} {line['display_size']}")
+        feedback.append(f"✗ No valid sources found for {material_type} {size_label}")
         return False, 0.0
     
     # Calculate available footage
     available_footage = sum(item['footage'] for item in source_items)
     
     if available_footage < total_footage_needed:
-        feedback.append(f"✗ Insufficient stock for {material_type} {line['display_size']}: need {total_footage_needed:.2f} ft, have {available_footage:.2f} ft")
+        feedback.append(f"✗ Insufficient stock for {material_type} {size_label}: need {total_footage_needed:.2f} ft, have {available_footage:.2f} ft")
         return False, 0.0
     
     # Deduct from sources
@@ -453,7 +486,7 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
         
         # Update database
         try:
-            action_details = f"Production: {line['pieces']} pcs of {line['display_size']} ({deduct_amount:.2f} ft used) for {client_name} (Order: {order_number})"
+            action_details = f"Production: {line['pieces']} pcs of {size_label} ({deduct_amount:.2f} ft used) for {client_name} (Order: {order_number})"
             
             success_update = update_stock(
                 item_id=item['id'],
@@ -470,8 +503,9 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
             deduction_details.append({
                 'source_id': item['id'],
                 'material': item['material'],
-                'size': line['display_size'],
+                'size': size_label,
                 'pieces': line['pieces'],
+                'inches_per_piece': inches_per_piece,
                 'footage_used': deduct_amount,
                 'waste': line['waste'],
                 'material_type': material_type
@@ -483,9 +517,8 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
             feedback.append(f"✗ Error updating {item['id']}: {e}")
             return False, 0.0
     
-    feedback.append(f"✓ {material_type} {line['display_size']}: {line['pieces']} pieces produced ({total_footage_needed:.2f} ft used)")
+    feedback.append(f"✓ {material_type} {size_label}: {line['pieces']} pieces produced ({total_footage_needed:.2f} ft used)")
     return True, total_footage_needed
-
 
 def generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, coil_extra=0.5, roll_extra=0.5):
     """
@@ -1235,16 +1268,26 @@ def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Admin Actions", "Insights", "Audit Trail"])
 
 with tab1:
-    # Refresh button
-    col_refresh, _ = st.columns([1, 3])
+    # Refresh controls
+    col_refresh, col_auto = st.columns([1, 2])
     with col_refresh:
         if st.button("🔄 Refresh Dashboard", use_container_width=False):
             st.cache_data.clear()
+            if 'df' in st.session_state:
+                del st.session_state['df']
+            if 'df_audit' in st.session_state:
+                del st.session_state['df_audit']
+            st.session_state.force_refresh = True
             st.toast("Dashboard refreshed from cloud!", icon="🛰️")
+            st.rerun()
+    
+    with col_auto:
+        auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False, key="auto_refresh_dash")
+        if auto_refresh:
+            time.sleep(30)
             st.rerun()
 
     st.caption(f"Data last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
     if not df.empty:
         # Available categories (sorted)
         available_categories = sorted(df['Category'].unique().tolist())
@@ -1752,6 +1795,8 @@ with tab2:
                         success = False
                         break
 
+            
+            
             if success:
                 st.success(f"Order **{order_number}** completed successfully! 🎉")
                 for msg in feedback:
@@ -1777,7 +1822,15 @@ with tab2:
                 st.session_state.coil_lines = []
                 st.session_state.roll_lines = []
 
+                # FORCE COMPLETE REFRESH
                 st.cache_data.clear()
+                if 'df' in st.session_state:
+                    del st.session_state['df']
+                if 'df_audit' in st.session_state:
+                    del st.session_state['df_audit']
+                st.session_state.force_refresh = True
+                
+                time.sleep(1)
                 st.rerun()
 
             else:
