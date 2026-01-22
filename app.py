@@ -2422,6 +2422,11 @@ with tab4:
         
         # ID Generation
         st.markdown("### Step 4️⃣: 🏷️ Identification")
+
+        st.markdown("---")
+        
+        # ID Generation
+        st.markdown("### Step 4️⃣: 🏷️ Identification")
         
         with st.container():
             st.markdown("""
@@ -2429,32 +2434,112 @@ with tab4:
                             padding: 24px; border-radius: 12px; border-left: 4px solid #9333ea;">
             """, unsafe_allow_html=True)
             
-            # ID Generation Logic
-            if cat_choice == "Coils" and is_serialized:
-                st.info(f"💡 **ID Format:** `{id_prefix}-##` (e.g. {id_prefix}-01)")
-                starting_id = st.text_input("🏷️ Starting Coil ID", value=f"{id_prefix}-01", placeholder=f"{id_prefix}-01")
-                id_preview = starting_id
-                st.success(f"🏷️ **First ID:** `{id_preview}`")
+            # Generate suggested ID prefix
+            if cat_choice in ["Coils", "Rolls"]:
+                suggested_prefix = f"{cat_choice[:-1]}-{metal_code}-{clean_gauge}-{texture_code}"
+                st.info(f"💡 **Suggested format:** `{suggested_prefix}-[NUMBER]` (e.g., {suggested_prefix}-01)")
+            elif 'id_prefix' in dir():
+                st.info(f"💡 **Suggested format:** `{id_prefix}-[NUMBER]`")
             
-            elif cat_choice == "Rolls" and is_serialized:
-                st.info(f"💡 **ID Format:** `{id_prefix}-##` (e.g. {id_prefix}-01)")
-                starting_id = st.text_input("🏷️ Starting Roll/Pallet ID", value=f"{id_prefix}-01", placeholder=f"{id_prefix}-01")
-                id_preview = starting_id
-                st.success(f"🏷️ **Pallet ID:** `{id_preview}` (Total: {total_added} footage)")
-                is_serialized = False
-            
-            elif is_serialized:
-                starting_id = st.text_input("🏷️ Starting ID", value=f"{id_prefix}-1001")
-                id_preview = starting_id
-                st.info(f"🏷️ **ID Preview:** `{id_preview}`")
-            
+            # Always allow custom ID input
+            if is_serialized:
+                st.markdown("**Enter your Item ID(s):**")
+                
+                if item_count == 1:
+                    # Single item - simple text input
+                    custom_id = st.text_input(
+                        "🏷️ Item ID",
+                        value="",
+                        placeholder=f"e.g., {id_prefix}-01" if 'id_prefix' in locals() else "Enter unique ID",
+                        key="custom_single_id",
+                        help="Enter any ID you want. Must be unique."
+                    )
+                    id_list = [custom_id.strip()] if custom_id.strip() else []
+                    
+                else:
+                    # Multiple items - two options
+                    id_method = st.radio(
+                        "How do you want to assign IDs?",
+                        ["Sequential (auto-increment)", "Manual (enter each)"],
+                        horizontal=True,
+                        key="id_method"
+                    )
+                    
+                    if id_method == "Sequential (auto-increment)":
+                        col_base, col_start = st.columns(2)
+                        with col_base:
+                            base_id = st.text_input(
+                                "🏷️ Base ID",
+                                value=id_prefix if 'id_prefix' in locals() else cat_choice.upper(),
+                                placeholder="e.g., Coil-AL-016-STP",
+                                key="base_id_input",
+                                help="The prefix before the number"
+                            )
+                        with col_start:
+                            start_num = st.number_input(
+                                "Starting Number",
+                                min_value=1,
+                                value=1,
+                                step=1,
+                                key="start_num_input"
+                            )
+                        
+                        # Generate the list
+                        id_list = [f"{base_id}-{str(start_num + i).zfill(2)}" for i in range(item_count)]
+                        
+                        # Preview
+                        st.markdown("**Preview IDs:**")
+                        preview_text = ", ".join(id_list[:5])
+                        if len(id_list) > 5:
+                            preview_text += f", ... ({len(id_list)} total)"
+                        st.code(preview_text)
+                    
+                    else:  # Manual entry
+                        st.markdown(f"Enter {item_count} IDs (one per line):")
+                        manual_ids = st.text_area(
+                            "🏷️ Item IDs (one per line)",
+                            value="",
+                            height=150,
+                            placeholder=f"Example:\n{id_prefix}-01\n{id_prefix}-02\n{id_prefix}-03" if 'id_prefix' in locals() else "Enter one ID per line",
+                            key="manual_ids_input"
+                        )
+                        
+                        # Parse the IDs
+                        id_list = [line.strip() for line in manual_ids.strip().split('\n') if line.strip()]
+                        
+                        # Validate count
+                        if id_list and len(id_list) != item_count:
+                            st.warning(f"⚠️ You entered {len(id_list)} IDs but specified {item_count} items. Please match the count.")
+                
+                # Check for duplicates within the list
+                if id_list:
+                    duplicates_in_list = [id for id in id_list if id_list.count(id) > 1]
+                    if duplicates_in_list:
+                        st.error(f"❌ Duplicate IDs in your list: {set(duplicates_in_list)}")
+                    
+                    # Check against existing inventory
+                    if safe_df is not None and not safe_df.empty:
+                        existing_ids = safe_df['Item_ID'].tolist()
+                        clashing_ids = [id for id in id_list if id in existing_ids]
+                        
+                        if clashing_ids:
+                            st.error(f"❌ **These IDs already exist in inventory:**")
+                            for clash_id in clashing_ids:
+                                existing_item = safe_df[safe_df['Item_ID'] == clash_id].iloc[0]
+                                st.markdown(f"- `{clash_id}` → {existing_item['Material']} ({existing_item['Footage']} ft at {existing_item['Location']})")
+                            st.warning("⚠️ Please change the conflicting IDs before adding to cart.")
+                
+                # Store for form submission
+                id_preview = id_list[0] if id_list else "NO-ID"
+                starting_id = None  # We're using id_list instead
+                
             else:
+                # Bulk item - no unique IDs needed
                 id_preview = f"{cat_choice.upper()}-BULK"
+                id_list = []
                 st.info("📦 **Bulk item** - No unique IDs needed")
             
             st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
         
         # Add to Cart Button
         add_item = st.form_submit_button(
@@ -2462,7 +2547,7 @@ with tab4:
             use_container_width=True, 
             type="secondary"
         )
-    
+
     # ── Process Add to Cart ─────────────────────────────────────────────────────
     if add_item:
         if not current_po.strip():
@@ -2471,24 +2556,49 @@ with tab4:
             st.error("⚠️ Please enter the Receiving Operator name!")
         elif not material:
             st.error("⚠️ Material details are required!")
+        elif is_serialized and not id_list:
+            st.error("⚠️ Please enter Item ID(s) for serialized items!")
+        elif is_serialized and len(id_list) != item_count:
+            st.error(f"⚠️ ID count mismatch: You entered {len(id_list)} IDs but specified {item_count} items.")
         else:
-            # Add to cart
-            st.session_state.receiving_cart.append({
-                'category': cat_choice,
-                'material': material,
-                'qty_val': qty_val,
-                'item_count': item_count,
-                'total_added': total_added,
-                'unit_label': unit_label,
-                'location': gen_loc,
-                'is_serialized': is_serialized,
-                'id_prefix': id_prefix if 'id_prefix' in locals() else cat_choice.upper(),
-                'id_preview': id_preview if 'id_preview' in locals() else f"{cat_choice}-BULK",
-                'starting_id': starting_id if 'starting_id' in locals() else None,
-            })
+            # Final validation - check for clashes
+            has_clashes = False
             
-            st.success(f"✅ Added: {item_count} × {material} ({total_added} {unit_label.lower()})")
-            st.rerun()
+            if is_serialized and safe_df is not None and not safe_df.empty:
+                existing_ids = safe_df['Item_ID'].tolist()
+                clashing_ids = [id for id in id_list if id in existing_ids]
+                
+                if clashing_ids:
+                    st.error(f"❌ Cannot add - these IDs already exist: {clashing_ids}")
+                    st.warning("Please fix the IDs above and try again.")
+                    has_clashes = True
+            
+            # Check for duplicates within the list
+            if is_serialized and id_list:
+                duplicates_in_list = set([id for id in id_list if id_list.count(id) > 1])
+                if duplicates_in_list:
+                    st.error(f"❌ Cannot add - duplicate IDs in your list: {duplicates_in_list}")
+                    has_clashes = True
+            
+            if not has_clashes:
+                # Add to cart
+                st.session_state.receiving_cart.append({
+                    'category': cat_choice,
+                    'material': material,
+                    'qty_val': qty_val,
+                    'item_count': item_count,
+                    'total_added': total_added,
+                    'unit_label': unit_label,
+                    'location': gen_loc,
+                    'is_serialized': is_serialized,
+                    'id_list': id_list if is_serialized else [],  # Store the full list
+                    'id_preview': id_list[0] if id_list else f"{cat_choice.upper()}-BULK",
+                })
+                
+                st.success(f"✅ Added: {item_count} × {material} ({total_added} {unit_label.lower()})")
+                if is_serialized and id_list:
+                    st.info(f"🏷️ IDs: {', '.join(id_list[:3])}{'...' if len(id_list) > 3 else ''}")
+                st.rerun()
     
     # ── Display Receiving Cart ──────────────────────────────────────────────────
     if st.session_state.receiving_cart:
@@ -2510,65 +2620,81 @@ with tab4:
         st.markdown("---")
         
         col_process, col_clear = st.columns(2)
-        
+
         with col_process:
             if st.button("✅ Process All Items to Inventory", type="primary", use_container_width=True, key="process_all_receiving"):
                 if not st.session_state.current_po.strip() or not st.session_state.receiving_operator.strip():
                     st.error("⚠️ PO Number and Operator are required!")
                 else:
-                    with st.spinner("☁️ Processing all items to Cloud Database..."):
-                        try:
-                            all_success = True
-                            items_added = 0
-                            items_skipped = 0
-                            
-                            for item in st.session_state.receiving_cart:
-                                if item['is_serialized']:
-                                    new_rows = []
-                                    for i in range(item['item_count']):
-                                        if item['starting_id']:
-                                            # Parse the starting ID and increment
-                                            parts = item['starting_id'].split('-')
-                                            base = '-'.join(parts[:-1])
-                                            num = int(parts[-1]) + i
-                                            unique_id = f"{base}-{num:02d}"
-                                        else:
-                                            unique_id = f"{item['id_preview']}-{i+1:04d}"
-                                        
-                                        # Check if this ID already exists
-                                        existing = supabase.table("inventory").select("Item_ID").eq("Item_ID", unique_id).execute()
-                                        if existing.data:
-                                            st.warning(f"⚠️ Skipped {unique_id} - already exists in inventory")
-                                            items_skipped += 1
-                                            continue
-                                        
-                                        new_rows.append({
-                                            "Item_ID": unique_id,
-                                            "Material": item['material'],
-                                            "Footage": item['qty_val'],
-                                            "Location": item['location'],
-                                            "Status": "Active",
-                                            "Category": item['category'],
-                                            "Purchase_Order_Num": st.session_state.current_po.strip()
-                                        })
-                                    
-                                    if new_rows:
-                                        supabase.table("inventory").insert(new_rows).execute()
-                                        items_added += len(new_rows)
+                    # FINAL CHECK - verify no clashes before processing
+                    all_new_ids = []
+                    for item in st.session_state.receiving_cart:
+                        if item['is_serialized']:
+                            all_new_ids.extend(item['id_list'])
+                    
+                    # Check against database
+                    has_clashes = False
+                    if all_new_ids:
+                        response = supabase.table("inventory").select("Item_ID").in_("Item_ID", all_new_ids).execute()
+                        if response.data:
+                            existing_clashes = [row['Item_ID'] for row in response.data]
+                            st.error(f"❌ **Cannot process - these IDs already exist in database:**")
+                            for clash in existing_clashes:
+                                st.write(f"- `{clash}`")
+                            st.warning("Please remove the conflicting items from cart and re-add with different IDs.")
+                            has_clashes = True
+                    
+                    if not has_clashes:
+                        with st.spinner("☁️ Processing all items to Cloud Database..."):
+                            try:
+                                items_added = 0
                                 
-                                else:
-                                    # Bulk item - check if exists in current inventory
-                                    if not safe_df.empty:
-                                        mask = (safe_df['Category'] == item['category']) & (safe_df['Material'] == item['material'])
-                                        if mask.any():
-                                            current_qty = safe_df.loc[mask, 'Footage'].values[0]
-                                            new_qty = current_qty + item['total_added']
-                                            bulk_id = safe_df.loc[mask, 'Item_ID'].values[0]
-                                            update_stock(bulk_id, new_qty, st.session_state.receiving_operator, 
-                                                       f"Received {item['total_added']} {item['unit_label'].lower()} (PO: {st.session_state.current_po})")
+                                for item in st.session_state.receiving_cart:
+                                    if item['is_serialized']:
+                                        new_rows = []
+                                        for unique_id in item['id_list']:
+                                            new_rows.append({
+                                                "Item_ID": unique_id,
+                                                "Material": item['material'],
+                                                "Footage": item['qty_val'],
+                                                "Location": item['location'],
+                                                "Status": "Active",
+                                                "Category": item['category'],
+                                                "Purchase_Order_Num": st.session_state.current_po.strip()
+                                            })
+                                        
+                                        if new_rows:
+                                            supabase.table("inventory").insert(new_rows).execute()
+                                            items_added += len(new_rows)
+                                    
+                                    else:
+                                        # Bulk item - check if exists in current inventory
+                                        if not safe_df.empty:
+                                            mask = (safe_df['Category'] == item['category']) & (safe_df['Material'] == item['material'])
+                                            if mask.any():
+                                                current_qty = safe_df.loc[mask, 'Footage'].values[0]
+                                                new_qty = current_qty + item['total_added']
+                                                bulk_id = safe_df.loc[mask, 'Item_ID'].values[0]
+                                                update_stock(bulk_id, new_qty, st.session_state.receiving_operator, 
+                                                           f"Received {item['total_added']} {item['unit_label'].lower()} (PO: {st.session_state.current_po})")
+                                                items_added += 1
+                                            else:
+                                                # Create new bulk item
+                                                unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                                new_data = {
+                                                    "Item_ID": unique_id,
+                                                    "Material": item['material'],
+                                                    "Footage": item['total_added'],
+                                                    "Location": item['location'],
+                                                    "Status": "Active",
+                                                    "Category": item['category'],
+                                                    "Purchase_Order_Num": st.session_state.current_po.strip()
+                                                }
+                                                supabase.table("inventory").insert(new_data).execute()
+                                                items_added += 1
                                         else:
-                                            # Create new bulk item
-                                            unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d')}"
+                                            # No inventory yet - create first bulk item
+                                            unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                                             new_data = {
                                                 "Item_ID": unique_id,
                                                 "Material": item['material'],
@@ -2580,48 +2706,28 @@ with tab4:
                                             }
                                             supabase.table("inventory").insert(new_data).execute()
                                             items_added += 1
-                                    else:
-                                        # No inventory yet - create first bulk item
-                                        unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d')}"
-                                        new_data = {
-                                            "Item_ID": unique_id,
-                                            "Material": item['material'],
-                                            "Footage": item['total_added'],
-                                            "Location": item['location'],
-                                            "Status": "Active",
-                                            "Category": item['category'],
-                                            "Purchase_Order_Num": st.session_state.current_po.strip()
-                                        }
-                                        supabase.table("inventory").insert(new_data).execute()
-                                        items_added += 1
+                                    
+                                    # Audit log for each cart item
+                                    log_entry = {
+                                        "Item_ID": item['id_preview'],
+                                        "Action": "Received",
+                                        "User": st.session_state.receiving_operator,
+                                        "Timestamp": datetime.now().isoformat(),
+                                        "Details": f"PO: {st.session_state.current_po} | {item['item_count']} × {item['material']} ({item['total_added']} {item['unit_label'].lower()})"
+                                    }
+                                    supabase.table("audit_log").insert(log_entry).execute()
                                 
-                                # Audit log for each item
-                                log_entry = {
-                                    "Item_ID": item['id_preview'],
-                                    "Action": "Received",
-                                    "User": st.session_state.receiving_operator,
-                                    "Timestamp": datetime.now().isoformat(),
-                                    "Details": f"PO: {st.session_state.current_po} | {item['item_count']} × {item['material']} ({item['total_added']} {item['unit_label'].lower()})"
-                                }
-                                supabase.table("audit_log").insert(log_entry).execute()
-                            
-                            st.cache_data.clear()
-                            
-                            # Summary message
-                            if items_added > 0 and items_skipped == 0:
+                                st.cache_data.clear()
+                                
                                 st.success(f"✅ Successfully received {items_added} item(s) for PO: {st.session_state.current_po}!")
                                 st.balloons()
-                            elif items_added > 0 and items_skipped > 0:
-                                st.warning(f"⚠️ Partially completed: {items_added} added, {items_skipped} skipped (duplicates)")
-                            else:
-                                st.error(f"❌ No items added - all {items_skipped} were duplicates!")
+                                
+                                # Clear cart
+                                st.session_state.receiving_cart = []
+                                st.rerun()
                             
-                            # Clear cart
-                            st.session_state.receiving_cart = []
-                            st.rerun()
-                        
-                        except Exception as e:
-                            st.error(f"❌ Failed to process items: {e}")
+                            except Exception as e:
+                                st.error(f"❌ Failed to process items: {e}")
         
         with col_clear:
             if st.button("🗑️ Clear Cart", use_container_width=True, key="clear_receiving_cart"):
