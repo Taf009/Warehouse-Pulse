@@ -1233,8 +1233,9 @@ def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
 # --- END OF PRE-TABS LAYOUT ---
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Admin Actions", "Insights", "Audit Trail"])
+
 with tab1:
-    # Refresh button (optional but super useful)
+    # Refresh button
     col_refresh, _ = st.columns([1, 3])
     with col_refresh:
         if st.button("🔄 Refresh Dashboard", use_container_width=False):
@@ -1242,7 +1243,6 @@ with tab1:
             st.toast("Dashboard refreshed from cloud!", icon="🛰️")
             st.rerun()
 
-    # Optional last updated time
     st.caption(f"Data last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     if not df.empty:
@@ -1250,115 +1250,256 @@ with tab1:
         available_categories = sorted(df['Category'].unique().tolist())
         view_options = ["All Materials"] + available_categories
 
-        # Sidebar filter - clean and scales to any number of categories
+        # Sidebar filter
         with st.sidebar:
-            st.subheader("Dashboard Filter")
+            st.subheader("Dashboard Filters")
+            
+            # Category filter
             selected_view = st.selectbox(
                 "Category",
                 view_options,
-                index=0,  # Default: All Materials
+                index=0,
                 placeholder="Select category...",
                 help="Choose what to show on the dashboard",
                 key="dashboard_category_filter"
             )
+            
+            # Sub-filters for Coils and Rolls
+            selected_metal = None
+            selected_gauge = None
+            selected_texture = None
+            
+            if selected_view in ["Coils", "Rolls"]:
+                st.markdown("---")
+                st.markdown(f"**🔍 {selected_view} Filters**")
+                
+                # Get unique values from the selected category
+                category_df = df[df['Category'] == selected_view]
+                
+                # Extract metal types from Material column
+                def extract_metal(material):
+                    material_lower = str(material).lower()
+                    if 'stainless' in material_lower:
+                        return 'Stainless Steel'
+                    elif 'aluminum' in material_lower:
+                        return 'Aluminum'
+                    elif 'galvanized' in material_lower:
+                        return 'Galvanized'
+                    else:
+                        return 'Other'
+                
+                # Extract gauge from Material column
+                def extract_gauge(material):
+                    import re
+                    match = re.search(r'\.(\d{3})', str(material))
+                    if match:
+                        return f".{match.group(1)}"
+                    return 'Unknown'
+                
+                # Extract texture from Material column
+                def extract_texture(material):
+                    material_lower = str(material).lower()
+                    if 'smooth' in material_lower:
+                        return 'Smooth'
+                    elif 'stucco' in material_lower:
+                        return 'Stucco'
+                    else:
+                        return 'Other'
+                
+                category_df['Metal_Type'] = category_df['Material'].apply(extract_metal)
+                category_df['Gauge'] = category_df['Material'].apply(extract_gauge)
+                category_df['Texture'] = category_df['Material'].apply(extract_texture)
+                
+                # Metal filter
+                metal_options = ["All"] + sorted(category_df['Metal_Type'].unique().tolist())
+                selected_metal = st.selectbox(
+                    "🔩 Metal Type",
+                    metal_options,
+                    key="dashboard_metal_filter"
+                )
+                
+                # Gauge filter
+                gauge_options = ["All"] + sorted(category_df['Gauge'].unique().tolist())
+                selected_gauge = st.selectbox(
+                    "📏 Gauge",
+                    gauge_options,
+                    key="dashboard_gauge_filter"
+                )
+                
+                # Texture filter
+                texture_options = ["All"] + sorted(category_df['Texture'].unique().tolist())
+                selected_texture = st.selectbox(
+                    "🎨 Texture",
+                    texture_options,
+                    key="dashboard_texture_filter"
+                )
 
-        # Filter data based on sidebar selection
+        # Filter data based on selections
         if selected_view == "All Materials":
             display_df = df.copy()
             st.subheader("📊 Global Material Pulse")
         else:
             display_df = df[df['Category'] == selected_view].copy()
-            st.subheader(f"📊 {selected_view} Inventory Pulse")
-
-        # 2. DATA AGGREGATION
-        summary_df = display_df.groupby(['Material', 'Category']).agg({
-            'Footage': 'sum',
-            'Item_ID': 'count'
-        }).reset_index()
-        summary_df.columns = ['Material', 'Type', 'Total_Footage', 'Unit_Count']
-
-        # 3. TOP-LEVEL METRICS
-        m1, m2, m3 = st.columns(3)
-        current_total_ft = display_df['Footage'].sum()
-        current_unit_count = len(display_df)
-        unique_mats = len(summary_df)
-        
-        m1.metric("Selected Footage", f"{current_total_ft:,.1f} ft")
-        m2.metric("Items in View", current_unit_count)
-        m3.metric("Material Types", unique_mats)
-
-        st.divider()
-
-        # 4. THE PULSE GRID (your original cards)
-        cols = st.columns(2)
-        for idx, row in summary_df.iterrows():
-            with cols[idx % 2]:
-                mat = row['Material']
-                ft = row['Total_Footage']
-                units = row['Unit_Count']
-                cat_type = row['Type'] 
+            
+            # Apply sub-filters for Coils/Rolls
+            if selected_view in ["Coils", "Rolls"]:
+                # Add extracted columns
+                display_df['Metal_Type'] = display_df['Material'].apply(extract_metal)
+                display_df['Gauge'] = display_df['Material'].apply(extract_gauge)
+                display_df['Texture'] = display_df['Material'].apply(extract_texture)
                 
-                # --- A. SET DEFAULTS ---
-                display_value = f"{ft:,.1f}"
-                unit_text = "Units"
-                sub_label_text = "In Stock"
-
-                # --- B. LOGIC BRANCHES ---
-                if cat_type == "Rolls":
-                    divisor = 200 if "RPR" in mat.upper() else 100
-                    roll_qty = ft / divisor
-                    display_value = f"{roll_qty:.1f}"
-                    unit_text = f"Rolls ({divisor}ft)"
-                    sub_label_text = f"Total: {ft:,.1f} FT"
+                if selected_metal and selected_metal != "All":
+                    display_df = display_df[display_df['Metal_Type'] == selected_metal]
                 
-                elif cat_type == "Coils":
-                    display_value = f"{ft:,.1f}"
-                    unit_text = "FT"
-                    sub_label_text = f"{int(units)} Separate Coils"
+                if selected_gauge and selected_gauge != "All":
+                    display_df = display_df[display_df['Gauge'] == selected_gauge]
                 
-                elif cat_type == "Fab Straps":
-                    display_value = f"{int(ft)}"
-                    unit_text = "Bundles"
-                    sub_label_text = "Standard Stock"
-
-                elif cat_type == "Elbows":
-                    display_value = f"{int(ft)}"
-                    unit_text = "Pcs"
-                    sub_label_text = "Standard Stock"
-
-                # --- C. THRESHOLD / HEALTH LOGIC ---
-                limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type in ["Fab Straps", "Elbows"] else 1000.0)
+                if selected_texture and selected_texture != "All":
+                    display_df = display_df[display_df['Texture'] == selected_texture]
                 
-                if ft < limit:
-                    status_color, status_text = "#FF4B4B", "🚨 REORDER REQUIRED"
-                elif ft < (limit * 1.5):
-                    status_color, status_text = "#FFA500", "⚠️ MONITOR CLOSELY"
+                # Build subtitle
+                filter_parts = []
+                if selected_metal and selected_metal != "All":
+                    filter_parts.append(selected_metal)
+                if selected_gauge and selected_gauge != "All":
+                    filter_parts.append(selected_gauge)
+                if selected_texture and selected_texture != "All":
+                    filter_parts.append(selected_texture)
+                
+                if filter_parts:
+                    st.subheader(f"📊 {selected_view} - {' | '.join(filter_parts)}")
                 else:
-                    status_color, status_text = "#00C853", "✅ STOCK HEALTHY"
+                    st.subheader(f"📊 {selected_view} Inventory Pulse")
+            else:
+                st.subheader(f"📊 {selected_view} Inventory Pulse")
 
-                # --- D. RENDER THE CARD ---
-                st.markdown(f"""
-                <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
-                            border-left: 12px solid {status_color}; margin-bottom: 15px; min-height: 180px;">
-                    <p style="color: #666; font-size: 11px; margin: 0; font-weight: bold;">{cat_type.upper()}</p>
-                    <h3 style="margin: 5px 0; font-size: 18px;">{mat}</h3>
-                    <h1 style="margin: 10px 0; color: {status_color};">{display_value} <span style="font-size: 16px;">{unit_text}</span></h1>
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
-                        <span style="font-weight: bold; color: {status_color}; font-size: 12px;">{status_text}</span>
-                        <span style="color: #888; font-size: 11px;">{units} IDs</span>
+        # Check if we have data after filtering
+        if display_df.empty:
+            st.warning("No items match the selected filters.")
+        else:
+            # DATA AGGREGATION
+            summary_df = display_df.groupby(['Material', 'Category']).agg({
+                'Footage': 'sum',
+                'Item_ID': 'count'
+            }).reset_index()
+            summary_df.columns = ['Material', 'Type', 'Total_Footage', 'Unit_Count']
+
+            # TOP-LEVEL METRICS
+            m1, m2, m3 = st.columns(3)
+            current_total_ft = display_df['Footage'].sum()
+            current_unit_count = len(display_df)
+            unique_mats = len(summary_df)
+            
+            m1.metric("Total Footage", f"{current_total_ft:,.1f} ft")
+            m2.metric("Items in View", current_unit_count)
+            m3.metric("Material Types", unique_mats)
+
+            st.divider()
+
+            # QUICK STATS FOR COILS/ROLLS (when filtered)
+            if selected_view in ["Coils", "Rolls"] and not display_df.empty:
+                st.markdown("### 📈 Quick Stats")
+                
+                qs1, qs2, qs3, qs4 = st.columns(4)
+                
+                with qs1:
+                    avg_footage = display_df['Footage'].mean()
+                    st.metric("Avg Footage/Item", f"{avg_footage:,.1f} ft")
+                
+                with qs2:
+                    min_footage = display_df['Footage'].min()
+                    st.metric("Lowest Stock", f"{min_footage:,.1f} ft")
+                
+                with qs3:
+                    max_footage = display_df['Footage'].max()
+                    st.metric("Highest Stock", f"{max_footage:,.1f} ft")
+                
+                with qs4:
+                    locations = display_df['Location'].nunique()
+                    st.metric("Locations", locations)
+                
+                st.divider()
+
+            # THE PULSE GRID
+            cols = st.columns(2)
+            for idx, row in summary_df.iterrows():
+                with cols[idx % 2]:
+                    mat = row['Material']
+                    ft = row['Total_Footage']
+                    units = row['Unit_Count']
+                    cat_type = row['Type'] 
+                    
+                    # SET DEFAULTS
+                    display_value = f"{ft:,.1f}"
+                    unit_text = "Units"
+                    sub_label_text = "In Stock"
+
+                    # LOGIC BRANCHES
+                    if cat_type == "Rolls":
+                        divisor = 200 if "RPR" in mat.upper() else 100
+                        roll_qty = ft / divisor
+                        display_value = f"{roll_qty:.1f}"
+                        unit_text = f"Rolls ({divisor}ft)"
+                        sub_label_text = f"Total: {ft:,.1f} FT"
+                    
+                    elif cat_type == "Coils":
+                        display_value = f"{ft:,.1f}"
+                        unit_text = "FT"
+                        sub_label_text = f"{int(units)} Separate Coils"
+                    
+                    elif cat_type == "Fab Straps":
+                        display_value = f"{int(ft)}"
+                        unit_text = "Bundles"
+                        sub_label_text = "Standard Stock"
+
+                    elif cat_type == "Elbows":
+                        display_value = f"{int(ft)}"
+                        unit_text = "Pcs"
+                        sub_label_text = "Standard Stock"
+
+                    # THRESHOLD / HEALTH LOGIC
+                    limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type in ["Fab Straps", "Elbows"] else 1000.0)
+                    
+                    if ft < limit:
+                        status_color, status_text = "#FF4B4B", "🚨 REORDER REQUIRED"
+                    elif ft < (limit * 1.5):
+                        status_color, status_text = "#FFA500", "⚠️ MONITOR CLOSELY"
+                    else:
+                        status_color, status_text = "#00C853", "✅ STOCK HEALTHY"
+
+                    # RENDER THE CARD
+                    st.markdown(f"""
+                    <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
+                                border-left: 12px solid {status_color}; margin-bottom: 15px; min-height: 180px;">
+                        <p style="color: #666; font-size: 11px; margin: 0; font-weight: bold;">{cat_type.upper()}</p>
+                        <h3 style="margin: 5px 0; font-size: 18px;">{mat}</h3>
+                        <h1 style="margin: 10px 0; color: {status_color};">{display_value} <span style="font-size: 16px;">{unit_text}</span></h1>
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
+                            <span style="font-weight: bold; color: {status_color}; font-size: 12px;">{status_text}</span>
+                            <span style="color: #888; font-size: 11px;">{units} IDs</span>
+                        </div>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
-        # 5. INDIVIDUAL ITEM TABLE
-        with st.expander(f"🔍 View {selected_view} Serial Numbers / Detail"):
-            st.dataframe(
-                display_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location']].sort_values('Material'), 
-                use_container_width=True, 
-                hide_index=True
-            )
+            # INDIVIDUAL ITEM TABLE
+            with st.expander(f"🔍 View Individual Items ({len(display_df)} items)"):
+                # Show additional columns for Coils/Rolls
+                if selected_view in ["Coils", "Rolls"] and 'Metal_Type' in display_df.columns:
+                    st.dataframe(
+                        display_df[['Item_ID', 'Material', 'Metal_Type', 'Gauge', 'Texture', 'Footage', 'Location']].sort_values('Material'), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                else:
+                    st.dataframe(
+                        display_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location']].sort_values('Material'), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
     else:
-        st.info("No data available. Add inventory in the Warehouse tab.")
+        st.info("No data available. Add inventory in the Receive tab.")
+
+
 # ── TAB 2: Production Log ────────────────────────────────────────────────────────
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders")
