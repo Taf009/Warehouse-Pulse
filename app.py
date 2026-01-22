@@ -1472,35 +1472,72 @@ with tab1:
                     units = row['Unit_Count']
                     cat_type = row['Type'] 
                     
-                    # SET DEFAULTS
+                    # --- SET DEFAULTS ---
                     display_value = f"{ft:,.1f}"
                     unit_text = "Units"
                     sub_label_text = "In Stock"
 
-                    # LOGIC BRANCHES
+                    # --- LOGIC BRANCHES ---
                     if cat_type == "Rolls":
-                        divisor = 200 if "RPR" in mat.upper() else 100
-                        roll_qty = ft / divisor
-                        display_value = f"{roll_qty:.1f}"
-                        unit_text = f"Rolls ({divisor}ft)"
-                        sub_label_text = f"Total: {ft:,.1f} FT"
+                        # Show actual roll count with average size
+                        if units > 0:
+                            avg_per_roll = ft / units
+                            display_value = f"{int(units)}"
+                            unit_text = f"Rolls"
+                            sub_label_text = f"Total: {ft:,.1f} FT (~{avg_per_roll:.0f} ft/roll)"
+                        else:
+                            display_value = "0"
+                            unit_text = "Rolls"
+                            sub_label_text = "No stock"
                     
                     elif cat_type == "Coils":
+                        # Show total footage and coil count
                         display_value = f"{ft:,.1f}"
                         unit_text = "FT"
-                        sub_label_text = f"{int(units)} Separate Coils"
+                        sub_label_text = f"{int(units)} Coil{'s' if units != 1 else ''} in stock"
                     
                     elif cat_type == "Fab Straps":
                         display_value = f"{int(ft)}"
                         unit_text = "Bundles"
-                        sub_label_text = "Standard Stock"
+                        sub_label_text = f"{int(units)} item{'s' if units != 1 else ''}"
 
                     elif cat_type == "Elbows":
                         display_value = f"{int(ft)}"
                         unit_text = "Pcs"
-                        sub_label_text = "Standard Stock"
+                        sub_label_text = f"{int(units)} item{'s' if units != 1 else ''}"
+                    
+                    elif cat_type == "Wire":
+                        display_value = f"{int(units)}"
+                        unit_text = "Rolls"
+                        sub_label_text = f"Total: {ft:,.1f} FT"
+                    
+                    elif cat_type == "Banding":
+                        display_value = f"{int(units)}"
+                        unit_text = "Rolls"
+                        sub_label_text = f"Total: {ft:,.1f} FT"
+                    
+                    elif cat_type == "Wing Seals":
+                        display_value = f"{int(ft)}"
+                        unit_text = "Pcs"
+                        sub_label_text = f"{int(units)} box{'es' if units != 1 else ''}"
+                    
+                    elif cat_type == "Mineral Wool":
+                        display_value = f"{int(ft)}"
+                        unit_text = "Sections"
+                        sub_label_text = f"{int(units)} item{'s' if units != 1 else ''}"
+                    
+                    elif cat_type == "Fiberglass Insulation":
+                        display_value = f"{int(units)}"
+                        unit_text = "Rolls/Batts"
+                        sub_label_text = f"Total: {ft:,.1f} sq ft"
+                    
+                    else:
+                        # Generic fallback
+                        display_value = f"{ft:,.1f}"
+                        unit_text = "Units"
+                        sub_label_text = f"{int(units)} item{'s' if units != 1 else ''}"
 
-                    # THRESHOLD / HEALTH LOGIC
+                    # --- THRESHOLD / HEALTH LOGIC ---
                     limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type in ["Fab Straps", "Elbows"] else 1000.0)
                     
                     if ft < limit:
@@ -1510,20 +1547,21 @@ with tab1:
                     else:
                         status_color, status_text = "#00C853", "✅ STOCK HEALTHY"
 
-                    # RENDER THE CARD
+                    # --- RENDER THE CARD ---
                     st.markdown(f"""
                     <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
                                 border-left: 12px solid {status_color}; margin-bottom: 15px; min-height: 180px;">
                         <p style="color: #666; font-size: 11px; margin: 0; font-weight: bold;">{cat_type.upper()}</p>
                         <h3 style="margin: 5px 0; font-size: 18px;">{mat}</h3>
                         <h1 style="margin: 10px 0; color: {status_color};">{display_value} <span style="font-size: 16px;">{unit_text}</span></h1>
+                        <p style="color: #666; font-size: 13px; margin: 5px 0;">{sub_label_text}</p>
                         <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
                             <span style="font-weight: bold; color: {status_color}; font-size: 12px;">{status_text}</span>
-                            <span style="color: #888; font-size: 11px;">{units} IDs</span>
+                            <span style="color: #888; font-size: 11px;">{units} ID{'s' if units != 1 else ''}</span>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-
+            
             # INDIVIDUAL ITEM TABLE
             with st.expander(f"🔍 View Individual Items ({len(display_df)} items)"):
                 # Show additional columns for Coils/Rolls
