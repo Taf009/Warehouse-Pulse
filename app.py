@@ -1947,6 +1947,196 @@ with tab2:
                 for msg in feedback:
                     if msg.startswith("✗"):
                         st.error(msg)
+# ══════════════════════════════════════════════════════════════════════════════
+    # PRODUCTION ORDER REVERSAL SECTION
+    # ══════════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h2 style="color: #dc2626; margin: 0;">🔄 Reverse Production Order</h2>
+            <p style="color: #64748b; margin-top: 8px;">Undo a production order and restore deducted footage</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    with st.expander("🔄 Reverse a Production Order", expanded=False):
+        st.warning("⚠️ **Use with caution!** This will restore footage to the source materials.")
+        
+        try:
+            # Fetch recent production orders from audit log
+            response = supabase.table("audit_log").select("*").ilike("Action", "%Production:%").order("Timestamp", desc=True).limit(50).execute()
+            
+            if not response.data:
+                st.info("📭 No recent production orders found")
+            else:
+                # Group by order number (extract from Details)
+                import re
+                from collections import defaultdict
+                
+                orders = defaultdict(list)
+                
+                for log in response.data:
+                    details = log.get('Details', '')
+                    # Extract order number from details like "Production: 10 pcs of #19 (52.50 ft used) for ClientName (Order: ORD-001)"
+                    order_match = re.search(r'\(Order:\s*([^)]+)\)', details)
+                    if order_match:
+                        order_num = order_match.group(1).strip()
+                        orders[order_num].append(log)
+                
+                if not orders:
+                    st.info("📭 No production orders with order numbers found")
+                else:
+                    # Create selection list
+                    order_options = []
+                    for order_num, logs in orders.items():
+                        # Get the most recent timestamp and client
+                        latest_log = max(logs, key=lambda x: x.get('Timestamp', ''))
+                        details = latest_log.get('Details', '')
+                        
+                        # Extract client name
+                        client_match = re.search(r'for\s+([^(]+)\s*\(Order:', details)
+                        client_name = client_match.group(1).strip() if client_match else "Unknown"
+                        
+                        timestamp = latest_log.get('Timestamp', '')[:16]
+                        
+                        order_options.append({
+                            'display': f"{order_num} - {client_name} ({timestamp})",
+                            'order_num': order_num,
+                            'logs': logs,
+                            'client': client_name,
+                            'timestamp': timestamp
+                        })
+                    
+                    # Sort by timestamp (newest first)
+                    order_options.sort(key=lambda x: x['timestamp'], reverse=True)
+                    
+                    selected_order = st.selectbox(
+                        "Select Production Order to Reverse",
+                        options=["-- Select an order --"] + [o['display'] for o in order_options],
+                        key="reverse_order_select"
+                    )
+                    
+                    if selected_order != "-- Select an order --":
+                        # Find the selected order
+                        selected = next((o for o in order_options if o['display'] == selected_order), None)
+                        
+                        if selected:
+                            st.markdown("---")
+                            st.markdown(f"### 📋 Order Details: {selected['order_num']}")
+                            st.write(f"**Client:** {selected['client']}")
+                            st.write(f"**Date:** {selected['timestamp']}")
+                            
+                            st.markdown("**Items to Restore:**")
+                            
+                            # Parse each log entry to get deduction details
+                            items_to_restore = []
+                            
+                            for log in selected['logs']:
+                                details = log.get('Details', '')
+                                item_id = log.get('Item_ID', '')
+                                
+                                # Parse details like "Production: 10 pcs of #19 (52.50 ft used) for ClientName (Order: ORD-001)"
+                                # Or "Updated Item COIL-001 to 2947.50 ft via Production: 10 pcs..."
+                                
+                                footage_match = re.search(r'(\d+\.?\d*)\s*ft\s*used', details)
+                                pieces_match = re.search(r'Production:\s*(\d+)\s*pcs\s*of\s*([^(]+)', details)
+                                
+                                if footage_match:
+                                    footage_used = float(footage_match.group(1))
+                                    pieces = int(pieces_match.group(1)) if pieces_match else 0
+                                    size = pieces_match.group(2).strip() if pieces_match else "Unknown"
+                                    
+                                    items_to_restore.append({
+                                        'item_id': item_id,
+                                        'footage_to_restore': footage_used,
+                                        'pieces': pieces,
+                                        'size': size,
+                                        'original_log': log
+                                    })
+                                    
+                                    st.write(f"• **{item_id}**: +{footage_used:.2f} ft ({pieces} pcs of {size})")
+                            
+                            if items_to_restore:
+                                total_to_restore = sum(item['footage_to_restore'] for item in items_to_restore)
+                                st.markdown(f"**Total Footage to Restore:** {total_to_restore:.2f} ft")
+                                
+                                st.markdown("---")
+                                
+                                # Reversal form
+                                reversal_reason = st.text_input(
+                                    "Reason for Reversal *",
+                                    placeholder="e.g. Wrong material used, customer cancelled, data entry error",
+                                    key="reversal_reason"
+                                )
+                                
+                                confirm_reversal = st.checkbox(
+                                    f"I confirm I want to reverse order {selected['order_num']} and restore {total_to_restore:.2f} ft",
+                                    key="confirm_reversal"
+                                )
+                                
+                                if st.button("🔄 Reverse This Order", type="primary", use_container_width=True):
+                                    if not reversal_reason.strip():
+                                        st.error("⚠️ Please provide a reason for the reversal")
+                                    elif not confirm_reversal:
+                                        st.error("⚠️ Please confirm the reversal")
+                                    else:
+                                        with st.spinner("Reversing production order..."):
+                                            try:
+                                                success_count = 0
+                                                
+                                                for item in items_to_restore:
+                                                    # Get current footage
+                                                    inv_response = supabase.table("inventory").select("Footage").eq("Item_ID", item['item_id']).execute()
+                                                    
+                                                    if inv_response.data:
+                                                        current_footage = float(inv_response.data[0]['Footage'])
+                                                        new_footage = current_footage + item['footage_to_restore']
+                                                        
+                                                        # Update inventory
+                                                        supabase.table("inventory").update({
+                                                            "Footage": new_footage
+                                                        }).eq("Item_ID", item['item_id']).execute()
+                                                        
+                                                        # Log the reversal
+                                                        log_entry = {
+                                                            "Item_ID": item['item_id'],
+                                                            "Action": "Production Reversal",
+                                                            "User": st.session_state.get('username', 'Admin'),
+                                                            "Timestamp": datetime.now().isoformat(),
+                                                            "Details": f"Reversed order {selected['order_num']}: Restored {item['footage_to_restore']:.2f} ft ({item['pieces']} pcs of {item['size']}). Reason: {reversal_reason}. Previous: {current_footage:.2f} ft → New: {new_footage:.2f} ft"
+                                                        }
+                                                        supabase.table("audit_log").insert(log_entry).execute()
+                                                        
+                                                        success_count += 1
+                                                    else:
+                                                        st.warning(f"⚠️ Item {item['item_id']} not found in inventory - skipped")
+                                                
+                                                # Log the overall reversal
+                                                summary_log = {
+                                                    "Item_ID": selected['order_num'],
+                                                    "Action": "Order Reversed",
+                                                    "User": st.session_state.get('username', 'Admin'),
+                                                    "Timestamp": datetime.now().isoformat(),
+                                                    "Details": f"Reversed production order {selected['order_num']} for {selected['client']}. Restored {total_to_restore:.2f} ft across {success_count} items. Reason: {reversal_reason}"
+                                                }
+                                                supabase.table("audit_log").insert(summary_log).execute()
+                                                
+                                                st.success(f"✅ Successfully reversed order {selected['order_num']}!")
+                                                st.success(f"📦 Restored {total_to_restore:.2f} ft to {success_count} item(s)")
+                                                st.balloons()
+                                                
+                                                # Clear cache and refresh
+                                                st.cache_data.clear()
+                                                st.session_state.force_refresh = True
+                                                time.sleep(1)
+                                                st.rerun()
+                                                
+                                            except Exception as e:
+                                                st.error(f"❌ Error reversing order: {e}")
+                            else:
+                                st.warning("⚠️ Could not parse deduction details from this order")
+        
+        except Exception as e:
+            st.error(f"Error loading production orders: {e}")
 
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
