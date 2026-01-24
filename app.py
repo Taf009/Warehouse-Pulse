@@ -1266,17 +1266,12 @@ def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
 # --- END OF PRE-TABS LAYOUT ---
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Admin Actions", "Insights", "Audit Trail"])
-
 with tab1:
     # Refresh controls
     col_refresh, col_auto = st.columns([1, 2])
     with col_refresh:
         if st.button("🔄 Refresh Dashboard", use_container_width=False):
             st.cache_data.clear()
-            if 'df' in st.session_state:
-                del st.session_state['df']
-            if 'df_audit' in st.session_state:
-                del st.session_state['df_audit']
             st.session_state.force_refresh = True
             st.toast("Dashboard refreshed from cloud!", icon="🛰️")
             st.rerun()
@@ -1288,6 +1283,7 @@ with tab1:
             st.rerun()
 
     st.caption(f"Data last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
     if not df.empty:
         # Available categories (sorted)
         available_categories = sorted(df['Category'].unique().tolist())
@@ -1317,7 +1313,7 @@ with tab1:
                 st.markdown(f"**🔍 {selected_view} Filters**")
                 
                 # Get unique values from the selected category
-                category_df = df[df['Category'] == selected_view]
+                category_df = df[df['Category'] == selected_view].copy()
                 
                 # Extract metal types from Material column
                 def extract_metal(material):
@@ -1386,6 +1382,34 @@ with tab1:
             
             # Apply sub-filters for Coils/Rolls
             if selected_view in ["Coils", "Rolls"]:
+                # Define extract functions again for this scope
+                def extract_metal(material):
+                    material_lower = str(material).lower()
+                    if 'stainless' in material_lower:
+                        return 'Stainless Steel'
+                    elif 'aluminum' in material_lower:
+                        return 'Aluminum'
+                    elif 'galvanized' in material_lower:
+                        return 'Galvanized'
+                    else:
+                        return 'Other'
+                
+                def extract_gauge(material):
+                    import re
+                    match = re.search(r'\.(\d{3})', str(material))
+                    if match:
+                        return f".{match.group(1)}"
+                    return 'Unknown'
+                
+                def extract_texture(material):
+                    material_lower = str(material).lower()
+                    if 'smooth' in material_lower:
+                        return 'Smooth'
+                    elif 'stucco' in material_lower:
+                        return 'Stucco'
+                    else:
+                        return 'Other'
+                
                 # Add extracted columns
                 display_df['Metal_Type'] = display_df['Material'].apply(extract_metal)
                 display_df['Gauge'] = display_df['Material'].apply(extract_gauge)
@@ -1420,12 +1444,15 @@ with tab1:
         if display_df.empty:
             st.warning("No items match the selected filters.")
         else:
-            # DATA AGGREGATION
+            # DATA AGGREGATION - Group by Material to show each specific type
             summary_df = display_df.groupby(['Material', 'Category']).agg({
                 'Footage': 'sum',
                 'Item_ID': 'count'
             }).reset_index()
             summary_df.columns = ['Material', 'Type', 'Total_Footage', 'Unit_Count']
+            
+            # Sort by footage descending so highest stock appears first
+            summary_df = summary_df.sort_values('Total_Footage', ascending=False)
 
             # TOP-LEVEL METRICS
             m1, m2, m3 = st.columns(3)
@@ -1463,14 +1490,32 @@ with tab1:
                 
                 st.divider()
 
-            # THE PULSE GRID
+            # THE PULSE GRID - Shows each material type separately
             cols = st.columns(2)
             for idx, row in summary_df.iterrows():
                 with cols[idx % 2]:
                     mat = row['Material']
                     ft = row['Total_Footage']
                     units = row['Unit_Count']
-                    cat_type = row['Type'] 
+                    cat_type = row['Type']
+                    
+                    # --- CREATE SHORT NAME FOR DISPLAY ---
+                    import re
+                    
+                    # Extract key info for short name
+                    gauge_match = re.search(r'\.(\d{3})', mat)
+                    gauge_str = f".{gauge_match.group(1)}" if gauge_match else ""
+                    
+                    mat_lower = mat.lower()
+                    texture_str = "Smooth" if "smooth" in mat_lower else ("Stucco" if "stucco" in mat_lower else "")
+                    metal_str = "Aluminum" if "aluminum" in mat_lower else ("Stainless Steel" if "stainless" in mat_lower else "")
+                    
+                    # Build short name (e.g., ".016 Smooth Aluminum")
+                    if gauge_str and texture_str and metal_str:
+                        short_name = f"{gauge_str} {texture_str} {metal_str}"
+                    else:
+                        # Use first 40 chars of material name if can't parse
+                        short_name = mat[:40] + ("..." if len(mat) > 40 else "")
                     
                     # --- SET DEFAULTS ---
                     display_value = f"{ft:,.1f}"
@@ -1483,7 +1528,7 @@ with tab1:
                         if units > 0:
                             avg_per_roll = ft / units
                             display_value = f"{int(units)}"
-                            unit_text = f"Rolls"
+                            unit_text = "Rolls"
                             sub_label_text = f"Total: {ft:,.1f} FT (~{avg_per_roll:.0f} ft/roll)"
                         else:
                             display_value = "0"
@@ -1541,18 +1586,19 @@ with tab1:
                     limit = LOW_STOCK_THRESHOLDS.get(mat, 10.0 if cat_type in ["Fab Straps", "Elbows"] else 1000.0)
                     
                     if ft < limit:
-                        status_color, status_text = "#FF4B4B", "🚨 REORDER REQUIRED"
+                        status_color, status_text = "#FF4B4B", "🚨 REORDER"
                     elif ft < (limit * 1.5):
-                        status_color, status_text = "#FFA500", "⚠️ MONITOR CLOSELY"
+                        status_color, status_text = "#FFA500", "⚠️ LOW"
                     else:
-                        status_color, status_text = "#00C853", "✅ STOCK HEALTHY"
+                        status_color, status_text = "#00C853", "✅ OK"
 
                     # --- RENDER THE CARD ---
                     st.markdown(f"""
                     <div style="background-color: #f9f9f9; padding: 20px; border-radius: 12px; 
-                                border-left: 12px solid {status_color}; margin-bottom: 15px; min-height: 180px;">
+                                border-left: 12px solid {status_color}; margin-bottom: 15px; min-height: 220px;">
                         <p style="color: #666; font-size: 11px; margin: 0; font-weight: bold;">{cat_type.upper()}</p>
-                        <h3 style="margin: 5px 0; font-size: 18px;">{mat}</h3>
+                        <h3 style="margin: 5px 0 0 0; font-size: 18px; color: #1e293b;">{short_name}</h3>
+                        <p style="color: #94a3b8; font-size: 10px; margin: 2px 0 10px 0; word-wrap: break-word;">{mat}</p>
                         <h1 style="margin: 10px 0; color: {status_color};">{display_value} <span style="font-size: 16px;">{unit_text}</span></h1>
                         <p style="color: #666; font-size: 13px; margin: 5px 0;">{sub_label_text}</p>
                         <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
@@ -1579,7 +1625,6 @@ with tab1:
                     )
     else:
         st.info("No data available. Add inventory in the Receive tab.")
-
 
 # ── TAB 2: Production Log ────────────────────────────────────────────────────────
 with tab2:
