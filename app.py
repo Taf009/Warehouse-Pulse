@@ -1265,7 +1265,7 @@ def send_receipt_email_sendgrid(admin_email, po_num, pdf_buffer, operator):
 
 # --- END OF PRE-TABS LAYOUT ---
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Admin Actions", "Insights", "Audit Trail"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Dashboard", "Production Log", "Stock Picking", "Manage", "Admin Actions", "Insights", "Audit Trail", "Reports"])
 with tab1:
     # Refresh controls
     col_refresh, col_auto = st.columns([1, 2])
@@ -4482,7 +4482,428 @@ with tab7:
                 use_container_width=True, 
                 hide_index=True
             )
+
+    with tab8:
+    st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h1 style="color: #0ea5e9; margin: 0;">📊 Inventory Reports</h1>
+            <p style="color: #64748b; margin-top: 8px;">Generate detailed inventory reports by category</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    if df is None or df.empty:
+        st.info("📦 No inventory data available. Add items first.")
+    else:
+        # Report Options
+        st.markdown("### 📋 Report Settings")
+        
+        col_cat, col_format = st.columns(2)
+        
+        with col_cat:
+            report_categories = ["All Categories"] + sorted(df['Category'].unique().tolist())
+            selected_report_cat = st.selectbox(
+                "Select Category",
+                report_categories,
+                key="report_category_select"
+            )
+        
+        with col_format:
+            report_format = st.radio(
+                "Report Format",
+                ["View on Screen", "Download PDF", "Download Excel"],
+                horizontal=True,
+                key="report_format"
+            )
+        
+        # Date for report
+        report_date = datetime.now().strftime('%B %d, %Y at %I:%M %p')
+        
+        st.markdown("---")
+        
+        # Generate Report Button
+        if st.button("📊 Generate Report", type="primary", use_container_width=True):
             
+            # Filter data
+            if selected_report_cat == "All Categories":
+                report_df = df.copy()
+            else:
+                report_df = df[df['Category'] == selected_report_cat].copy()
+            
+            if report_df.empty:
+                st.warning("No data found for selected category.")
+            else:
+                # ══════════════════════════════════════════════════════════════
+                # BUILD REPORT DATA
+                # ══════════════════════════════════════════════════════════════
+                
+                report_data = []
+                categories_to_process = report_df['Category'].unique().tolist()
+                
+                for category in categories_to_process:
+                    cat_df = report_df[report_df['Category'] == category]
+                    
+                    # Group by Material
+                    material_summary = cat_df.groupby('Material').agg({
+                        'Footage': ['sum', 'count', 'mean', 'min', 'max'],
+                        'Location': lambda x: ', '.join(sorted(x.unique())[:3]) + ('...' if len(x.unique()) > 3 else '')
+                    }).reset_index()
+                    
+                    material_summary.columns = ['Material', 'Total_Footage', 'Item_Count', 'Avg_Footage', 'Min_Footage', 'Max_Footage', 'Locations']
+                    
+                    for _, row in material_summary.iterrows():
+                        report_data.append({
+                            'Category': category,
+                            'Material': row['Material'],
+                            'Total_Footage': row['Total_Footage'],
+                            'Item_Count': row['Item_Count'],
+                            'Avg_Footage': row['Avg_Footage'],
+                            'Min_Footage': row['Min_Footage'],
+                            'Max_Footage': row['Max_Footage'],
+                            'Locations': row['Locations']
+                        })
+                
+                report_summary_df = pd.DataFrame(report_data)
+                
+                # ══════════════════════════════════════════════════════════════
+                # DISPLAY ON SCREEN
+                # ══════════════════════════════════════════════════════════════
+                
+                if report_format == "View on Screen":
+                    st.markdown(f"""
+                        <div style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); 
+                                    padding: 20px; border-radius: 12px; color: white; margin-bottom: 20px;">
+                            <h2 style="margin: 0;">📊 Inventory Report</h2>
+                            <p style="margin: 5px 0 0 0; opacity: 0.9;">
+                                Category: <strong>{selected_report_cat}</strong> | Generated: {report_date}
+                            </p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Overall Summary
+                    st.markdown("### 📈 Overall Summary")
+                    
+                    sum1, sum2, sum3, sum4 = st.columns(4)
+                    sum1.metric("Total Footage", f"{report_df['Footage'].sum():,.1f} ft")
+                    sum2.metric("Total Items", len(report_df))
+                    sum3.metric("Material Types", len(report_summary_df))
+                    sum4.metric("Locations", report_df['Location'].nunique())
+                    
+                    st.markdown("---")
+                    
+                    # Detailed breakdown by category
+                    for category in categories_to_process:
+                        cat_data = report_summary_df[report_summary_df['Category'] == category]
+                        cat_df_raw = report_df[report_df['Category'] == category]
+                        
+                        st.markdown(f"""
+                            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; 
+                                        border-left: 4px solid #0ea5e9; margin: 20px 0 10px 0;">
+                                <h3 style="margin: 0; color: #0ea5e9;">{category}</h3>
+                                <p style="margin: 5px 0 0 0; color: #64748b;">
+                                    {len(cat_df_raw)} items | {cat_df_raw['Footage'].sum():,.1f} ft total
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Material breakdown
+                        for _, mat_row in cat_data.iterrows():
+                            material = mat_row['Material']
+                            total_ft = mat_row['Total_Footage']
+                            count = int(mat_row['Item_Count'])
+                            avg_ft = mat_row['Avg_Footage']
+                            locations = mat_row['Locations']
+                            
+                            # Build description based on category
+                            if category == "Coils":
+                                desc = f"{count} Coil{'s' if count != 1 else ''} @ ~{avg_ft:,.0f} ft each"
+                            elif category == "Rolls":
+                                desc = f"{count} Roll{'s' if count != 1 else ''} @ ~{avg_ft:,.0f} ft each"
+                            elif category in ["Elbows", "Fab Straps", "Wing Seals"]:
+                                desc = f"{count} item{'s' if count != 1 else ''}"
+                            else:
+                                desc = f"{count} item{'s' if count != 1 else ''} @ ~{avg_ft:,.0f} units each"
+                            
+                            st.markdown(f"""
+                                <div style="background: white; padding: 15px; border-radius: 8px; 
+                                            margin: 8px 0; border: 1px solid #e2e8f0;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            <strong style="color: #1e293b; font-size: 15px;">{material}</strong><br>
+                                            <span style="color: #64748b; font-size: 13px;">{desc}</span><br>
+                                            <span style="color: #94a3b8; font-size: 11px;">📍 {locations}</span>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <span style="color: #0ea5e9; font-size: 24px; font-weight: bold;">{total_ft:,.1f}</span><br>
+                                            <span style="color: #64748b; font-size: 12px;">feet total</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Show individual items in expander
+                        with st.expander(f"📋 View all {category} items"):
+                            st.dataframe(
+                                cat_df_raw[['Item_ID', 'Material', 'Footage', 'Location']].sort_values(['Material', 'Item_ID']),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                
+                # ══════════════════════════════════════════════════════════════
+                # DOWNLOAD PDF
+                # ══════════════════════════════════════════════════════════════
+                
+                elif report_format == "Download PDF":
+                    with st.spinner("Generating PDF report..."):
+                        try:
+                            from reportlab.lib import colors
+                            from reportlab.lib.pagesizes import letter
+                            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+                            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                            from reportlab.lib.units import inch
+                            from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+                            from io import BytesIO
+                            
+                            buffer = BytesIO()
+                            doc = SimpleDocTemplate(buffer, pagesize=letter,
+                                                   rightMargin=0.5*inch, leftMargin=0.5*inch,
+                                                   topMargin=0.75*inch, bottomMargin=0.5*inch)
+                            
+                            elements = []
+                            styles = getSampleStyleSheet()
+                            
+                            # Custom styles
+                            title_style = ParagraphStyle(
+                                'CustomTitle',
+                                parent=styles['Heading1'],
+                                fontSize=24,
+                                textColor=colors.HexColor('#0ea5e9'),
+                                spaceAfter=12,
+                                alignment=TA_CENTER,
+                                fontName='Helvetica-Bold'
+                            )
+                            
+                            subtitle_style = ParagraphStyle(
+                                'CustomSubtitle',
+                                parent=styles['Normal'],
+                                fontSize=10,
+                                textColor=colors.HexColor('#64748b'),
+                                spaceAfter=20,
+                                alignment=TA_CENTER
+                            )
+                            
+                            heading_style = ParagraphStyle(
+                                'CustomHeading',
+                                parent=styles['Heading2'],
+                                fontSize=14,
+                                textColor=colors.HexColor('#0ea5e9'),
+                                spaceAfter=10,
+                                spaceBefore=15
+                            )
+                            
+                            # Title
+                            elements.append(Paragraph("📊 INVENTORY REPORT", title_style))
+                            elements.append(Paragraph(f"Category: {selected_report_cat} | Generated: {report_date}", subtitle_style))
+                            
+                            # Overall Summary Table
+                            summary_data = [
+                                ['Total Footage', 'Total Items', 'Material Types', 'Locations'],
+                                [f"{report_df['Footage'].sum():,.1f} ft", str(len(report_df)), str(len(report_summary_df)), str(report_df['Location'].nunique())]
+                            ]
+                            
+                            summary_table = Table(summary_data, colWidths=[1.8*inch]*4)
+                            summary_table.setStyle(TableStyle([
+                                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0ea5e9')),
+                                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+                                ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#f0f9ff')),
+                                ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                                ('PADDING', (0, 0), (-1, -1), 8),
+                            ]))
+                            elements.append(summary_table)
+                            elements.append(Spacer(1, 0.3*inch))
+                            
+                            # Detailed breakdown by category
+                            for category in categories_to_process:
+                                cat_data = report_summary_df[report_summary_df['Category'] == category]
+                                cat_df_raw = report_df[report_df['Category'] == category]
+                                
+                                elements.append(Paragraph(f"{category}", heading_style))
+                                elements.append(Paragraph(f"{len(cat_df_raw)} items | {cat_df_raw['Footage'].sum():,.1f} ft total", styles['Normal']))
+                                elements.append(Spacer(1, 0.1*inch))
+                                
+                                # Material table
+                                table_data = [['Material', 'Items', 'Total Footage', 'Avg/Item', 'Locations']]
+                                
+                                for _, mat_row in cat_data.iterrows():
+                                    table_data.append([
+                                        mat_row['Material'][:40] + ('...' if len(mat_row['Material']) > 40 else ''),
+                                        str(int(mat_row['Item_Count'])),
+                                        f"{mat_row['Total_Footage']:,.1f} ft",
+                                        f"{mat_row['Avg_Footage']:,.0f} ft",
+                                        mat_row['Locations'][:20] + ('...' if len(mat_row['Locations']) > 20 else '')
+                                    ])
+                                
+                                mat_table = Table(table_data, colWidths=[2.2*inch, 0.7*inch, 1.2*inch, 0.9*inch, 1.5*inch])
+                                mat_table.setStyle(TableStyle([
+                                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0ea5e9')),
+                                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                                    ('FONTSIZE', (0, 1), (-1, -1), 8),
+                                    ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                                    ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+                                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+                                    ('PADDING', (0, 0), (-1, -1), 6),
+                                ]))
+                                elements.append(mat_table)
+                                elements.append(Spacer(1, 0.2*inch))
+                            
+                            # Footer
+                            elements.append(Spacer(1, 0.3*inch))
+                            footer_style = ParagraphStyle(
+                                'Footer',
+                                parent=styles['Normal'],
+                                fontSize=8,
+                                textColor=colors.HexColor('#94a3b8'),
+                                alignment=TA_CENTER
+                            )
+                            elements.append(Paragraph(
+                                "This report was automatically generated by MJP Pulse Inventory System.",
+                                footer_style
+                            ))
+                            
+                            doc.build(elements)
+                            buffer.seek(0)
+                            
+                            # Download button
+                            file_name = f"Inventory_Report_{selected_report_cat.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                            
+                            st.download_button(
+                                label="📥 Download PDF Report",
+                                data=buffer.getvalue(),
+                                file_name=file_name,
+                                mime="application/pdf",
+                                type="primary",
+                                use_container_width=True
+                            )
+                            
+                            st.success("✅ PDF report generated successfully!")
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error generating PDF: {e}")
+                
+                # ══════════════════════════════════════════════════════════════
+                # DOWNLOAD EXCEL
+                # ══════════════════════════════════════════════════════════════
+                
+                elif report_format == "Download Excel":
+                    with st.spinner("Generating Excel report..."):
+                        try:
+                            from io import BytesIO
+                            
+                            buffer = BytesIO()
+                            
+                            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                                # Summary sheet
+                                summary_sheet_data = []
+                                summary_sheet_data.append({'Metric': 'Report Date', 'Value': report_date})
+                                summary_sheet_data.append({'Metric': 'Category', 'Value': selected_report_cat})
+                                summary_sheet_data.append({'Metric': 'Total Footage', 'Value': f"{report_df['Footage'].sum():,.1f} ft"})
+                                summary_sheet_data.append({'Metric': 'Total Items', 'Value': len(report_df)})
+                                summary_sheet_data.append({'Metric': 'Material Types', 'Value': len(report_summary_df)})
+                                summary_sheet_data.append({'Metric': 'Locations', 'Value': report_df['Location'].nunique()})
+                                
+                                pd.DataFrame(summary_sheet_data).to_excel(writer, sheet_name='Summary', index=False)
+                                
+                                # Material Summary sheet
+                                report_summary_df.to_excel(writer, sheet_name='Material Summary', index=False)
+                                
+                                # Detailed items sheet
+                                report_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location', 'Status']].to_excel(
+                                    writer, sheet_name='All Items', index=False
+                                )
+                                
+                                # Separate sheet for each category
+                                for category in categories_to_process:
+                                    cat_df_raw = report_df[report_df['Category'] == category]
+                                    sheet_name = category[:30]  # Excel sheet names max 31 chars
+                                    cat_df_raw[['Item_ID', 'Material', 'Footage', 'Location']].to_excel(
+                                        writer, sheet_name=sheet_name, index=False
+                                    )
+                            
+                            buffer.seek(0)
+                            
+                            file_name = f"Inventory_Report_{selected_report_cat.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                            
+                            st.download_button(
+                                label="📥 Download Excel Report",
+                                data=buffer.getvalue(),
+                                file_name=file_name,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                type="primary",
+                                use_container_width=True
+                            )
+                            
+                            st.success("✅ Excel report generated successfully!")
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error generating Excel: {e}")
+        
+        st.markdown("---")
+        
+        # ══════════════════════════════════════════════════════════════════════
+        # QUICK CATEGORY REPORTS
+        # ══════════════════════════════════════════════════════════════════════
+        
+        st.markdown("### 🚀 Quick Reports")
+        st.caption("Click to view instant summaries")
+        
+        # Get categories that have data
+        categories_with_data = df['Category'].unique().tolist()
+        
+        # Create columns for quick report buttons
+        num_cols = min(4, len(categories_with_data))
+        if num_cols > 0:
+            cols = st.columns(num_cols)
+            
+            for idx, category in enumerate(categories_with_data[:8]):  # Max 8 categories
+                with cols[idx % num_cols]:
+                    cat_df = df[df['Category'] == category]
+                    total_ft = cat_df['Footage'].sum()
+                    item_count = len(cat_df)
+                    
+                    # Category icon
+                    cat_icons = {
+                        "Coils": "🔄", "Rolls": "📜", "Elbows": "↩️",
+                        "Fab Straps": "🔗", "Mineral Wool": "🧶",
+                        "Fiberglass Insulation": "🏠", "Wing Seals": "🔒",
+                        "Wire": "➰", "Banding": "📏"
+                    }
+                    icon = cat_icons.get(category, "📦")
+                    
+                    with st.expander(f"{icon} {category}"):
+                        st.metric("Total Footage", f"{total_ft:,.1f} ft")
+                        st.metric("Items", item_count)
+                        
+                        # Quick material breakdown
+                        mat_summary = cat_df.groupby('Material').agg({
+                            'Footage': 'sum',
+                            'Item_ID': 'count'
+                        }).reset_index()
+                        mat_summary.columns = ['Material', 'Footage', 'Count']
+                        mat_summary = mat_summary.sort_values('Footage', ascending=False)
+                        
+                        st.markdown("**Top Materials:**")
+                        for _, row in mat_summary.head(5).iterrows():
+                            if category in ["Coils", "Rolls"]:
+                                st.write(f"• {row['Material'][:30]}...")
+                                st.write(f"  {row['Footage']:,.1f} ft ({int(row['Count'])} items)")
+                            else:
+                                st.write(f"• {row['Material'][:30]}: {int(row['Footage'])} pcs")
     except Exception as e:
         st.error(f"Audit Log Display Error: {e}")
         st.error(f"Audit Log Display Error: {e}")
