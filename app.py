@@ -4483,7 +4483,10 @@ with tab7:
                 hide_index=True
             )
 
-    with tab8:
+    except Exception as e:
+        st.error(f"Audit Log Display Error: {e}")
+
+with tab8:
     st.markdown("""
         <div style="text-align: center; padding: 20px 0;">
             <h1 style="color: #0ea5e9; margin: 0;">📊 Inventory Reports</h1>
@@ -4701,7 +4704,7 @@ with tab7:
                             )
                             
                             # Title
-                            elements.append(Paragraph("📊 INVENTORY REPORT", title_style))
+                            elements.append(Paragraph("INVENTORY REPORT", title_style))
                             elements.append(Paragraph(f"Category: {selected_report_cat} | Generated: {report_date}", subtitle_style))
                             
                             # Overall Summary Table
@@ -4904,6 +4907,3 @@ with tab7:
                                 st.write(f"  {row['Footage']:,.1f} ft ({int(row['Count'])} items)")
                             else:
                                 st.write(f"• {row['Material'][:30]}: {int(row['Footage'])} pcs")
-    except Exception as e:
-        st.error(f"Audit Log Display Error: {e}")
-        st.error(f"Audit Log Display Error: {e}")
