@@ -3542,60 +3542,251 @@ with tab5:
                         item_category = item_data.get('Category', 'Other')
                         current_footage = float(item_data['Footage'])
                         
-                        with st.form("edit_footage_form", clear_on_submit=True):
+                        # Different UI based on category
+                        if item_category == "Rolls":
+                            st.info("🗞️ **Roll Inventory** - Edit footage per roll and/or manage roll count")
                             
-                            # Different UI based on category
-                            if item_category == "Rolls":
-                                st.info("🗞️ **Roll Inventory** - Edit footage per roll and/or number of rolls")
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    # For rolls, allow editing the footage (length per roll)
+                            # Get all rolls of same material
+                            same_material_rolls = df[(df['Material'] == item_data['Material']) & (df['Category'] == 'Rolls')]
+                            current_roll_count = len(same_material_rolls)
+                            
+                            st.markdown(f"**Current Inventory:** {current_roll_count} roll(s) of this material")
+                            
+                            # Show all rolls of this material
+                            with st.expander(f"📋 View all {current_roll_count} roll(s) of {item_data['Material'][:40]}..."):
+                                st.dataframe(
+                                    same_material_rolls[['Item_ID', 'Footage', 'Location']].sort_values('Item_ID'),
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
+                            
+                            st.markdown("---")
+                            
+                            # Tab for different roll operations
+                            roll_op1, roll_op2, roll_op3 = st.tabs(["✏️ Edit This Roll", "➕ Add Rolls", "➖ Remove Rolls"])
+                            
+                            # ── Edit single roll footage ──
+                            with roll_op1:
+                                with st.form("edit_single_roll_form", clear_on_submit=True):
+                                    st.markdown(f"**Editing:** {selected_item}")
+                                    
                                     new_footage = st.number_input(
-                                        "Footage (per roll)",
+                                        "Footage for this roll",
                                         min_value=0.0,
                                         value=current_footage,
                                         step=10.0,
-                                        key="new_footage_input",
+                                        key="edit_roll_footage",
                                         help="The length of this roll in feet"
                                     )
+                                    
+                                    footage_diff = new_footage - current_footage
+                                    if footage_diff > 0:
+                                        st.success(f"📈 Adding {footage_diff:.1f} ft to this roll")
+                                    elif footage_diff < 0:
+                                        st.warning(f"📉 Removing {abs(footage_diff):.1f} ft from this roll")
+                                    
+                                    edit_roll_reason = st.text_input(
+                                        "Reason for change *",
+                                        placeholder="e.g. Physical measurement, partial use",
+                                        key="edit_roll_reason"
+                                    )
+                                    
+                                    submit_edit_roll = st.form_submit_button("💾 Update This Roll", type="primary", use_container_width=True)
                                 
-                                with col2:
-                                    # Show current count of this material
-                                    same_material_count = len(df[df['Material'] == item_data['Material']])
-                                    st.metric("Rolls of this material", same_material_count)
-                                
-                                # Option to add more rolls of same type
-                                st.markdown("---")
-                                st.markdown("**➕ Add More Rolls of Same Type**")
-                                
-                                add_rolls = st.number_input(
-                                    "Number of additional rolls to add",
-                                    min_value=0,
-                                    value=0,
-                                    step=1,
-                                    key="add_rolls_count",
-                                    help="Add more rolls with the same material and footage"
-                                )
-                                
-                                if add_rolls > 0:
-                                    new_roll_footage = st.number_input(
-                                        "Footage for new rolls",
+                                if submit_edit_roll:
+                                    if not edit_roll_reason.strip():
+                                        st.error("⚠️ Please provide a reason")
+                                    elif new_footage == current_footage:
+                                        st.info("No changes made")
+                                    else:
+                                        try:
+                                            supabase.table("inventory").update({
+                                                "Footage": new_footage
+                                            }).eq("Item_ID", selected_item).execute()
+                                            
+                                            log_entry = {
+                                                "Item_ID": selected_item,
+                                                "Action": "Admin Edit - Roll Footage",
+                                                "User": st.session_state.get('username', 'Admin'),
+                                                "Timestamp": datetime.now().isoformat(),
+                                                "Details": f"Changed footage from {current_footage:.1f} to {new_footage:.1f} ft. Reason: {edit_roll_reason}"
+                                            }
+                                            supabase.table("audit_log").insert(log_entry).execute()
+                                            
+                                            st.success(f"✅ Updated {selected_item}: {current_footage:.1f} → {new_footage:.1f} ft")
+                                            st.cache_data.clear()
+                                            st.session_state.force_refresh = True
+                                            time.sleep(1)
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"❌ Failed: {e}")
+                            
+                            # ── Add more rolls ──
+                            with roll_op2:
+                                with st.form("add_rolls_form", clear_on_submit=True):
+                                    st.markdown("**Add more rolls of the same material**")
+                                    
+                                    add_roll_count = st.number_input(
+                                        "Number of rolls to add",
+                                        min_value=1,
+                                        value=1,
+                                        step=1,
+                                        key="add_roll_count"
+                                    )
+                                    
+                                    add_roll_footage = st.number_input(
+                                        "Footage per roll",
                                         min_value=0.1,
                                         value=current_footage,
                                         step=10.0,
-                                        key="new_rolls_footage"
+                                        key="add_roll_footage"
                                     )
-                                    new_roll_location = st.text_input(
-                                        "Location for new rolls",
+                                    
+                                    add_roll_location = st.text_input(
+                                        "Location",
                                         value=item_data.get('Location', ''),
-                                        key="new_rolls_location"
+                                        key="add_roll_location"
                                     )
-                            
-                            elif item_category == "Coils":
-                                st.info("🔄 **Coil Inventory** - Edit footage for this coil")
+                                    
+                                    st.info(f"📦 Will add {add_roll_count} roll(s) × {add_roll_footage} ft = {add_roll_count * add_roll_footage:,.1f} ft total")
+                                    
+                                    add_roll_reason = st.text_input(
+                                        "Reason *",
+                                        placeholder="e.g. New shipment received, inventory correction",
+                                        key="add_roll_reason"
+                                    )
+                                    
+                                    submit_add_rolls = st.form_submit_button("➕ Add Rolls", type="primary", use_container_width=True)
                                 
+                                if submit_add_rolls:
+                                    if not add_roll_reason.strip():
+                                        st.error("⚠️ Please provide a reason")
+                                    else:
+                                        try:
+                                            # Generate new IDs
+                                            base_id = selected_item.rsplit('-', 1)[0] if '-' in selected_item else selected_item
+                                            
+                                            # Find highest existing number
+                                            existing_ids = df[df['Item_ID'].str.startswith(base_id)]['Item_ID'].tolist()
+                                            max_num = 0
+                                            for eid in existing_ids:
+                                                try:
+                                                    num = int(eid.split('-')[-1])
+                                                    max_num = max(max_num, num)
+                                                except:
+                                                    pass
+                                            
+                                            new_rolls_data = []
+                                            new_ids = []
+                                            for i in range(add_roll_count):
+                                                new_id = f"{base_id}-{str(max_num + i + 1).zfill(2)}"
+                                                new_ids.append(new_id)
+                                                new_rolls_data.append({
+                                                    "Item_ID": new_id,
+                                                    "Material": item_data['Material'],
+                                                    "Footage": add_roll_footage,
+                                                    "Location": add_roll_location,
+                                                    "Status": "Active",
+                                                    "Category": "Rolls",
+                                                    "Purchase_Order_Num": item_data.get('Purchase_Order_Num', '')
+                                                })
+                                            
+                                            supabase.table("inventory").insert(new_rolls_data).execute()
+                                            
+                                            log_entry = {
+                                                "Item_ID": base_id,
+                                                "Action": "Admin - Added Rolls",
+                                                "User": st.session_state.get('username', 'Admin'),
+                                                "Timestamp": datetime.now().isoformat(),
+                                                "Details": f"Added {add_roll_count} roll(s) of {item_data['Material'][:30]}... at {add_roll_footage} ft each. IDs: {', '.join(new_ids[:3])}{'...' if len(new_ids) > 3 else ''}. Reason: {add_roll_reason}"
+                                            }
+                                            supabase.table("audit_log").insert(log_entry).execute()
+                                            
+                                            st.success(f"✅ Added {add_roll_count} roll(s)")
+                                            st.cache_data.clear()
+                                            st.session_state.force_refresh = True
+                                            time.sleep(1)
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"❌ Failed: {e}")
+                            
+                            # ── Remove rolls ──
+                            with roll_op3:
+                                st.markdown("**Remove rolls of this material**")
+                                st.warning("⚠️ This will permanently delete selected rolls from inventory")
+                                
+                                # Let user select which rolls to remove
+                                roll_options = same_material_rolls['Item_ID'].tolist()
+                                
+                                rolls_to_remove = st.multiselect(
+                                    "Select roll(s) to remove",
+                                    options=roll_options,
+                                    key="rolls_to_remove",
+                                    help="Select one or more rolls to delete"
+                                )
+                                
+                                if rolls_to_remove:
+                                    # Show what will be removed
+                                    remove_df = same_material_rolls[same_material_rolls['Item_ID'].isin(rolls_to_remove)]
+                                    total_footage_removing = remove_df['Footage'].sum()
+                                    
+                                    st.markdown(f"**Removing {len(rolls_to_remove)} roll(s):**")
+                                    st.dataframe(
+                                        remove_df[['Item_ID', 'Footage', 'Location']],
+                                        use_container_width=True,
+                                        hide_index=True
+                                    )
+                                    st.error(f"🗑️ Total footage to remove: {total_footage_removing:,.1f} ft")
+                                    
+                                    with st.form("remove_rolls_form"):
+                                        remove_reason = st.text_input(
+                                            "Reason for removal *",
+                                            placeholder="e.g. Damaged, sold externally, inventory correction",
+                                            key="remove_rolls_reason"
+                                        )
+                                        
+                                        confirm_remove = st.checkbox(
+                                            f"I confirm I want to permanently delete {len(rolls_to_remove)} roll(s)",
+                                            key="confirm_remove_rolls"
+                                        )
+                                        
+                                        submit_remove_rolls = st.form_submit_button("🗑️ Remove Selected Rolls", type="primary", use_container_width=True)
+                                    
+                                    if submit_remove_rolls:
+                                        if not remove_reason.strip():
+                                            st.error("⚠️ Please provide a reason")
+                                        elif not confirm_remove:
+                                            st.error("⚠️ Please confirm the removal")
+                                        else:
+                                            try:
+                                                # Log before deleting
+                                                log_entry = {
+                                                    "Item_ID": item_data['Material'][:30],
+                                                    "Action": "Admin - Removed Rolls",
+                                                    "User": st.session_state.get('username', 'Admin'),
+                                                    "Timestamp": datetime.now().isoformat(),
+                                                    "Details": f"Removed {len(rolls_to_remove)} roll(s): {', '.join(rolls_to_remove[:5])}{'...' if len(rolls_to_remove) > 5 else ''} ({total_footage_removing:,.1f} ft total). Reason: {remove_reason}"
+                                                }
+                                                supabase.table("audit_log").insert(log_entry).execute()
+                                                
+                                                # Delete the rolls
+                                                for roll_id in rolls_to_remove:
+                                                    supabase.table("inventory").delete().eq("Item_ID", roll_id).execute()
+                                                
+                                                st.success(f"✅ Removed {len(rolls_to_remove)} roll(s)")
+                                                st.cache_data.clear()
+                                                st.session_state.force_refresh = True
+                                                time.sleep(1)
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"❌ Failed: {e}")
+                                else:
+                                    st.info("👆 Select rolls above to remove them")
+                        
+                        elif item_category == "Coils":
+                            st.info("🔄 **Coil Inventory** - Edit footage for this coil")
+                            
+                            with st.form("edit_coil_form", clear_on_submit=True):
                                 col1, col2 = st.columns(2)
                                 
                                 with col1:
@@ -3617,26 +3808,59 @@ with tab5:
                                     else:
                                         st.info("No change")
                                 
-                                add_rolls = 0  # Not applicable for coils
-                            
-                            elif item_category in ["Elbows", "Fab Straps", "Wing Seals"]:
-                                st.info(f"📦 **{item_category}** - Edit piece count")
+                                footage_reason = st.text_input(
+                                    "Reason for Change *",
+                                    placeholder="e.g. Physical count adjustment, damaged material",
+                                    key="footage_reason"
+                                )
                                 
+                                submit_footage = st.form_submit_button("💾 Update Footage", type="primary", use_container_width=True)
+                            
+                            if submit_footage:
+                                if not footage_reason.strip():
+                                    st.error("⚠️ Please provide a reason for the change.")
+                                else:
+                                    try:
+                                        supabase.table("inventory").update({
+                                            "Footage": new_footage
+                                        }).eq("Item_ID", selected_item).execute()
+                                        
+                                        log_entry = {
+                                            "Item_ID": selected_item,
+                                            "Action": "Admin Edit - Footage",
+                                            "User": st.session_state.get('username', 'Admin'),
+                                            "Timestamp": datetime.now().isoformat(),
+                                            "Details": f"Changed footage from {current_footage:.1f} to {new_footage:.1f} ft. Reason: {footage_reason}"
+                                        }
+                                        supabase.table("audit_log").insert(log_entry).execute()
+                                        
+                                        st.success(f"✅ Footage updated: {current_footage:.1f} → {new_footage:.1f} ft")
+                                        st.cache_data.clear()
+                                        st.session_state.force_refresh = True
+                                        time.sleep(1)
+                                        st.rerun()
+                                        
+                                    except Exception as e:
+                                        st.error(f"❌ Failed to update: {e}")
+                        
+                        elif item_category in ["Elbows", "Fab Straps", "Wing Seals"]:
+                            st.info(f"📦 **{item_category}** - Edit piece count")
+                            
+                            with st.form("edit_pieces_form", clear_on_submit=True):
                                 col1, col2 = st.columns(2)
                                 
                                 with col1:
-                                    new_footage = st.number_input(
+                                    new_qty = st.number_input(
                                         "Quantity (pieces)",
                                         min_value=0,
                                         value=int(current_footage),
                                         step=1,
-                                        key="new_footage_input",
+                                        key="new_qty_input",
                                         help=f"Number of {item_category.lower()} in stock"
                                     )
-                                    new_footage = float(new_footage)  # Convert back to float for storage
                                 
                                 with col2:
-                                    qty_diff = int(new_footage) - int(current_footage)
+                                    qty_diff = new_qty - int(current_footage)
                                     if qty_diff > 0:
                                         st.success(f"📈 Adding {qty_diff} pcs")
                                     elif qty_diff < 0:
@@ -3644,78 +3868,59 @@ with tab5:
                                     else:
                                         st.info("No change")
                                 
-                                add_rolls = 0
-                            
-                            elif item_category in ["Wire", "Banding"]:
-                                st.info(f"➰ **{item_category}** - Edit footage")
+                                qty_reason = st.text_input(
+                                    "Reason for Change *",
+                                    placeholder="e.g. Physical count, used in production",
+                                    key="qty_reason"
+                                )
                                 
+                                submit_qty = st.form_submit_button("💾 Update Quantity", type="primary", use_container_width=True)
+                            
+                            if submit_qty:
+                                if not qty_reason.strip():
+                                    st.error("⚠️ Please provide a reason for the change.")
+                                else:
+                                    try:
+                                        supabase.table("inventory").update({
+                                            "Footage": float(new_qty)
+                                        }).eq("Item_ID", selected_item).execute()
+                                        
+                                        log_entry = {
+                                            "Item_ID": selected_item,
+                                            "Action": "Admin Edit - Quantity",
+                                            "User": st.session_state.get('username', 'Admin'),
+                                            "Timestamp": datetime.now().isoformat(),
+                                            "Details": f"Changed quantity from {int(current_footage)} to {new_qty} pcs. Reason: {qty_reason}"
+                                        }
+                                        supabase.table("audit_log").insert(log_entry).execute()
+                                        
+                                        st.success(f"✅ Quantity updated: {int(current_footage)} → {new_qty} pcs")
+                                        st.cache_data.clear()
+                                        st.session_state.force_refresh = True
+                                        time.sleep(1)
+                                        st.rerun()
+                                        
+                                    except Exception as e:
+                                        st.error(f"❌ Failed to update: {e}")
+                        
+                        else:
+                            # Generic fallback for other categories
+                            st.info(f"📦 **{item_category}** - Edit quantity/footage")
+                            
+                            with st.form("edit_generic_form", clear_on_submit=True):
                                 col1, col2 = st.columns(2)
                                 
                                 with col1:
-                                    new_footage = st.number_input(
-                                        "Footage",
-                                        min_value=0.0,
-                                        value=current_footage,
-                                        step=10.0,
-                                        key="new_footage_input",
-                                        help=f"Total footage of {item_category.lower()}"
-                                    )
-                                
-                                with col2:
-                                    footage_diff = new_footage - current_footage
-                                    if footage_diff > 0:
-                                        st.success(f"📈 Adding {footage_diff:.1f} ft")
-                                    elif footage_diff < 0:
-                                        st.warning(f"📉 Removing {abs(footage_diff):.1f} ft")
-                                    else:
-                                        st.info("No change")
-                                
-                                add_rolls = 0
-                            
-                            elif item_category in ["Mineral Wool", "Fiberglass Insulation"]:
-                                st.info(f"🧶 **{item_category}** - Edit quantity")
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    new_footage = st.number_input(
-                                        "Quantity (sections/pieces)",
-                                        min_value=0,
-                                        value=int(current_footage),
-                                        step=1,
-                                        key="new_footage_input",
-                                        help=f"Number of {item_category.lower()} sections"
-                                    )
-                                    new_footage = float(new_footage)
-                                
-                                with col2:
-                                    qty_diff = int(new_footage) - int(current_footage)
-                                    if qty_diff > 0:
-                                        st.success(f"📈 Adding {qty_diff}")
-                                    elif qty_diff < 0:
-                                        st.warning(f"📉 Removing {abs(qty_diff)}")
-                                    else:
-                                        st.info("No change")
-                                
-                                add_rolls = 0
-                            
-                            else:
-                                # Generic fallback
-                                st.info(f"📦 **{item_category}** - Edit quantity")
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    new_footage = st.number_input(
+                                    new_value = st.number_input(
                                         "Quantity/Footage",
                                         min_value=0.0,
                                         value=current_footage,
                                         step=1.0,
-                                        key="new_footage_input"
+                                        key="new_value_input"
                                     )
                                 
                                 with col2:
-                                    diff = new_footage - current_footage
+                                    diff = new_value - current_footage
                                     if diff > 0:
                                         st.success(f"📈 Adding {diff:.1f}")
                                     elif diff < 0:
@@ -3723,101 +3928,41 @@ with tab5:
                                     else:
                                         st.info("No change")
                                 
-                                add_rolls = 0
+                                generic_reason = st.text_input(
+                                    "Reason for Change *",
+                                    placeholder="e.g. Inventory adjustment",
+                                    key="generic_reason"
+                                )
+                                
+                                submit_generic = st.form_submit_button("💾 Update", type="primary", use_container_width=True)
                             
-                            st.markdown("---")
-                            
-                            footage_reason = st.text_input(
-                                "Reason for Change *",
-                                placeholder="e.g. Physical count adjustment, damaged material, inventory correction",
-                                key="footage_reason"
-                            )
-                            
-                            submit_footage = st.form_submit_button("💾 Update Inventory", type="primary", use_container_width=True)
-                        
-                        if submit_footage:
-                            if not footage_reason.strip():
-                                st.error("⚠️ Please provide a reason for the change.")
-                            else:
-                                try:
-                                    changes_made = []
-                                    
-                                    # Update the main item's footage if changed
-                                    if new_footage != current_footage:
+                            if submit_generic:
+                                if not generic_reason.strip():
+                                    st.error("⚠️ Please provide a reason for the change.")
+                                else:
+                                    try:
                                         supabase.table("inventory").update({
-                                            "Footage": new_footage
+                                            "Footage": new_value
                                         }).eq("Item_ID", selected_item).execute()
-                                        
-                                        # Log the change
-                                        if item_category in ["Elbows", "Fab Straps", "Wing Seals", "Mineral Wool", "Fiberglass Insulation"]:
-                                            change_desc = f"Changed quantity from {int(current_footage)} to {int(new_footage)} pcs"
-                                        else:
-                                            change_desc = f"Changed footage from {current_footage:.1f} to {new_footage:.1f} ft"
                                         
                                         log_entry = {
                                             "Item_ID": selected_item,
-                                            "Action": "Admin Edit - Quantity/Footage",
+                                            "Action": "Admin Edit - Quantity",
                                             "User": st.session_state.get('username', 'Admin'),
                                             "Timestamp": datetime.now().isoformat(),
-                                            "Details": f"{change_desc}. Reason: {footage_reason}"
+                                            "Details": f"Changed from {current_footage:.1f} to {new_value:.1f}. Reason: {generic_reason}"
                                         }
                                         supabase.table("audit_log").insert(log_entry).execute()
-                                        changes_made.append(change_desc)
-                                    
-                                    # Add new rolls if requested (for Rolls category)
-                                    if item_category == "Rolls" and add_rolls > 0:
-                                        # Generate new IDs for additional rolls
-                                        base_id = selected_item.rsplit('-', 1)[0] if '-' in selected_item else selected_item
                                         
-                                        # Find highest existing number
-                                        existing_ids = df[df['Item_ID'].str.startswith(base_id)]['Item_ID'].tolist()
-                                        max_num = 0
-                                        for eid in existing_ids:
-                                            try:
-                                                num = int(eid.split('-')[-1])
-                                                max_num = max(max_num, num)
-                                            except:
-                                                pass
-                                        
-                                        new_rolls_data = []
-                                        for i in range(add_rolls):
-                                            new_id = f"{base_id}-{str(max_num + i + 1).zfill(2)}"
-                                            new_rolls_data.append({
-                                                "Item_ID": new_id,
-                                                "Material": item_data['Material'],
-                                                "Footage": new_roll_footage,
-                                                "Location": new_roll_location,
-                                                "Status": "Active",
-                                                "Category": "Rolls",
-                                                "Purchase_Order_Num": item_data.get('Purchase_Order_Num', '')
-                                            })
-                                        
-                                        if new_rolls_data:
-                                            supabase.table("inventory").insert(new_rolls_data).execute()
-                                            
-                                            # Log the addition
-                                            log_entry = {
-                                                "Item_ID": selected_item,
-                                                "Action": "Admin - Added Rolls",
-                                                "User": st.session_state.get('username', 'Admin'),
-                                                "Timestamp": datetime.now().isoformat(),
-                                                "Details": f"Added {add_rolls} new roll(s) of {item_data['Material']} at {new_roll_footage} ft each. Reason: {footage_reason}"
-                                            }
-                                            supabase.table("audit_log").insert(log_entry).execute()
-                                            changes_made.append(f"Added {add_rolls} new roll(s)")
-                                    
-                                    if changes_made:
-                                        st.success(f"✅ Updated: {', '.join(changes_made)}")
+                                        st.success(f"✅ Updated: {current_footage:.1f} → {new_value:.1f}")
                                         st.cache_data.clear()
                                         st.session_state.force_refresh = True
                                         time.sleep(1)
                                         st.rerun()
-                                    else:
-                                        st.info("No changes were made.")
-                                    
-                                except Exception as e:
-                                    st.error(f"❌ Failed to update: {e}")
-                                    
+                                        
+                                    except Exception as e:
+                                        st.error(f"❌ Failed to update: {e}")
+                                        
                     # ── Edit Location Tab ───────────────────────────────────────────
                     with edit_tab3:
                         st.markdown("#### 📍 Move Item to New Location")
