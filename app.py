@@ -2232,8 +2232,23 @@ with tab3:
         pick_df = df.copy()
         if 'Category' in pick_df.columns and not pick_df.empty:
             pick_df['Category'] = pick_df['Category'].apply(normalize_pick_category)
+        
+        # Add Roll Type for RPR detection
+        def get_roll_type(row):
+            if row.get('Category') != 'Rolls':
+                return None
+            if 'RPR' in str(row.get('Item_ID', '')).upper() or 'RPR' in str(row.get('Material', '')).upper():
+                return 'RPR'
+            return 'Regular'
+        
+        pick_df['Roll_Type'] = pick_df.apply(get_roll_type, axis=1)
 
-        category_options = ["Fab Straps", "Rolls", "Elbows", "Mineral Wool", "Coils"]
+        category_options = ["Coils", "Rolls", "Fab Straps", "Elbows", "Mineral Wool"]
+        
+        # Filter to only show categories that exist in inventory
+        available_categories = [cat for cat in category_options if cat in pick_df['Category'].unique()]
+        if not available_categories:
+            available_categories = category_options  # Fallback
         
         # ── Initialize Session State for Cart ───────────────────────────────────────
         if 'pick_cart' not in st.session_state:
@@ -2260,7 +2275,8 @@ with tab3:
             customer = st.text_input(
                 "Customer / Job Name",
                 placeholder="e.g. John Doe / Site A",
-                key="pick_customer_persist"
+                key="pick_customer_persist",
+                label_visibility="collapsed"
             )
             
             st.markdown("</div>", unsafe_allow_html=True)
@@ -2275,122 +2291,434 @@ with tab3:
             sales_order = st.text_input(
                 "Sales Order Number",
                 placeholder="e.g. SO-2026-0456",
-                key="pick_sales_order_persist"
+                key="pick_sales_order_persist",
+                label_visibility="collapsed"
             )
             
             st.markdown("</div>", unsafe_allow_html=True)
         
         st.divider()
 
-        # ── Add Items to Cart Form ──────────────────────────────────────────────────
+        # ── Add Items to Cart ───────────────────────────────────────────────────────
         st.markdown("#### ➕ Add Items to Order")
         
-        # Category selection OUTSIDE form so it can update dynamically
+        # Category selection
         pick_cat = st.selectbox(
-            "Category",
-            category_options,
+            "📦 Category",
+            available_categories,
             key="pick_cat_add"
         )
         
+        # Filter by category
         filtered_df = pick_df[pick_df['Category'] == pick_cat].copy() if not pick_df.empty else pd.DataFrame()
+        filtered_df = filtered_df[filtered_df['Footage'] > 0]  # Only show items with stock
         
-        with st.form("add_to_cart_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if filtered_df.empty:
-                    st.warning(f"⚠️ No items in stock for {pick_cat}")
-                    selected_mat = None
-                else:
-                    mat_options = sorted(filtered_df['Material'].unique())
-                    selected_mat = st.selectbox("Size / Material", mat_options, key="mat_add")
-            
-            with col2:
-                if selected_mat:
-                    if pick_cat in ["Rolls", "Coils"]:
-                        specific_ids = filtered_df[filtered_df['Material'] == selected_mat]['Item_ID'].tolist()
-                        pick_id = st.selectbox("Select Serial #", specific_ids or ["No items available"], key="id_add")
-                        pick_qty = 1
-                    else:
-                        pick_id = "BULK"
-                        pick_qty = st.number_input("Quantity", min_value=1, step=1, key="qty_add")
-                else:
-                    pick_id = None
-                    pick_qty = 0
-
-            add_to_cart = st.form_submit_button("🛒 Add to Cart", use_container_width=True)
-
-        # ── Process Add to Cart ─────────────────────────────────────────────────────
-        if add_to_cart and selected_mat:
-            # Check current stock
-            if pick_cat in ["Rolls", "Coils"]:
-                available = pick_id in filtered_df['Item_ID'].values
-                if available:
-                    st.session_state.pick_cart.append({
-                        'category': pick_cat,
-                        'material': selected_mat,
-                        'item_id': pick_id,
-                        'quantity': 1,
-                        'available': 1,
-                        'shortfall': 0
-                    })
-                    st.success(f"✅ Added {pick_cat[:-1]} {selected_mat} (#{pick_id})")
-                    st.rerun()
-                else:
-                    st.error("Item not available")
+        # ════════════════════════════════════════════════════════════════════════════
+        # COILS PICKING
+        # ════════════════════════════════════════════════════════════════════════════
+        if pick_cat == "Coils":
+            if filtered_df.empty:
+                st.warning("⚠️ No coils in stock")
             else:
-                mask = (pick_df['Category'] == pick_cat) & (pick_df['Material'] == selected_mat)
-                if mask.any():
-                    current_stock = pick_df.loc[mask, 'Footage'].values[0]
-                    bulk_item_id = pick_df.loc[mask, 'Item_ID'].values[0]
+                # Extract coil properties for filtering
+                import re
+                
+                def extract_coil_props(row):
+                    mat = str(row['Material']).lower()
                     
-                    # Calculate what's actually available
-                    available = min(current_stock, pick_qty)
-                    shortfall = max(0, pick_qty - current_stock)
+                    # Gauge
+                    gauge_match = re.search(r'\.(\d{3})', str(row['Material']))
+                    gauge = f".{gauge_match.group(1)}" if gauge_match else "Unknown"
+                    
+                    # Texture
+                    texture = "Smooth" if "smooth" in mat else ("Stucco" if "stucco" in mat else "Other")
+                    
+                    # Metal
+                    metal = "Aluminum" if "aluminum" in mat else ("Stainless Steel" if "stainless" in mat else "Other")
+                    
+                    return pd.Series({'Gauge': gauge, 'Texture': texture, 'Metal': metal})
+                
+                filtered_df[['Gauge', 'Texture', 'Metal']] = filtered_df.apply(extract_coil_props, axis=1)
+                
+                # Filters
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    texture_opts = ["All"] + sorted(filtered_df['Texture'].unique().tolist())
+                    sel_texture = st.selectbox("🎨 Texture", texture_opts, key="coil_texture_filter")
+                
+                with col2:
+                    metal_opts = ["All"] + sorted(filtered_df['Metal'].unique().tolist())
+                    sel_metal = st.selectbox("🔩 Metal", metal_opts, key="coil_metal_filter")
+                
+                with col3:
+                    gauge_opts = ["All"] + sorted(filtered_df['Gauge'].unique().tolist())
+                    sel_gauge = st.selectbox("📏 Gauge", gauge_opts, key="coil_gauge_filter")
+                
+                # Apply filters
+                display_df = filtered_df.copy()
+                if sel_texture != "All":
+                    display_df = display_df[display_df['Texture'] == sel_texture]
+                if sel_metal != "All":
+                    display_df = display_df[display_df['Metal'] == sel_metal]
+                if sel_gauge != "All":
+                    display_df = display_df[display_df['Gauge'] == sel_gauge]
+                
+                if display_df.empty:
+                    st.warning("No coils match the selected filters")
+                else:
+                    # Show available coils
+                    st.markdown(f"**{len(display_df)} coil(s) available:**")
+                    st.dataframe(
+                        display_df[['Item_ID', 'Material', 'Footage', 'Location']].sort_values('Footage', ascending=False),
+                        use_container_width=True,
+                        hide_index=True,
+                        height=200
+                    )
+                    
+                    st.markdown("---")
+                    
+                    # Pick form
+                    with st.form("pick_coil_form", clear_on_submit=True):
+                        # Select specific coil
+                        coil_options = [f"{row['Item_ID']} | {row['Material'][:35]}... | {row['Footage']:.0f} ft" 
+                                       for _, row in display_df.iterrows()]
+                        
+                        selected_coil = st.selectbox("🎯 Select Coil", coil_options, key="coil_select")
+                        
+                        if selected_coil:
+                            coil_id = selected_coil.split(" | ")[0]
+                            coil_data = display_df[display_df['Item_ID'] == coil_id].iloc[0]
+                            current_footage = float(coil_data['Footage'])
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                pick_footage = st.number_input(
+                                    "📏 Footage to Pick",
+                                    min_value=1.0,
+                                    max_value=current_footage,
+                                    value=min(100.0, current_footage),
+                                    step=10.0,
+                                    key="coil_pick_footage"
+                                )
+                            
+                            with col2:
+                                remaining = current_footage - pick_footage
+                                st.metric("Remaining After Pick", f"{remaining:,.0f} ft")
+                                if remaining < 100:
+                                    st.caption("⚠️ Low stock warning")
+                        
+                        add_coil = st.form_submit_button("🛒 Add Coil to Cart", use_container_width=True)
+                    
+                    if add_coil and selected_coil:
+                        coil_id = selected_coil.split(" | ")[0]
+                        coil_data = display_df[display_df['Item_ID'] == coil_id].iloc[0]
+                        
+                        st.session_state.pick_cart.append({
+                            'category': 'Coils',
+                            'material': coil_data['Material'],
+                            'item_id': coil_id,
+                            'quantity': pick_footage,
+                            'unit': 'ft',
+                            'available': coil_data['Footage'],
+                            'shortfall': 0,
+                            'pick_type': 'partial'  # Indicates we're picking footage, not whole coil
+                        })
+                        st.success(f"✅ Added {pick_footage:.0f} ft from Coil {coil_id}")
+                        st.rerun()
+        
+        # ════════════════════════════════════════════════════════════════════════════
+        # ROLLS PICKING
+        # ════════════════════════════════════════════════════════════════════════════
+        elif pick_cat == "Rolls":
+            if filtered_df.empty:
+                st.warning("⚠️ No rolls in stock")
+            else:
+                # Extract roll properties
+                import re
+                
+                def extract_roll_props(row):
+                    mat = str(row['Material']).lower()
+                    
+                    gauge_match = re.search(r'\.(\d{3})', str(row['Material']))
+                    gauge = f".{gauge_match.group(1)}" if gauge_match else "Unknown"
+                    
+                    texture = "Smooth" if "smooth" in mat else ("Stucco" if "stucco" in mat else "Other")
+                    metal = "Aluminum" if "aluminum" in mat else ("Stainless Steel" if "stainless" in mat else "Other")
+                    
+                    # RPR detection
+                    roll_type = "RPR" if ("rpr" in mat or "rpr" in str(row['Item_ID']).lower()) else "Regular"
+                    
+                    return pd.Series({'Gauge': gauge, 'Texture': texture, 'Metal': metal, 'Roll_Type': roll_type})
+                
+                filtered_df[['Gauge', 'Texture', 'Metal', 'Roll_Type']] = filtered_df.apply(extract_roll_props, axis=1)
+                
+                # Filters
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    roll_type_opts = ["All"] + sorted(filtered_df['Roll_Type'].unique().tolist())
+                    sel_roll_type = st.selectbox("🗞️ Type", roll_type_opts, key="roll_type_filter")
+                
+                with col2:
+                    texture_opts = ["All"] + sorted(filtered_df['Texture'].unique().tolist())
+                    sel_texture = st.selectbox("🎨 Texture", texture_opts, key="roll_texture_filter")
+                
+                with col3:
+                    metal_opts = ["All"] + sorted(filtered_df['Metal'].unique().tolist())
+                    sel_metal = st.selectbox("🔩 Metal", metal_opts, key="roll_metal_filter")
+                
+                with col4:
+                    gauge_opts = ["All"] + sorted(filtered_df['Gauge'].unique().tolist())
+                    sel_gauge = st.selectbox("📏 Gauge", gauge_opts, key="roll_gauge_filter")
+                
+                # Apply filters
+                display_df = filtered_df.copy()
+                if sel_roll_type != "All":
+                    display_df = display_df[display_df['Roll_Type'] == sel_roll_type]
+                if sel_texture != "All":
+                    display_df = display_df[display_df['Texture'] == sel_texture]
+                if sel_metal != "All":
+                    display_df = display_df[display_df['Metal'] == sel_metal]
+                if sel_gauge != "All":
+                    display_df = display_df[display_df['Gauge'] == sel_gauge]
+                
+                if display_df.empty:
+                    st.warning("No rolls match the selected filters")
+                else:
+                    st.markdown(f"**{len(display_df)} roll(s) available:**")
+                    st.dataframe(
+                        display_df[['Item_ID', 'Roll_Type', 'Material', 'Footage', 'Location']].sort_values(['Roll_Type', 'Material']),
+                        use_container_width=True,
+                        hide_index=True,
+                        height=200
+                    )
+                    
+                    st.markdown("---")
+                    
+                    # Pick mode selection
+                    pick_mode = st.radio(
+                        "Pick Mode",
+                        ["Pick entire roll(s)", "Pick partial footage"],
+                        horizontal=True,
+                        key="roll_pick_mode"
+                    )
+                    
+                    if pick_mode == "Pick entire roll(s)":
+                        # Multi-select for whole rolls
+                        roll_options = [f"{row['Item_ID']} | {row['Roll_Type']} | {row['Footage']:.0f} ft" 
+                                       for _, row in display_df.iterrows()]
+                        
+                        selected_rolls = st.multiselect(
+                            "🎯 Select Roll(s) to Pick",
+                            roll_options,
+                            key="roll_multi_select"
+                        )
+                        
+                        if selected_rolls:
+                            total_footage = 0
+                            for roll_str in selected_rolls:
+                                roll_id = roll_str.split(" | ")[0]
+                                roll_footage = display_df[display_df['Item_ID'] == roll_id]['Footage'].values[0]
+                                total_footage += roll_footage
+                            
+                            st.info(f"📦 Selected: {len(selected_rolls)} roll(s) = **{total_footage:,.0f} ft** total")
+                            
+                            if st.button("🛒 Add Selected Rolls to Cart", type="primary", use_container_width=True):
+                                for roll_str in selected_rolls:
+                                    roll_id = roll_str.split(" | ")[0]
+                                    roll_data = display_df[display_df['Item_ID'] == roll_id].iloc[0]
+                                    
+                                    st.session_state.pick_cart.append({
+                                        'category': 'Rolls',
+                                        'material': roll_data['Material'],
+                                        'item_id': roll_id,
+                                        'quantity': roll_data['Footage'],
+                                        'unit': 'ft (whole roll)',
+                                        'available': roll_data['Footage'],
+                                        'shortfall': 0,
+                                        'pick_type': 'whole',
+                                        'roll_type': roll_data['Roll_Type']
+                                    })
+                                
+                                st.success(f"✅ Added {len(selected_rolls)} roll(s) to cart")
+                                st.rerun()
+                    
+                    else:  # Partial footage
+                        with st.form("pick_roll_partial_form", clear_on_submit=True):
+                            roll_options = [f"{row['Item_ID']} | {row['Roll_Type']} | {row['Material'][:30]}... | {row['Footage']:.0f} ft" 
+                                           for _, row in display_df.iterrows()]
+                            
+                            selected_roll = st.selectbox("🎯 Select Roll", roll_options, key="roll_single_select")
+                            
+                            if selected_roll:
+                                roll_id = selected_roll.split(" | ")[0]
+                                roll_data = display_df[display_df['Item_ID'] == roll_id].iloc[0]
+                                current_footage = float(roll_data['Footage'])
+                                
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    pick_footage = st.number_input(
+                                        "📏 Footage to Pick",
+                                        min_value=1.0,
+                                        max_value=current_footage,
+                                        value=min(50.0, current_footage),
+                                        step=5.0,
+                                        key="roll_pick_footage"
+                                    )
+                                
+                                with col2:
+                                    remaining = current_footage - pick_footage
+                                    st.metric("Remaining", f"{remaining:,.0f} ft")
+                            
+                            add_roll = st.form_submit_button("🛒 Add to Cart", use_container_width=True)
+                        
+                        if add_roll and selected_roll:
+                            roll_id = selected_roll.split(" | ")[0]
+                            roll_data = display_df[display_df['Item_ID'] == roll_id].iloc[0]
+                            
+                            st.session_state.pick_cart.append({
+                                'category': 'Rolls',
+                                'material': roll_data['Material'],
+                                'item_id': roll_id,
+                                'quantity': pick_footage,
+                                'unit': 'ft',
+                                'available': roll_data['Footage'],
+                                'shortfall': 0,
+                                'pick_type': 'partial',
+                                'roll_type': roll_data.get('Roll_Type', 'Regular')
+                            })
+                            st.success(f"✅ Added {pick_footage:.0f} ft from Roll {roll_id}")
+                            st.rerun()
+        
+        # ════════════════════════════════════════════════════════════════════════════
+        # OTHER CATEGORIES (Fab Straps, Elbows, Mineral Wool, etc.)
+        # ════════════════════════════════════════════════════════════════════════════
+        else:
+            if filtered_df.empty:
+                st.warning(f"⚠️ No {pick_cat.lower()} in stock")
+            else:
+                st.markdown(f"**{len(filtered_df)} item(s) available:**")
+                st.dataframe(
+                    filtered_df[['Item_ID', 'Material', 'Footage', 'Location']].sort_values('Material'),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=200
+                )
+                
+                st.markdown("---")
+                
+                with st.form("pick_other_form", clear_on_submit=True):
+                    # Material selection
+                    mat_options = sorted(filtered_df['Material'].unique().tolist())
+                    selected_mat = st.selectbox("📦 Select Material", mat_options, key="other_mat_select")
+                    
+                    if selected_mat:
+                        mat_data = filtered_df[filtered_df['Material'] == selected_mat].iloc[0]
+                        current_qty = int(mat_data['Footage'])
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            pick_qty = st.number_input(
+                                "🔢 Quantity to Pick",
+                                min_value=1,
+                                max_value=current_qty,
+                                value=1,
+                                step=1,
+                                key="other_pick_qty"
+                            )
+                        
+                        with col2:
+                            remaining = current_qty - pick_qty
+                            st.metric("Remaining", f"{remaining} pcs")
+                            if remaining < 5:
+                                st.caption("⚠️ Low stock warning")
+                    
+                    add_other = st.form_submit_button("🛒 Add to Cart", use_container_width=True)
+                
+                if add_other and selected_mat:
+                    mat_data = filtered_df[filtered_df['Material'] == selected_mat].iloc[0]
+                    current_qty = int(mat_data['Footage'])
+                    
+                    available = min(current_qty, pick_qty)
+                    shortfall = max(0, pick_qty - current_qty)
                     
                     st.session_state.pick_cart.append({
                         'category': pick_cat,
                         'material': selected_mat,
-                        'item_id': bulk_item_id,
+                        'item_id': mat_data['Item_ID'],
                         'quantity': pick_qty,
+                        'unit': 'pcs',
                         'available': available,
-                        'shortfall': shortfall
+                        'shortfall': shortfall,
+                        'pick_type': 'quantity'
                     })
                     
                     if shortfall > 0:
-                        st.warning(f"⚠️ Added to cart: {available} available, {shortfall} will be back ordered")
+                        st.warning(f"⚠️ Added: {available} available, {shortfall} back ordered")
                     else:
                         st.success(f"✅ Added {pick_qty} × {selected_mat}")
                     st.rerun()
 
-        # ── Display Cart ────────────────────────────────────────────────────────────
+        # ════════════════════════════════════════════════════════════════════════════
+        # DISPLAY CART
+        # ════════════════════════════════════════════════════════════════════════════
         if st.session_state.pick_cart:
             st.markdown("---")
             st.markdown("#### 🛒 Current Order")
+            
+            total_coil_footage = 0
+            total_roll_footage = 0
+            total_other_items = 0
             
             for idx, item in enumerate(st.session_state.pick_cart):
                 col_item, col_remove = st.columns([5, 1])
                 
                 with col_item:
                     status = ""
-                    if item['shortfall'] > 0:
-                        status = f" ⚠️ ({item['available']} available, {item['shortfall']} back order)"
+                    if item.get('shortfall', 0) > 0:
+                        status = f" ⚠️ ({item['available']} avail, {item['shortfall']} backorder)"
                     
-                    if item['category'] in ["Rolls", "Coils"]:
-                        st.write(f"**{item['category'][:-1]}** - {item['material']} (#{item['item_id']}){status}")
+                    if item['category'] == 'Coils':
+                        st.markdown(f"**🔄 Coil** - {item['material'][:40]}...")
+                        st.caption(f"ID: {item['item_id']} | Pick: **{item['quantity']:.0f} ft**{status}")
+                        total_coil_footage += item['quantity']
+                    
+                    elif item['category'] == 'Rolls':
+                        roll_type_icon = "🔷" if item.get('roll_type') == 'RPR' else "📜"
+                        pick_label = "Whole Roll" if item.get('pick_type') == 'whole' else f"{item['quantity']:.0f} ft"
+                        st.markdown(f"**{roll_type_icon} {item.get('roll_type', 'Regular')} Roll** - {item['material'][:35]}...")
+                        st.caption(f"ID: {item['item_id']} | Pick: **{pick_label}**{status}")
+                        total_roll_footage += item['quantity']
+                    
                     else:
-                        st.write(f"**{item['quantity']}x {item['material']}** ({item['category']}){status}")
+                        st.markdown(f"**📦 {item['category']}** - {item['material'][:40]}...")
+                        st.caption(f"Qty: **{item['quantity']} {item.get('unit', 'pcs')}**{status}")
+                        total_other_items += item['quantity']
                 
                 with col_remove:
-                    if st.button("🗑️", key=f"remove_{idx}"):
+                    if st.button("🗑️", key=f"remove_{idx}", help="Remove from cart"):
                         st.session_state.pick_cart.pop(idx)
                         st.rerun()
+            
+            # Cart summary
+            st.markdown("---")
+            sum_col1, sum_col2, sum_col3 = st.columns(3)
+            if total_coil_footage > 0:
+                sum_col1.metric("Coil Footage", f"{total_coil_footage:,.0f} ft")
+            if total_roll_footage > 0:
+                sum_col2.metric("Roll Footage", f"{total_roll_footage:,.0f} ft")
+            if total_other_items > 0:
+                sum_col3.metric("Other Items", f"{total_other_items:,}")
             
             st.divider()
             
             # Authorized By
             picker_name = st.text_input(
-                "Authorized By",
+                "👤 Authorized By",
                 value=st.session_state.get("username", "Admin"),
                 key="pick_authorized"
             )
@@ -2398,75 +2726,90 @@ with tab3:
             col_process, col_clear = st.columns(2)
             
             with col_process:
-                if st.button("📤 Process All Items", type="primary", use_container_width=True):
+                if st.button("📤 Process Order", type="primary", use_container_width=True):
                     if not customer.strip():
                         st.error("⚠️ Please enter Customer / Job Name.")
                     elif not sales_order.strip():
                         st.error("⚠️ Please enter Sales Order Number.")
+                    elif not picker_name.strip():
+                        st.error("⚠️ Please enter Authorized By name.")
                     else:
-                        # Save for back orders
                         st.session_state.last_customer = customer.strip()
                         st.session_state.last_sales_order = sales_order.strip()
                         st.session_state.back_order_items = []
                         
-                        action_suffix = f" (SO: {sales_order})"
                         all_success = True
                         
-                        with st.spinner("Processing all items..."):
+                        with st.spinner("Processing order..."):
                             for item in st.session_state.pick_cart:
-                                if item['category'] in ["Rolls", "Coils"]:
-                                    success = update_stock(
-                                        item_id=item['item_id'],
-                                        new_footage=0,
-                                        user_name=picker_name,
-                                        action_type=f"Sold {item['category'][:-1]} to {customer}{action_suffix}"
-                                    )
-                                    all_success = all_success and success
-                                else:
-                                    # Get current stock
-                                    mask = (pick_df['Category'] == item['category']) & (pick_df['Item_ID'] == item['item_id'])
-                                    if mask.any():
-                                        current_stock = pick_df.loc[mask, 'Footage'].values[0]
-                                        deduct_amount = min(current_stock, item['quantity'])
-                                        new_total = current_stock - deduct_amount
+                                try:
+                                    # Get current stock from database
+                                    response = supabase.table("inventory").select("Footage").eq("Item_ID", item['item_id']).execute()
+                                    
+                                    if response.data:
+                                        current_stock = float(response.data[0]['Footage'])
                                         
-                                        action_msg = f"Removed {deduct_amount} {item['category'][:-1]}(s) - {item['material']} for {customer}{action_suffix}"
-                                        if item['shortfall'] > 0:
-                                            action_msg += f" (shortfall: {item['shortfall']})"
+                                        if item['pick_type'] == 'whole':
+                                            # Remove entire roll/coil (set to 0 or delete)
+                                            new_footage = 0
+                                            action_desc = f"Picked whole {item['category'][:-1]} ({item['quantity']:.0f} ft)"
+                                        else:
+                                            # Partial pick
+                                            new_footage = current_stock - item['quantity']
+                                            if new_footage < 0:
+                                                new_footage = 0
+                                            action_desc = f"Picked {item['quantity']:.0f} {item.get('unit', 'units')} from {item['category']}"
                                         
-                                        success = update_stock(
-                                            item_id=item['item_id'],
-                                            new_footage=new_total,
-                                            user_name=picker_name,
-                                            action_type=action_msg
-                                        )
-                                        all_success = all_success and success
+                                        # Update database
+                                        supabase.table("inventory").update({
+                                            "Footage": new_footage
+                                        }).eq("Item_ID", item['item_id']).execute()
+                                        
+                                        # Log the pick
+                                        log_entry = {
+                                            "Item_ID": item['item_id'],
+                                            "Action": f"Stock Pick - {item['category']}",
+                                            "User": picker_name,
+                                            "Timestamp": datetime.now().isoformat(),
+                                            "Details": f"{action_desc} for {customer} (SO: {sales_order}). Material: {item['material'][:40]}. Remaining: {new_footage:.0f}"
+                                        }
+                                        supabase.table("audit_log").insert(log_entry).execute()
                                         
                                         # Track back orders
-                                        if item['shortfall'] > 0:
+                                        if item.get('shortfall', 0) > 0:
                                             st.session_state.back_order_items.append(item)
+                                    else:
+                                        st.warning(f"Item {item['item_id']} not found")
+                                        all_success = False
+                                        
+                                except Exception as e:
+                                    st.error(f"Error processing {item['item_id']}: {e}")
+                                    all_success = False
                         
                         if all_success:
-                            st.success(f"✅ All items processed for {customer} ({sales_order})!")
+                            st.success(f"✅ Order processed for {customer} ({sales_order})!")
                             
                             if st.session_state.back_order_items:
                                 st.session_state.show_back_order = True
                             else:
                                 st.balloons()
-                                st.snow()
                                 st.toast("Order complete! 🎉", icon="🎉")
                                 st.session_state.pick_cart = []
                                 st.cache_data.clear()
+                                st.session_state.force_refresh = True
+                                time.sleep(1)
                                 st.rerun()
                         else:
-                            st.error("Some items failed to process. Check logs.")
+                            st.error("Some items failed. Check above for details.")
             
             with col_clear:
-                if st.button("🗑️ Clear Cart", use_container_width=True, key="clear_pick_cart"):
+                if st.button("🗑️ Clear Cart", use_container_width=True):
                     st.session_state.pick_cart = []
                     st.rerun()
 
-        # ── Back Order UI ───────────────────────────────────────────────────────────
+        # ════════════════════════════════════════════════════════════════════════════
+        # BACK ORDER UI
+        # ════════════════════════════════════════════════════════════════════════════
         if st.session_state.show_back_order and st.session_state.back_order_items:
             st.markdown("---")
             st.markdown("### 📦 Back Orders Required")
@@ -2474,11 +2817,11 @@ with tab3:
             st.info(f"**Customer:** {st.session_state.last_customer}  \n**Order:** {st.session_state.last_sales_order}")
             
             for item in st.session_state.back_order_items:
-                st.write(f"- **{item['material']}** ({item['category']}): {item['shortfall']} units short")
+                st.write(f"- **{item['material'][:40]}** ({item['category']}): {item['shortfall']} {item.get('unit', 'units')} short")
             
             back_order_note = st.text_area(
-                "Optional note for all back orders",
-                placeholder="e.g. Urgent for client - ship when restocked",
+                "Optional note",
+                placeholder="e.g. Urgent - ship when available",
                 key="back_order_note"
             )
             
@@ -2501,156 +2844,48 @@ with tab3:
                         st.success(f"✅ Created {len(st.session_state.back_order_items)} back order(s)!")
                         st.balloons()
                     except Exception as e:
-                        st.error(f"Failed to create back orders: {e}")
+                        st.error(f"Failed: {e}")
                     
-                    # Clear everything
                     st.session_state.show_back_order = False
                     st.session_state.back_order_items = []
                     st.session_state.pick_cart = []
                     st.cache_data.clear()
+                    st.session_state.force_refresh = True
                     st.rerun()
             
             with col_skip:
-                if st.button("❌ Skip Back Orders", use_container_width=True):
+                if st.button("❌ Skip", use_container_width=True):
                     st.session_state.show_back_order = False
                     st.session_state.back_order_items = []
                     st.session_state.pick_cart = []
                     st.cache_data.clear()
+                    st.session_state.force_refresh = True
                     st.rerun()
         
-        # ── Back Order Report Section ──────────────────────────────────────────────
-        st.markdown("---")
-        st.markdown("#### 📄 Back Order Reports")
-        
-        try:
-            # Fetch all open back orders
-            response = supabase.table("back_orders").select("*").eq("status", "Open").execute()
-            back_orders = response.data
-            
-            if back_orders:
-                st.info(f"📋 **{len(back_orders)}** open back order(s) in system")
-                
-                # Display back orders in expandable section
-                with st.expander("View Open Back Orders"):
-                    for bo in back_orders:
-                        st.write(f"**{bo.get('material')}** - Qty: {bo.get('shortfall_quantity')} | Customer: {bo.get('client_name')} | Order: {bo.get('order_number')}")
-                
-                # Generate PDF Report Button
-                if st.button("📥 Generate PDF Report", type="secondary", key="generate_backorder_pdf"):
-                    from datetime import datetime
-                    
-                    # Create HTML report
-                    current_time = datetime.now().strftime('%B %d, %Y at %I:%M %p')
-                    
-                    html_content = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <title>Back Order Report</title>
-                        <style>
-                            @page {{ size: A4; margin: 2cm; }}
-                            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 40px; background: white; color: #333; }}
-                            .header {{ text-align: center; border-bottom: 4px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }}
-                            .header h1 {{ margin: 0; color: #1e40af; font-size: 32px; font-weight: 700; }}
-                            .header .subtitle {{ color: #64748b; font-size: 14px; margin-top: 8px; }}
-                            .meta-info {{ background: #f1f5f9; padding: 15px 20px; border-radius: 8px; margin-bottom: 30px; display: flex; justify-content: space-between; }}
-                            .meta-info div {{ font-size: 14px; }}
-                            .meta-info strong {{ color: #1e40af; }}
-                            .order-card {{ border: 2px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px; background: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); page-break-inside: avoid; }}
-                            .order-header {{ background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: white; padding: 12px 16px; border-radius: 6px; margin: -20px -20px 15px -20px; font-size: 16px; font-weight: 600; }}
-                            .order-details {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
-                            .detail-row {{ padding: 8px 0; border-bottom: 1px solid #f1f5f9; }}
-                            .detail-label {{ color: #64748b; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }}
-                            .detail-value {{ color: #1e293b; font-size: 15px; font-weight: 500; margin-top: 4px; }}
-                            .quantity {{ background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 20px; font-weight: 700; display: inline-block; }}
-                            .note {{ background: #eff6ff; border-left: 4px solid #2563eb; padding: 12px; margin-top: 15px; font-size: 13px; color: #1e40af; border-radius: 4px; }}
-                            .footer {{ margin-top: 40px; text-align: center; color: #94a3b8; font-size: 12px; border-top: 2px solid #e2e8f0; padding-top: 20px; }}
-                            @media print {{ body {{ padding: 20px; }} .no-print {{ display: none; }} }}
-                        </style>
-                    </head>
-                    <body>
-                        <div class="header">
-                            <h1>📦 BACK ORDER REPORT</h1>
-                            <div class="subtitle">Warehouse Management System</div>
-                        </div>
-                        <div class="meta-info">
-                            <div><strong>Generated:</strong> {current_time}</div>
-                            <div><strong>Total Open Orders:</strong> {len(back_orders)}</div>
-                            <div><strong>Status:</strong> Open</div>
-                        </div>
-                    """
-                    
-                    # Add each back order
-                    for idx, bo in enumerate(back_orders, 1):
-                        html_content += f"""
-                        <div class="order-card">
-                            <div class="order-header">Order #{idx}</div>
-                            <div class="order-details">
-                                <div class="detail-row">
-                                    <div class="detail-label">Material / Item</div>
-                                    <div class="detail-value">{bo.get('material', 'N/A')}</div>
-                                </div>
-                                <div class="detail-row">
-                                    <div class="detail-label">Quantity Needed</div>
-                                    <div class="detail-value"><span class="quantity">{bo.get('shortfall_quantity', 'N/A')} units</span></div>
-                                </div>
-                                <div class="detail-row">
-                                    <div class="detail-label">Customer / Job</div>
-                                    <div class="detail-value">{bo.get('client_name', 'N/A')}</div>
-                                </div>
-                                <div class="detail-row">
-                                    <div class="detail-label">Sales Order #</div>
-                                    <div class="detail-value">{bo.get('order_number', 'N/A')}</div>
-                                </div>
-                            </div>
-                        """
-                        
-                        if bo.get('note'):
-                            html_content += f"""
-                            <div class="note">
-                                <strong>📝 Note:</strong> {bo.get('note')}
-                            </div>
-                            """
-                        
-                        html_content += """
-                        </div>
-                        """
-                    
-                    html_content += """
-                        <div class="footer">
-                            <p>This report was automatically generated by the Warehouse Management System.</p>
-                            <p>For questions or updates, please contact the warehouse administrator.</p>
-                        </div>
-                    </body>
-                    </html>
-                    """
-                    
-                    # Create download button for HTML
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    st.download_button(
-                        label="📄 Download HTML Report (Print to PDF)",
-                        data=html_content,
-                        file_name=f"back_orders_report_{timestamp}.html",
-                        mime="text/html",
-                        help="Download and open in browser, then use 'Print to PDF' (Ctrl+P)"
-                    )
-                    
-                    # Preview the report
-                    with st.expander("📋 Preview Report", expanded=True):
-                        st.components.v1.html(html_content, height=600, scrolling=True)
-                    
-                    st.success("✅ Report generated! Download the HTML file and print to PDF using your browser.")
-                    st.info("💡 **Tip:** Open the downloaded HTML file → Press Ctrl+P (or Cmd+P on Mac) → Select 'Save as PDF'")
-            else:
-                st.success("✅ No open back orders at this time!")
-        
-        except Exception as e:
-            st.error(f"Failed to fetch back orders: {e}")
-        
+        # ════════════════════════════════════════════════════════════════════════════
+        # BACK ORDER REPORTS
+        # ════════════════════════════════════════════════════════════════════════════
         if not st.session_state.pick_cart and not st.session_state.show_back_order:
-            st.info("👆 Add items to start building your order")
-        
+            st.markdown("---")
+            st.markdown("#### 📄 Back Order Reports")
+            
+            try:
+                response = supabase.table("back_orders").select("*").eq("status", "Open").execute()
+                back_orders = response.data
+                
+                if back_orders:
+                    st.info(f"📋 **{len(back_orders)}** open back order(s)")
+                    
+                    with st.expander("View Open Back Orders"):
+                        for bo in back_orders:
+                            st.write(f"- **{bo.get('material', 'N/A')[:40]}** - Qty: {bo.get('shortfall_quantity')} | Customer: {bo.get('client_name')} | SO: {bo.get('order_number')}")
+                else:
+                    st.success("✅ No open back orders!")
+            except Exception as e:
+                st.caption(f"Could not load back orders: {e}")
+            
+            st.info("👆 Select a category and add items to start building your order")
+            
 with tab4:
     st.markdown("""
         <div style="text-align: center; padding: 20px 0;">
