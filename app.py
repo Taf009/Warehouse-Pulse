@@ -2808,83 +2808,413 @@ with tab3:
                     st.rerun()
 
         # ════════════════════════════════════════════════════════════════════════════
-        # BACK ORDER UI
-        # ════════════════════════════════════════════════════════════════════════════
-        if st.session_state.show_back_order and st.session_state.back_order_items:
-            st.markdown("---")
-            st.markdown("### 📦 Back Orders Required")
-            
-            st.info(f"**Customer:** {st.session_state.last_customer}  \n**Order:** {st.session_state.last_sales_order}")
-            
-            for item in st.session_state.back_order_items:
-                st.write(f"- **{item['material'][:40]}** ({item['category']}): {item['shortfall']} {item.get('unit', 'units')} short")
-            
-            back_order_note = st.text_area(
-                "Optional note",
-                placeholder="e.g. Urgent - ship when available",
-                key="back_order_note"
-            )
-            
-            col_confirm, col_skip = st.columns(2)
-            
-            with col_confirm:
-                if st.button("✅ Create Back Orders", type="primary", use_container_width=True):
-                    try:
-                        for item in st.session_state.back_order_items:
-                            back_order_data = {
-                                "material": item['material'],
-                                "shortfall_quantity": item['shortfall'],
-                                "client_name": st.session_state.last_customer,
-                                "order_number": st.session_state.last_sales_order,
-                                "status": "Open",
-                                "note": back_order_note.strip() or None
-                            }
-                            supabase.table("back_orders").insert(back_order_data).execute()
-                        
-                        st.success(f"✅ Created {len(st.session_state.back_order_items)} back order(s)!")
-                        st.balloons()
-                    except Exception as e:
-                        st.error(f"Failed: {e}")
-                    
-                    st.session_state.show_back_order = False
-                    st.session_state.back_order_items = []
-                    st.session_state.pick_cart = []
-                    st.cache_data.clear()
-                    st.session_state.force_refresh = True
-                    st.rerun()
-            
-            with col_skip:
-                if st.button("❌ Skip", use_container_width=True):
-                    st.session_state.show_back_order = False
-                    st.session_state.back_order_items = []
-                    st.session_state.pick_cart = []
-                    st.cache_data.clear()
-                    st.session_state.force_refresh = True
-                    st.rerun()
-        
-        # ════════════════════════════════════════════════════════════════════════════
-        # BACK ORDER REPORTS
+        # BACK ORDER MANAGEMENT
         # ════════════════════════════════════════════════════════════════════════════
         if not st.session_state.pick_cart and not st.session_state.show_back_order:
             st.markdown("---")
-            st.markdown("#### 📄 Back Order Reports")
+            st.markdown("#### 📦 Back Order Management")
             
             try:
-                response = supabase.table("back_orders").select("*").eq("status", "Open").execute()
-                back_orders = response.data
+                # Fetch all back orders (not just open)
+                response = supabase.table("back_orders").select("*").order("id", desc=True).execute()
+                all_back_orders = response.data if response.data else []
                 
-                if back_orders:
-                    st.info(f"📋 **{len(back_orders)}** open back order(s)")
+                # Separate by status
+                open_orders = [bo for bo in all_back_orders if bo.get('status') == 'Open']
+                fulfilled_orders = [bo for bo in all_back_orders if bo.get('status') == 'Fulfilled']
+                cancelled_orders = [bo for bo in all_back_orders if bo.get('status') == 'Cancelled']
+                
+                # Summary metrics
+                metric_col1, metric_col2, metric_col3 = st.columns(3)
+                metric_col1.metric("🔴 Open", len(open_orders))
+                metric_col2.metric("✅ Fulfilled", len(fulfilled_orders))
+                metric_col3.metric("❌ Cancelled", len(cancelled_orders))
+                
+                # Tabs for different views
+                bo_tab1, bo_tab2, bo_tab3 = st.tabs(["🔴 Open Orders", "✅ Fulfilled", "📊 All Orders"])
+                
+                # ── OPEN ORDERS TAB ─────────────────────────────────────────────────
+                with bo_tab1:
+                    if not open_orders:
+                        st.success("✅ No open back orders!")
+                    else:
+                        st.warning(f"📋 **{len(open_orders)}** order(s) pending fulfillment")
+                        
+                        for bo in open_orders:
+                            bo_id = bo.get('id')
+                            
+                            with st.expander(f"📦 {bo.get('material', 'Unknown')[:40]}... - {bo.get('shortfall_quantity')} units | {bo.get('client_name')}"):
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown(f"""
+                                        **Material:** {bo.get('material', 'N/A')}  
+                                        **Quantity Needed:** {bo.get('shortfall_quantity', 0)}  
+                                        **Customer:** {bo.get('client_name', 'N/A')}  
+                                        **Sales Order:** {bo.get('order_number', 'N/A')}
+                                    """)
+                                    
+                                    if bo.get('note'):
+                                        st.info(f"📝 Note: {bo.get('note')}")
+                                
+                                with col2:
+                                    st.markdown("**Actions:**")
+                                    
+                                    # Fulfill button
+                                    if st.button("✅ Mark as Fulfilled", key=f"fulfill_{bo_id}", type="primary", use_container_width=True):
+                                        try:
+                                            supabase.table("back_orders").update({
+                                                "status": "Fulfilled",
+                                                "fulfilled_date": datetime.now().isoformat(),
+                                                "fulfilled_by": st.session_state.get('username', 'Admin')
+                                            }).eq("id", bo_id).execute()
+                                            
+                                            # Log it
+                                            log_entry = {
+                                                "Item_ID": f"BO-{bo_id}",
+                                                "Action": "Back Order Fulfilled",
+                                                "User": st.session_state.get('username', 'Admin'),
+                                                "Timestamp": datetime.now().isoformat(),
+                                                "Details": f"Fulfilled back order for {bo.get('shortfall_quantity')} × {bo.get('material', 'N/A')[:30]} for {bo.get('client_name')} (SO: {bo.get('order_number')})"
+                                            }
+                                            supabase.table("audit_log").insert(log_entry).execute()
+                                            
+                                            st.success("✅ Marked as fulfilled!")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Failed: {e}")
+                                    
+                                    # Partial fulfill
+                                    with st.form(f"partial_fulfill_{bo_id}"):
+                                        st.markdown("**Partial Fulfillment:**")
+                                        partial_qty = st.number_input(
+                                            "Quantity fulfilled",
+                                            min_value=1,
+                                            max_value=int(bo.get('shortfall_quantity', 1)),
+                                            value=1,
+                                            key=f"partial_qty_{bo_id}"
+                                        )
+                                        
+                                        if st.form_submit_button("📦 Partial Fulfill", use_container_width=True):
+                                            try:
+                                                remaining = int(bo.get('shortfall_quantity', 0)) - partial_qty
+                                                
+                                                if remaining <= 0:
+                                                    # Fully fulfilled
+                                                    supabase.table("back_orders").update({
+                                                        "status": "Fulfilled",
+                                                        "shortfall_quantity": 0,
+                                                        "fulfilled_date": datetime.now().isoformat(),
+                                                        "fulfilled_by": st.session_state.get('username', 'Admin')
+                                                    }).eq("id", bo_id).execute()
+                                                    st.success("✅ Fully fulfilled!")
+                                                else:
+                                                    # Partial - update remaining quantity
+                                                    supabase.table("back_orders").update({
+                                                        "shortfall_quantity": remaining
+                                                    }).eq("id", bo_id).execute()
+                                                    st.success(f"✅ Fulfilled {partial_qty}. Remaining: {remaining}")
+                                                
+                                                # Log it
+                                                log_entry = {
+                                                    "Item_ID": f"BO-{bo_id}",
+                                                    "Action": "Back Order Partial Fulfill",
+                                                    "User": st.session_state.get('username', 'Admin'),
+                                                    "Timestamp": datetime.now().isoformat(),
+                                                    "Details": f"Fulfilled {partial_qty} of {bo.get('shortfall_quantity')} × {bo.get('material', 'N/A')[:30]}. Remaining: {remaining}"
+                                                }
+                                                supabase.table("audit_log").insert(log_entry).execute()
+                                                
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Failed: {e}")
+                                    
+                                    # Cancel button
+                                    if st.button("❌ Cancel Order", key=f"cancel_{bo_id}", use_container_width=True):
+                                        try:
+                                            supabase.table("back_orders").update({
+                                                "status": "Cancelled",
+                                                "cancelled_date": datetime.now().isoformat(),
+                                                "cancelled_by": st.session_state.get('username', 'Admin')
+                                            }).eq("id", bo_id).execute()
+                                            
+                                            # Log it
+                                            log_entry = {
+                                                "Item_ID": f"BO-{bo_id}",
+                                                "Action": "Back Order Cancelled",
+                                                "User": st.session_state.get('username', 'Admin'),
+                                                "Timestamp": datetime.now().isoformat(),
+                                                "Details": f"Cancelled back order for {bo.get('shortfall_quantity')} × {bo.get('material', 'N/A')[:30]} for {bo.get('client_name')}"
+                                            }
+                                            supabase.table("audit_log").insert(log_entry).execute()
+                                            
+                                            st.success("❌ Order cancelled")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Failed: {e}")
+                        
+                        # Bulk actions
+                        st.markdown("---")
+                        st.markdown("**Bulk Actions:**")
+                        
+                        col_bulk1, col_bulk2 = st.columns(2)
+                        
+                        with col_bulk1:
+                            if st.button("✅ Fulfill ALL Open Orders", use_container_width=True):
+                                try:
+                                    for bo in open_orders:
+                                        supabase.table("back_orders").update({
+                                            "status": "Fulfilled",
+                                            "fulfilled_date": datetime.now().isoformat(),
+                                            "fulfilled_by": st.session_state.get('username', 'Admin')
+                                        }).eq("id", bo.get('id')).execute()
+                                    
+                                    # Log bulk action
+                                    log_entry = {
+                                        "Item_ID": "BULK",
+                                        "Action": "Bulk Back Order Fulfillment",
+                                        "User": st.session_state.get('username', 'Admin'),
+                                        "Timestamp": datetime.now().isoformat(),
+                                        "Details": f"Fulfilled {len(open_orders)} back orders in bulk"
+                                    }
+                                    supabase.table("audit_log").insert(log_entry).execute()
+                                    
+                                    st.success(f"✅ Fulfilled {len(open_orders)} orders!")
+                                    st.balloons()
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Failed: {e}")
+                        
+                        with col_bulk2:
+                            if st.button("❌ Cancel ALL Open Orders", use_container_width=True):
+                                confirm = st.checkbox("I confirm I want to cancel all open orders", key="confirm_cancel_all")
+                                if confirm:
+                                    try:
+                                        for bo in open_orders:
+                                            supabase.table("back_orders").update({
+                                                "status": "Cancelled",
+                                                "cancelled_date": datetime.now().isoformat(),
+                                                "cancelled_by": st.session_state.get('username', 'Admin')
+                                            }).eq("id", bo.get('id')).execute()
+                                        
+                                        st.success(f"❌ Cancelled {len(open_orders)} orders")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Failed: {e}")
+                
+                # ── FULFILLED ORDERS TAB ────────────────────────────────────────────
+                with bo_tab2:
+                    if not fulfilled_orders:
+                        st.info("📭 No fulfilled orders yet")
+                    else:
+                        st.success(f"✅ **{len(fulfilled_orders)}** order(s) fulfilled")
+                        
+                        # Create dataframe for display
+                        fulfilled_df = pd.DataFrame(fulfilled_orders)
+                        
+                        # Select columns to display
+                        display_cols = ['material', 'shortfall_quantity', 'client_name', 'order_number', 'fulfilled_date', 'fulfilled_by']
+                        available_cols = [col for col in display_cols if col in fulfilled_df.columns]
+                        
+                        if available_cols:
+                            st.dataframe(
+                                fulfilled_df[available_cols].rename(columns={
+                                    'material': 'Material',
+                                    'shortfall_quantity': 'Qty',
+                                    'client_name': 'Customer',
+                                    'order_number': 'SO #',
+                                    'fulfilled_date': 'Fulfilled Date',
+                                    'fulfilled_by': 'Fulfilled By'
+                                }),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                        
+                        # Option to reopen
+                        st.markdown("---")
+                        st.markdown("**Reopen a fulfilled order:**")
+                        
+                        reopen_options = [f"{bo.get('id')} - {bo.get('material', 'N/A')[:30]} ({bo.get('client_name')})" for bo in fulfilled_orders]
+                        selected_reopen = st.selectbox("Select order to reopen", ["-- Select --"] + reopen_options, key="reopen_select")
+                        
+                        if selected_reopen != "-- Select --":
+                            reopen_id = int(selected_reopen.split(" - ")[0])
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                reopen_qty = st.number_input("Quantity to reopen", min_value=1, value=1, key="reopen_qty")
+                            
+                            with col2:
+                                if st.button("🔄 Reopen Order", type="primary", use_container_width=True):
+                                    try:
+                                        supabase.table("back_orders").update({
+                                            "status": "Open",
+                                            "shortfall_quantity": reopen_qty,
+                                            "fulfilled_date": None,
+                                            "fulfilled_by": None
+                                        }).eq("id", reopen_id).execute()
+                                        
+                                        st.success("🔄 Order reopened!")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Failed: {e}")
+                
+                # ── ALL ORDERS TAB ──────────────────────────────────────────────────
+                with bo_tab3:
+                    if not all_back_orders:
+                        st.info("📭 No back orders in system")
+                    else:
+                        st.markdown(f"**Total:** {len(all_back_orders)} back order(s) in history")
+                        
+                        # Filter by status
+                        status_filter = st.multiselect(
+                            "Filter by Status",
+                            ["Open", "Fulfilled", "Cancelled"],
+                            default=["Open", "Fulfilled", "Cancelled"],
+                            key="bo_status_filter"
+                        )
+                        
+                        filtered_bo = [bo for bo in all_back_orders if bo.get('status') in status_filter]
+                        
+                        if filtered_bo:
+                            bo_df = pd.DataFrame(filtered_bo)
+                            
+                            display_cols = ['id', 'status', 'material', 'shortfall_quantity', 'client_name', 'order_number', 'note']
+                            available_cols = [col for col in display_cols if col in bo_df.columns]
+                            
+                            st.dataframe(
+                                bo_df[available_cols].rename(columns={
+                                    'id': 'ID',
+                                    'status': 'Status',
+                                    'material': 'Material',
+                                    'shortfall_quantity': 'Qty',
+                                    'client_name': 'Customer',
+                                    'order_number': 'SO #',
+                                    'note': 'Notes'
+                                }),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                        
+                        # Delete old records
+                        st.markdown("---")
+                        st.markdown("**🗑️ Cleanup:**")
+                        
+                        with st.expander("Delete old fulfilled/cancelled orders"):
+                            st.warning("⚠️ This will permanently delete records from the database")
+                            
+                            delete_status = st.multiselect(
+                                "Delete orders with status:",
+                                ["Fulfilled", "Cancelled"],
+                                key="delete_status"
+                            )
+                            
+                            if delete_status:
+                                to_delete = [bo for bo in all_back_orders if bo.get('status') in delete_status]
+                                st.write(f"This will delete **{len(to_delete)}** record(s)")
+                                
+                                confirm_delete = st.checkbox(f"I confirm I want to delete {len(to_delete)} records", key="confirm_delete_bo")
+                                
+                                if confirm_delete:
+                                    if st.button("🗑️ Delete Records", type="primary"):
+                                        try:
+                                            for status in delete_status:
+                                                supabase.table("back_orders").delete().eq("status", status).execute()
+                                            
+                                            st.success(f"🗑️ Deleted {len(to_delete)} records")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Failed: {e}")
+                
+                # ── GENERATE REPORT ─────────────────────────────────────────────────
+                st.markdown("---")
+                if open_orders and st.button("📥 Generate PDF Report", type="secondary"):
+                    current_time = datetime.now().strftime('%B %d, %Y at %I:%M %p')
                     
-                    with st.expander("View Open Back Orders"):
-                        for bo in back_orders:
-                            st.write(f"- **{bo.get('material', 'N/A')[:40]}** - Qty: {bo.get('shortfall_quantity')} | Customer: {bo.get('client_name')} | SO: {bo.get('order_number')}")
-                else:
-                    st.success("✅ No open back orders!")
-            except Exception as e:
-                st.caption(f"Could not load back orders: {e}")
+                    html_content = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>Back Order Report</title>
+                        <style>
+                            @page {{ size: A4; margin: 2cm; }}
+                            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 40px; background: white; color: #333; }}
+                            .header {{ text-align: center; border-bottom: 4px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }}
+                            .header h1 {{ margin: 0; color: #1e40af; font-size: 32px; font-weight: 700; }}
+                            .header .subtitle {{ color: #64748b; font-size: 14px; margin-top: 8px; }}
+                            .meta-info {{ background: #f1f5f9; padding: 15px 20px; border-radius: 8px; margin-bottom: 30px; display: flex; justify-content: space-between; }}
+                            .order-card {{ border: 2px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px; background: #ffffff; page-break-inside: avoid; }}
+                            .order-header {{ background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; padding: 12px 16px; border-radius: 6px; margin: -20px -20px 15px -20px; }}
+                            .detail-row {{ padding: 8px 0; border-bottom: 1px solid #f1f5f9; }}
+                            .detail-label {{ color: #64748b; font-size: 12px; font-weight: 600; text-transform: uppercase; }}
+                            .detail-value {{ color: #1e293b; font-size: 15px; font-weight: 500; margin-top: 4px; }}
+                            .quantity {{ background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 20px; font-weight: 700; }}
+                            .footer {{ margin-top: 40px; text-align: center; color: #94a3b8; font-size: 12px; border-top: 2px solid #e2e8f0; padding-top: 20px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="header">
+                            <h1>📦 OPEN BACK ORDERS</h1>
+                            <div class="subtitle">Pending Fulfillment Report</div>
+                        </div>
+                        <div class="meta-info">
+                            <div><strong>Generated:</strong> {current_time}</div>
+                            <div><strong>Open Orders:</strong> {len(open_orders)}</div>
+                        </div>
+                    """
+                    
+                    for idx, bo in enumerate(open_orders, 1):
+                        html_content += f"""
+                        <div class="order-card">
+                            <div class="order-header">Back Order #{idx}</div>
+                            <div class="detail-row">
+                                <div class="detail-label">Material</div>
+                                <div class="detail-value">{bo.get('material', 'N/A')}</div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Quantity</div>
+                                <div class="detail-value"><span class="quantity">{bo.get('shortfall_quantity', 0)} units</span></div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Customer</div>
+                                <div class="detail-value">{bo.get('client_name', 'N/A')}</div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Sales Order</div>
+                                <div class="detail-value">{bo.get('order_number', 'N/A')}</div>
+                            </div>
+                        """
+                        if bo.get('note'):
+                            html_content += f"""
+                            <div class="detail-row">
+                                <div class="detail-label">Notes</div>
+                                <div class="detail-value">{bo.get('note')}</div>
+                            </div>
+                            """
+                        html_content += "</div>"
+                    
+                    html_content += """
+                        <div class="footer">
+                            <p>Generated by MJP Pulse Inventory System</p>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                    
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    st.download_button(
+                        label="📄 Download Report",
+                        data=html_content,
+                        file_name=f"back_orders_{timestamp}.html",
+                        mime="text/html"
+                    )
+                    st.info("💡 Open in browser → Print → Save as PDF")
             
-            st.info("👆 Select a category and add items to start building your order")
+            except Exception as e:
+                st.error(f"Error loading back orders: {e}")
+            
+            st.info("👆 Select a category above to start building your order")
             
 with tab4:
     st.markdown("""
