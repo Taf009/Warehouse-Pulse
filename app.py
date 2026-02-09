@@ -435,14 +435,15 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
         inches_per_piece = SIZE_DISPLAY.get(line["display_size"], 12.0)
         size_label = line["display_size"]
     
-    # Calculate total inches needed (pieces × inches per piece + extra allowance per piece)
+    # Calculate production footage (pieces × inches per piece + extra allowance per piece)
     total_inches = (inches_per_piece + extra_allowance) * line["pieces"]
+    production_footage = total_inches / 12.0  # This is JUST production, no waste
     
-    # Convert to footage
-    total_footage_needed = total_inches / 12.0
+    # Waste is separate
+    waste_footage = line["waste"]
     
-    # Add waste
-    total_footage_needed += line["waste"]
+    # Total needed for deduction = production + waste
+    total_footage_needed = production_footage + waste_footage
     
     # Get source items - refresh from database to get current values
     source_items = []
@@ -484,9 +485,19 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
         deduct_amount = min(item['footage'], remaining_needed)
         new_footage = item['footage'] - deduct_amount
         
+        # Calculate how much of this deduction is production vs waste
+        # (proportionally allocate if using multiple sources)
+        if total_footage_needed > 0:
+            proportion = deduct_amount / total_footage_needed
+            item_production = production_footage * proportion
+            item_waste = waste_footage * proportion
+        else:
+            item_production = 0
+            item_waste = 0
+        
         # Update database
         try:
-            action_details = f"Production: {line['pieces']} pcs of {size_label} ({deduct_amount:.2f} ft used) for {client_name} (Order: {order_number})"
+            action_details = f"Production: {line['pieces']} pcs of {size_label} ({item_production:.2f} ft production + {item_waste:.2f} ft waste = {deduct_amount:.2f} ft total) for {client_name} (Order: {order_number})"
             
             success_update = update_stock(
                 item_id=item['id'],
@@ -499,16 +510,19 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
                 feedback.append(f"✗ Failed to update {item['id']}")
                 return False, 0.0
             
-            # Record for PDF
+            # Record for PDF - SEPARATE production and waste
             deduction_details.append({
                 'source_id': item['id'],
                 'material': item['material'],
                 'size': size_label,
                 'pieces': line['pieces'],
                 'inches_per_piece': inches_per_piece,
-                'footage_used': deduct_amount,
-                'waste': line['waste'],
-                'material_type': material_type
+                'production_footage': item_production,  # Production ONLY (no waste)
+                'waste': item_waste,                    # Waste ONLY
+                'total_deducted': deduct_amount,        # Total deducted from this source
+                'material_type': material_type,
+                # Keep footage_used for backward compatibility
+                'footage_used': deduct_amount
             })
             
             remaining_needed -= deduct_amount
@@ -517,8 +531,9 @@ def process_production_line(line, extra_allowance, material_type, order_number, 
             feedback.append(f"✗ Error updating {item['id']}: {e}")
             return False, 0.0
     
-    feedback.append(f"✓ {material_type} {size_label}: {line['pieces']} pieces produced ({total_footage_needed:.2f} ft used)")
+    feedback.append(f"✓ {material_type} {size_label}: {line['pieces']} pieces produced ({production_footage:.2f} ft production + {waste_footage:.2f} ft waste = {total_footage_needed:.2f} ft total)")
     return True, total_footage_needed
+    
 
 def generate_production_pdf(order_number, client_name, operator_name, deduction_details, box_usage, coil_extra=0.5, roll_extra=0.5):
     """
@@ -569,7 +584,7 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     )
     
     # Title
-    elements.append(Paragraph("📋 MJP PRODUCTION ORDER LOG", title_style))
+    elements.append(Paragraph("MJP PRODUCTION ORDER LOG", title_style))
     elements.append(Paragraph("Manufacturing & Stock Deduction Documentation", subtitle_style))
     
     # Order metadata with fillable production order number
@@ -614,18 +629,23 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     
     elements.append(Paragraph("Production Details", heading_style))
     
-    # Table data - more compact columns
-    table_data = [['Type', 'Source ID', 'Size', 'Pcs', 'Footage', 'Waste', 'Extra"']]
+    # Table data - UPDATED COLUMNS: Production and Waste separate
+    table_data = [['Type', 'Source ID', 'Size', 'Pcs', 'Production', 'Waste', 'Extra"']]
     
     for detail in deduction_details:
         extra_allowance = coil_extra if detail['material_type'] == 'Coil' else roll_extra
+        
+        # Use new field names, with fallback for backward compatibility
+        production_ft = detail.get('production_footage', detail.get('footage_used', 0) - detail.get('waste', 0))
+        waste_ft = detail.get('waste', 0)
+        
         table_data.append([
             detail['material_type'][:4],  # Coil/Roll
             str(detail['source_id'])[:15],  # Truncate if needed
             detail['size'],
             str(detail['pieces']),
-            f"{detail['footage_used']:.1f}",
-            f"{detail['waste']:.1f}",
+            f"{production_ft:.1f}",   # Production footage ONLY
+            f"{waste_ft:.1f}",        # Waste ONLY
             f"{extra_allowance}"
         ])
     
@@ -659,53 +679,63 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     elements.append(prod_table)
     elements.append(Spacer(1, 0.15*inch))
     
-    # TOTALS SECTION - Group by material
-    elements.append(Paragraph("📊 TOTALS BY MATERIAL", heading_style))
+    # TOTALS SECTION - Group by material with CLEAR separation
+    elements.append(Paragraph("TOTALS BY MATERIAL", heading_style))
     
-    # Calculate totals by material
+    # Calculate totals by material - SEPARATE production and waste
     material_totals = {}
     for detail in deduction_details:
         material_key = detail['material']
         if material_key not in material_totals:
             material_totals[material_key] = {
-                'footage': 0,
+                'production': 0,
                 'waste': 0,
                 'pieces': 0,
                 'type': detail['material_type']
             }
-        material_totals[material_key]['footage'] += detail['footage_used']
-        material_totals[material_key]['waste'] += detail['waste']
+        
+        # Use new field names with fallback
+        production_ft = detail.get('production_footage', detail.get('footage_used', 0) - detail.get('waste', 0))
+        waste_ft = detail.get('waste', 0)
+        
+        material_totals[material_key]['production'] += production_ft
+        material_totals[material_key]['waste'] += waste_ft
         material_totals[material_key]['pieces'] += detail['pieces']
     
-    # Create totals table
-    totals_data = [['Material', 'Type', 'Total Pieces', 'Total Footage Used', 'Total Waste']]
+    # Create totals table - UPDATED COLUMNS
+    totals_data = [['Material', 'Type', 'Pieces', 'Production (ft)', 'Waste (ft)', 'Total (ft)']]
     
-    grand_footage = 0
+    grand_production = 0
     grand_waste = 0
     grand_pieces = 0
     
     for material, totals in material_totals.items():
+        material_total = totals['production'] + totals['waste']
         totals_data.append([
-            material[:35],  # Truncate long names
+            material[:30],  # Truncate long names
             totals['type'],
             str(totals['pieces']),
-            f"{totals['footage']:.2f} ft",
-            f"{totals['waste']:.2f} ft"
+            f"{totals['production']:.2f}",
+            f"{totals['waste']:.2f}",
+            f"{material_total:.2f}"
         ])
-        grand_footage += totals['footage']
+        grand_production += totals['production']
         grand_waste += totals['waste']
         grand_pieces += totals['pieces']
+    
+    grand_total = grand_production + grand_waste
     
     # Grand total row
     totals_data.append([
         'GRAND TOTAL',
         '',
         str(grand_pieces),
-        f"{grand_footage:.2f} ft",
-        f"{grand_waste:.2f} ft"
+        f"{grand_production:.2f}",
+        f"{grand_waste:.2f}",
+        f"{grand_total:.2f}"
     ])
     
-    totals_table = Table(totals_data, colWidths=[2*inch, 0.7*inch, 1.1*inch, 1.4*inch, 1.1*inch])
+    totals_table = Table(totals_data, colWidths=[1.8*inch, 0.6*inch, 0.7*inch, 1.1*inch, 0.9*inch, 0.9*inch])
     totals_table.setStyle(TableStyle([
         # Header
         ('BACKGROUND', (0, 0), (-1, 0), navy_blue),
@@ -735,7 +765,23 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     elements.append(totals_table)
     elements.append(Spacer(1, 0.15*inch))
     
-    # Extra allowance summary
+    # Summary box - CLEAR breakdown
+    summary_style = ParagraphStyle(
+        'SummaryStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=navy_blue,
+        alignment=TA_CENTER,
+        spaceAfter=10,
+        fontName='Helvetica-Bold'
+    )
+    
+    elements.append(Paragraph(
+        f"SUMMARY: {grand_production:.2f} ft Production + {grand_waste:.2f} ft Waste = {grand_total:.2f} ft Total Deducted",
+        summary_style
+    ))
+    
+    # Extra allowance note
     allowance_note = ParagraphStyle(
         'AllowanceNote',
         parent=styles['Normal'],
@@ -746,14 +792,14 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     )
     
     elements.append(Paragraph(
-        f"<b>Note:</b> Extra allowance included - Coils: {coil_extra}\" per piece | Rolls: {roll_extra}\" per piece",
+        f"<b>Note:</b> Extra allowance included in production - Coils: {coil_extra}\" per piece | Rolls: {roll_extra}\" per piece",
         allowance_note
     ))
     
     # Box usage section (if any)
     if any(box_usage.values()):
         elements.append(Spacer(1, 0.1*inch))
-        elements.append(Paragraph("📦 Box Usage", heading_style))
+        elements.append(Paragraph("Box Usage", heading_style))
         
         box_data = [['Box Type', 'Quantity Used']]
         for box_type, qty in box_usage.items():
@@ -796,8 +842,6 @@ def generate_production_pdf(order_number, client_name, operator_name, deduction_
     buffer.seek(0)
     
     return buffer
-
-
 def send_production_pdf(pdf_buffer, order_number, client_name):
     """
     Send production PDF via email to admin.
