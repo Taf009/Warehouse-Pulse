@@ -3269,14 +3269,9 @@ with tab4:
     """, unsafe_allow_html=True)
     
     # ── Safe DataFrame Check ────────────────────────────────────────────────────
-    # ... rest of your code continues
-    
-    # ── Safe DataFrame Check ────────────────────────────────────────────────────
-    # Create a safe working copy - even if df is empty
     if df is not None and not df.empty:
         safe_df = df.copy()
     else:
-        # Create empty DataFrame with expected structure
         safe_df = pd.DataFrame(columns=['Item_ID', 'Material', 'Footage', 'Location', 'Status', 'Category', 'Purchase_Order_Num'])
         st.info("📦 No inventory data found. This is your first time receiving items - let's get started!")
     
@@ -3300,6 +3295,9 @@ with tab4:
         "Fiberglass Insulation": "🏠", "Wing Seals": "🔒", 
         "Wire": "➰", "Banding": "📏", "Other": "📦"
     }
+    
+    # Categories that require unique serial IDs (tracked individually)
+    SERIALIZED_CATEGORIES = ["Coils", "Rolls"]
     
     # ── Initialize Session State for Receiving Cart ────────────────────────────
     if 'receiving_cart' not in st.session_state:
@@ -3358,6 +3356,14 @@ with tab4:
     )
     cat_choice = cat_mapping[raw_cat]
     
+    # Determine if this category needs serial IDs
+    is_serialized = cat_choice in SERIALIZED_CATEGORIES
+    
+    if is_serialized:
+        st.info(f"🏷️ **{cat_choice}** require unique Item IDs for tracking")
+    else:
+        st.success(f"📦 **{cat_choice}** - Bulk item (quantities will be added together automatically)")
+    
     st.markdown("---")
     
     # ── STEP 2: Add Item Form ──────────────────────────────────────────────────
@@ -3367,7 +3373,7 @@ with tab4:
         material = ""
         qty_val = 1.0
         unit_label = "Items"
-        is_serialized = cat_choice in ["Coils", "Rolls", "Wire"]
+        id_prefix = ""
         
         # Material Specifications Card
         st.markdown(f"### Step 2️⃣: {category_icons.get(cat_choice, '📦')} {cat_choice} Specifications")
@@ -3378,144 +3384,150 @@ with tab4:
                             padding: 24px; border-radius: 12px; border-left: 4px solid #0284c7;">
             """, unsafe_allow_html=True)
             
-            if cat_choice == "Coils" or cat_choice == "Rolls":
+            if cat_choice == "Coils":
                 col1, col2 = st.columns(2)
                 with col1:
-                    texture = st.radio("🎨 Texture", ["Stucco", "Smooth"], horizontal=True)
-                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel"], horizontal=True)
+                    texture = st.radio("🎨 Texture", ["Stucco", "Smooth"], horizontal=True, key="coil_texture")
+                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel"], horizontal=True, key="coil_metal")
                 with col2:
-                    gauge = st.selectbox("📏 Gauge", [".010", ".016", ".020", ".024", ".032", "Other"])
+                    gauge = st.selectbox("📏 Gauge", [".010", ".016", ".020", ".024", ".032", "Other"], key="coil_gauge")
                     if gauge == "Other":
-                        gauge = st.text_input("Custom Gauge", placeholder="e.g. .040")
+                        gauge = st.text_input("Custom Gauge", placeholder="e.g. .040", key="coil_custom_gauge")
                 
                 clean_gauge = gauge.replace('.', '')
                 texture_code = "SMP" if texture == "Smooth" else "STP"
                 metal_code = "AL" if metal == "Aluminum" else "SST"
                 
-                material = f"{texture} {metal} {cat_choice[:-1]} - {gauge} Gauge"
-                qty_val = st.number_input("📐 Footage per Item", min_value=0.1, value=3000.0 if cat_choice == "Coils" else 100.0)
-                unit_label = cat_choice  # "Coils" or "Rolls"
+                material = f"{texture} {metal} Coil - {gauge} Gauge"
+                qty_val = st.number_input("📐 Footage per Coil", min_value=0.1, value=3000.0, key="coil_footage")
+                unit_label = "Coils"
                 
-                id_prefix = f"{cat_choice[:-1]}-{metal_code}-{clean_gauge}-{texture_code}-{int(qty_val)}"
+                id_prefix = f"Coil-{metal_code}-{clean_gauge}-{texture_code}"
             
-            elif cat_choice == "Fiberglass Insulation":
+            elif cat_choice == "Rolls":
                 col1, col2 = st.columns(2)
                 with col1:
-                    form_type = st.radio("📦 Form", ["Rolls", "Batts", "Pipe Wrap", "Other"])
-                    thickness = st.selectbox("📏 Thickness", ["0.25 in", "0.5 in", "1 in", "1.5 in", "2 in", "Other"])
-                    if thickness == "Other":
-                        thickness = st.text_input("Custom Thickness", placeholder="e.g. 3 in")
+                    roll_type = st.radio("🗞️ Roll Type", ["Regular", "RPR (Reinforced)"], horizontal=True, key="roll_type")
+                    texture = st.radio("🎨 Texture", ["Stucco", "Smooth"], horizontal=True, key="roll_texture")
+                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel"], horizontal=True, key="roll_metal")
                 with col2:
-                    sq_ft_per_roll = st.number_input("📐 Sq Ft per Roll", min_value=1.0, value=150.0)
+                    gauge = st.selectbox("📏 Gauge", [".016", ".020", ".024", ".032", "Other"], key="roll_gauge")
+                    if gauge == "Other":
+                        gauge = st.text_input("Custom Gauge", placeholder="e.g. .040", key="roll_custom_gauge")
                 
-                material = f"Fiberglass {form_type} - {thickness} Thickness - {sq_ft_per_roll} sq ft/roll"
-                qty_val = sq_ft_per_roll
-                unit_label = form_type  # "Rolls", "Batts", etc.
-                is_serialized = form_type == "Rolls"
+                clean_gauge = gauge.replace('.', '')
+                texture_code = "SMP" if texture == "Smooth" else "STP"
+                metal_code = "AL" if metal == "Aluminum" else "SST"
+                roll_type_code = "RPR-" if roll_type == "RPR (Reinforced)" else ""
                 
-                id_prefix = f"FG-{thickness.replace(' ', '')}-{int(sq_ft_per_roll)}"
+                material = f"{texture} {metal} {roll_type_code}Roll - {gauge} Gauge"
+                qty_val = st.number_input("📐 Footage per Roll", min_value=0.1, value=100.0, key="roll_footage")
+                unit_label = "Rolls"
+                
+                id_prefix = f"Roll-{roll_type_code}{metal_code}-{clean_gauge}-{texture_code}"
             
             elif cat_choice == "Elbows":
                 col1, col2 = st.columns(2)
                 with col1:
-                    angle = st.radio("📐 Angle", ["45°", "90°", "Other"], horizontal=True)
+                    angle = st.radio("📐 Angle", ["45°", "90°", "Other"], horizontal=True, key="elbow_angle")
                     if angle == "Other":
-                        angle = st.text_input("Custom Angle", placeholder="e.g. 22.5°")
-                    size_num = st.number_input("🔢 Size Number", min_value=1, max_value=60, value=1)
+                        angle = st.text_input("Custom Angle", placeholder="e.g. 22.5°", key="elbow_custom_angle")
+                    size_num = st.number_input("🔢 Size Number", min_value=1, max_value=60, value=1, key="elbow_size")
                 with col2:
-                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel", "Galvanized", "Other"])
+                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel", "Galvanized", "Other"], key="elbow_metal")
                 
                 material = f"{angle} Elbow - Size #{size_num} - {metal}"
-                qty_val = 1.0
-                unit_label = "Elbows"
-                id_prefix = f"ELB-{angle.replace('°', '')}-S{size_num}"
-            
-            elif cat_choice == "Mineral Wool":
-                col1, col2 = st.columns(2)
-                with col1:
-                    pipe_size = st.selectbox("🔧 Pipe Size", ["1 in", "2 in", "3 in", "4 in", "Other"])
-                    if pipe_size == "Other":
-                        pipe_size = st.text_input("Custom Pipe Size")
-                with col2:
-                    thickness = st.selectbox("📏 Thickness", ["0.5 in", "1 in", "1.5 in", "2 in", "Other"])
-                    if thickness == "Other":
-                        thickness = st.text_input("Custom Thickness")
-                
-                material = f"Mineral Wool - Pipe Size: {pipe_size} - Thickness: {thickness}"
-                qty_val = 1.0
-                unit_label = "Sections"
-                id_prefix = f"MW-PS{pipe_size.replace(' ', '')}-THK{thickness.replace(' ', '')}"
-            
-            elif cat_choice == "Wing Seals":
-                col1, col2 = st.columns(2)
-                with col1:
-                    seal_type = st.radio("🔐 Type", ["Open", "Closed"], horizontal=True)
-                    size = st.radio("📏 Size", ["1/2 in", "3/4 in"], horizontal=True)
-                    gauge = st.selectbox("📐 Gauge", [".028", ".032", "Other"])
-                    if gauge == "Other":
-                        gauge = st.text_input("Custom Gauge")
-                with col2:
-                    grooves = st.radio("〰️ Grooves", ["With Grooves (Center)", "Without Grooves"])
-                    joint_pos = st.radio("📍 Joint Position", ["Bottom", "Top", "N/A"])
-                    box_qty = st.number_input("📦 Pieces per Box", min_value=1, value=1000, step=100)
-                
-                material = f"{seal_type} Wing Seal - {size} - {gauge} Gauge - {grooves} - Joint at {joint_pos}"
-                qty_val = box_qty
+                qty_val = st.number_input("🔢 Quantity (pieces)", min_value=1, value=1, step=1, key="elbow_qty")
                 unit_label = "Pieces"
-                id_prefix = f"WS-{seal_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
-            
-            elif cat_choice == "Wire":
-                col1, col2 = st.columns(2)
-                with col1:
-                    gauge = st.selectbox("📏 Gauge", ["14", "16", "18", "Other"])
-                    if gauge == "Other":
-                        gauge = st.text_input("Custom Gauge")
-                    rolls_count = st.number_input("🔢 Number of Rolls", min_value=1, value=1, step=1)
-                with col2:
-                    footage_per_roll = st.number_input("📐 Footage per Roll (optional)", min_value=0.0, value=0.0)
-                    is_serialized = st.checkbox("🏷️ Assign unique ID to each roll?", value=False)
-                
-                material = f"Wire - {gauge} Gauge - {rolls_count} Roll(s)"
-                qty_val = rolls_count if footage_per_roll == 0 else footage_per_roll * rolls_count
-                unit_label = "Rolls"  # Always "Rolls" for wire
-                
-                id_prefix = f"WIRE-{gauge}"
-            
-            elif cat_choice == "Banding":
-                col1, col2 = st.columns(2)
-                with col1:
-                    osc_type = st.radio("🌀 Type", ["Oscillated", "Non-Oscillated"])
-                    size = st.radio("📏 Size", ["3/4 in", "1/2 in"])
-                with col2:
-                    gauge = st.selectbox("📐 Gauge", [".015", ".020"])
-                    core = st.radio("⚙️ Core", ["Metal Core", "Non-Metal Core"])
-                
-                material = f"{osc_type} Banding - {size} - {gauge} Gauge - {core}"
-                qty_val = st.number_input("📐 Footage per Item", min_value=0.1, value=100.0)
-                unit_label = "Rolls"  # Changed from "Footage" to "Rolls"
-                is_serialized = True
-                
-                id_prefix = f"BAND-{osc_type[0]}-{size.replace('/','').replace(' ','')}-{gauge.replace('.', '')}"
             
             elif cat_choice == "Fab Straps":
                 col1, col2 = st.columns(2)
                 with col1:
-                    gauge = st.selectbox("📏 Gauge", [".015", ".020"])
-                    size_num = st.number_input("🔢 Size Number", min_value=1, max_value=50, value=1)
+                    gauge = st.selectbox("📏 Gauge", [".015", ".020"], key="strap_gauge")
+                    size_num = st.number_input("🔢 Size Number", min_value=1, max_value=50, value=1, key="strap_size")
                 with col2:
-                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel", "Other"])
+                    metal = st.radio("🔩 Metal Type", ["Aluminum", "Stainless Steel", "Other"], key="strap_metal")
                 
                 material = f"Fab Strap {gauge} - #{size_num} - {metal}"
-                qty_val = 1.0
-                unit_label = "Fab Straps"  # More specific
-                id_prefix = f"FS-{gauge.replace('.', '')}-S{size_num}"
+                qty_val = st.number_input("🔢 Quantity (bundles)", min_value=1, value=1, step=1, key="strap_qty")
+                unit_label = "Bundles"
+            
+            elif cat_choice == "Mineral Wool":
+                col1, col2 = st.columns(2)
+                with col1:
+                    pipe_size = st.selectbox("🔧 Pipe Size", ["1 in", "2 in", "3 in", "4 in", "Other"], key="mw_pipe")
+                    if pipe_size == "Other":
+                        pipe_size = st.text_input("Custom Pipe Size", key="mw_custom_pipe")
+                with col2:
+                    thickness = st.selectbox("📏 Thickness", ["0.5 in", "1 in", "1.5 in", "2 in", "Other"], key="mw_thick")
+                    if thickness == "Other":
+                        thickness = st.text_input("Custom Thickness", key="mw_custom_thick")
+                
+                material = f"Mineral Wool - Pipe Size: {pipe_size} - Thickness: {thickness}"
+                qty_val = st.number_input("🔢 Quantity (sections)", min_value=1, value=1, step=1, key="mw_qty")
+                unit_label = "Sections"
+            
+            elif cat_choice == "Fiberglass Insulation":
+                col1, col2 = st.columns(2)
+                with col1:
+                    form_type = st.radio("📦 Form", ["Rolls", "Batts", "Pipe Wrap", "Other"], key="fg_form")
+                    thickness = st.selectbox("📏 Thickness", ["0.25 in", "0.5 in", "1 in", "1.5 in", "2 in", "Other"], key="fg_thick")
+                    if thickness == "Other":
+                        thickness = st.text_input("Custom Thickness", placeholder="e.g. 3 in", key="fg_custom_thick")
+                with col2:
+                    sq_ft_per = st.number_input("📐 Sq Ft per item", min_value=1.0, value=150.0, key="fg_sqft")
+                
+                material = f"Fiberglass {form_type} - {thickness} Thickness"
+                qty_val = st.number_input("🔢 Quantity", min_value=1, value=1, step=1, key="fg_qty")
+                unit_label = form_type
+            
+            elif cat_choice == "Wing Seals":
+                col1, col2 = st.columns(2)
+                with col1:
+                    seal_type = st.radio("🔐 Type", ["Open", "Closed"], horizontal=True, key="ws_type")
+                    size = st.radio("📏 Size", ["1/2 in", "3/4 in"], horizontal=True, key="ws_size")
+                    gauge = st.selectbox("📐 Gauge", [".028", ".032", "Other"], key="ws_gauge")
+                    if gauge == "Other":
+                        gauge = st.text_input("Custom Gauge", key="ws_custom_gauge")
+                with col2:
+                    grooves = st.radio("〰️ Grooves", ["With Grooves (Center)", "Without Grooves"], key="ws_grooves")
+                    joint_pos = st.radio("📍 Joint Position", ["Bottom", "Top", "N/A"], key="ws_joint")
+                
+                material = f"{seal_type} Wing Seal - {size} - {gauge} Gauge - {grooves} - Joint at {joint_pos}"
+                qty_val = st.number_input("🔢 Quantity (pieces)", min_value=1, value=1000, step=100, key="ws_qty")
+                unit_label = "Pieces"
+            
+            elif cat_choice == "Wire":
+                col1, col2 = st.columns(2)
+                with col1:
+                    gauge = st.selectbox("📏 Gauge", ["14", "16", "18", "Other"], key="wire_gauge")
+                    if gauge == "Other":
+                        gauge = st.text_input("Custom Gauge", key="wire_custom_gauge")
+                with col2:
+                    footage_per_roll = st.number_input("📐 Footage per Roll (optional)", min_value=0.0, value=0.0, key="wire_footage")
+                
+                material = f"Wire - {gauge} Gauge"
+                qty_val = st.number_input("🔢 Number of Rolls", min_value=1, value=1, step=1, key="wire_rolls")
+                unit_label = "Rolls"
+            
+            elif cat_choice == "Banding":
+                col1, col2 = st.columns(2)
+                with col1:
+                    osc_type = st.radio("🌀 Type", ["Oscillated", "Non-Oscillated"], key="band_osc")
+                    size = st.radio("📏 Size", ["3/4 in", "1/2 in"], key="band_size")
+                with col2:
+                    gauge = st.selectbox("📐 Gauge", [".015", ".020"], key="band_gauge")
+                    core = st.radio("⚙️ Core", ["Metal Core", "Non-Metal Core"], key="band_core")
+                
+                material = f"{osc_type} Banding - {size} - {gauge} Gauge - {core}"
+                qty_val = st.number_input("📐 Footage per Roll", min_value=0.1, value=100.0, key="band_footage")
+                unit_label = "Rolls"
             
             elif cat_choice == "Other":
-                cat_choice = st.text_input("📝 New Category Name", placeholder="e.g. Accessories")
-                material = st.text_input("📦 Material Description", placeholder="e.g. Custom Gaskets")
-                qty_val = st.number_input("🔢 Qty/Footage per item", min_value=0.1, value=1.0)
-                unit_label = st.text_input("🏷️ Unit Label", value="Units")
-                id_prefix = f"OTH-{cat_choice.upper()[:3]}" if cat_choice else "OTH-UNK"
+                cat_choice = st.text_input("📝 New Category Name", placeholder="e.g. Accessories", key="other_cat")
+                material = st.text_input("📦 Material Description", placeholder="e.g. Custom Gaskets", key="other_mat")
+                qty_val = st.number_input("🔢 Qty/Footage per item", min_value=0.1, value=1.0, key="other_qty")
+                unit_label = st.text_input("🏷️ Unit Label", value="Units", key="other_unit")
             
             st.markdown("</div>", unsafe_allow_html=True)
         
@@ -3533,18 +3545,24 @@ with tab4:
             col1, col2 = st.columns(2)
             
             with col1:
-                item_count = st.number_input(
-                    f"📦 How many {unit_label}?", 
-                    min_value=1, value=1, step=1
-                )
-                
-                total_added = item_count * qty_val
-                st.success(f"**📊 Total:** {total_added} {unit_label.lower()}")
+                if is_serialized:
+                    item_count = st.number_input(
+                        f"📦 How many {unit_label}?", 
+                        min_value=1, value=1, step=1,
+                        key="item_count_serialized"
+                    )
+                    total_added = item_count * qty_val
+                    st.success(f"**📊 Total:** {item_count} {unit_label.lower()} ({total_added:.1f} ft)")
+                else:
+                    # For non-serialized, qty_val IS the quantity
+                    item_count = 1  # Always 1 "batch"
+                    total_added = qty_val
+                    st.success(f"**📊 Total:** {total_added:.0f} {unit_label.lower()}")
             
             with col2:
                 loc_type = st.radio("🏢 Storage Type", ["Rack System", "Floor / Open Space"], horizontal=True, key="storage_type_radio")
             
-            # Storage location input (moved outside columns for better layout)
+            # Storage location input
             if loc_type == "Rack System":
                 subcol1, subcol2, subcol3 = st.columns(3)
                 bay = subcol1.number_input("🅱️ Bay", min_value=1, value=1, key="rack_bay")
@@ -3556,10 +3574,8 @@ with tab4:
                 bay = subcol1.number_input("🅱️ Bay", min_value=1, value=1, key="floor_bay")
                 floor_options = [f"Floor {letter}" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
                 floor_selection = subcol2.selectbox("🔤 Floor Section", floor_options, key="floor_sec")
-                # Extract just the letter from "Floor A" -> "Floor A"
-                floor_letter = floor_selection  # Keep it as "Floor A" format
                 lvl = subcol3.number_input("⬆️ Level", min_value=1, value=1, key="floor_lvl")
-                gen_loc = f"{bay}-{floor_letter}-{lvl}"
+                gen_loc = f"{bay}-{floor_selection}-{lvl}"
             
             st.info(f"📍 **Location:** {gen_loc}")
             
@@ -3567,44 +3583,30 @@ with tab4:
         
         st.markdown("---")
         
-        # ID Generation
-        st.markdown("### Step 4️⃣: 🏷️ Identification")
-
-        st.markdown("---")
+        # ── STEP 4: ID Generation (Only for Serialized Items) ──────────────────
+        id_list = []
         
-        # ID Generation
-        st.markdown("### Step 4️⃣: 🏷️ Identification")
-        
-        with st.container():
-            st.markdown("""
-                <div style="background: linear-gradient(135deg, #fdf4ff 0%, #fae8ff 100%); 
-                            padding: 24px; border-radius: 12px; border-left: 4px solid #9333ea;">
-            """, unsafe_allow_html=True)
+        if is_serialized:
+            st.markdown("### Step 4️⃣: 🏷️ Item Identification")
             
-            # Generate suggested ID prefix
-            if cat_choice in ["Coils", "Rolls"]:
-                suggested_prefix = f"{cat_choice[:-1]}-{metal_code}-{clean_gauge}-{texture_code}"
-                st.info(f"💡 **Suggested format:** `{suggested_prefix}-[NUMBER]` (e.g., {suggested_prefix}-01)")
-            elif 'id_prefix' in dir():
-                st.info(f"💡 **Suggested format:** `{id_prefix}-[NUMBER]`")
-            
-            # Always allow custom ID input
-            if is_serialized:
-                st.markdown("**Enter your Item ID(s):**")
+            with st.container():
+                st.markdown("""
+                    <div style="background: linear-gradient(135deg, #fdf4ff 0%, #fae8ff 100%); 
+                                padding: 24px; border-radius: 12px; border-left: 4px solid #9333ea;">
+                """, unsafe_allow_html=True)
+                
+                st.info(f"💡 **Suggested format:** `{id_prefix}-[NUMBER]` (e.g., {id_prefix}-01)")
                 
                 if item_count == 1:
-                    # Single item - simple text input
                     custom_id = st.text_input(
                         "🏷️ Item ID",
                         value="",
-                        placeholder=f"e.g., {id_prefix}-01" if 'id_prefix' in locals() else "Enter unique ID",
+                        placeholder=f"e.g., {id_prefix}-01",
                         key="custom_single_id",
                         help="Enter any ID you want. Must be unique."
                     )
                     id_list = [custom_id.strip()] if custom_id.strip() else []
-                    
                 else:
-                    # Multiple items - two options
                     id_method = st.radio(
                         "How do you want to assign IDs?",
                         ["Sequential (auto-increment)", "Manual (enter each)"],
@@ -3617,10 +3619,9 @@ with tab4:
                         with col_base:
                             base_id = st.text_input(
                                 "🏷️ Base ID",
-                                value=id_prefix if 'id_prefix' in locals() else cat_choice.upper(),
+                                value=id_prefix,
                                 placeholder="e.g., Coil-AL-016-STP",
-                                key="base_id_input",
-                                help="The prefix before the number"
+                                key="base_id_input"
                             )
                         with col_start:
                             start_num = st.number_input(
@@ -3631,35 +3632,31 @@ with tab4:
                                 key="start_num_input"
                             )
                         
-                        # Generate the list
                         id_list = [f"{base_id}-{str(start_num + i).zfill(2)}" for i in range(item_count)]
                         
-                        # Preview
                         st.markdown("**Preview IDs:**")
                         preview_text = ", ".join(id_list[:5])
                         if len(id_list) > 5:
                             preview_text += f", ... ({len(id_list)} total)"
                         st.code(preview_text)
                     
-                    else:  # Manual entry
+                    else:
                         st.markdown(f"Enter {item_count} IDs (one per line):")
                         manual_ids = st.text_area(
                             "🏷️ Item IDs (one per line)",
                             value="",
                             height=150,
-                            placeholder=f"Example:\n{id_prefix}-01\n{id_prefix}-02\n{id_prefix}-03" if 'id_prefix' in locals() else "Enter one ID per line",
+                            placeholder=f"Example:\n{id_prefix}-01\n{id_prefix}-02\n{id_prefix}-03",
                             key="manual_ids_input"
                         )
-                        
-                        # Parse the IDs
                         id_list = [line.strip() for line in manual_ids.strip().split('\n') if line.strip()]
                         
-                        # Validate count
                         if id_list and len(id_list) != item_count:
-                            st.warning(f"⚠️ You entered {len(id_list)} IDs but specified {item_count} items. Please match the count.")
+                            st.warning(f"⚠️ You entered {len(id_list)} IDs but specified {item_count} items.")
                 
-                # Check for duplicates within the list
+                # Validation for serialized items
                 if id_list:
+                    # Check duplicates within list
                     duplicates_in_list = [id for id in id_list if id_list.count(id) > 1]
                     if duplicates_in_list:
                         st.error(f"❌ Duplicate IDs in your list: {set(duplicates_in_list)}")
@@ -3670,29 +3667,23 @@ with tab4:
                         clashing_ids = [id for id in id_list if id in existing_ids]
                         
                         if clashing_ids:
-                            st.error(f"❌ **These IDs already exist in inventory:**")
-                            for clash_id in clashing_ids:
+                            st.error(f"❌ **These IDs already exist:**")
+                            for clash_id in clashing_ids[:5]:
                                 existing_item = safe_df[safe_df['Item_ID'] == clash_id].iloc[0]
-                                st.markdown(f"- `{clash_id}` → {existing_item['Material']} ({existing_item['Footage']} ft at {existing_item['Location']})")
-                            st.warning("⚠️ Please change the conflicting IDs before adding to cart.")
+                                st.markdown(f"- `{clash_id}` → {existing_item['Material']} at {existing_item['Location']}")
+                            if len(clashing_ids) > 5:
+                                st.markdown(f"- ... and {len(clashing_ids) - 5} more")
                 
-                # Store for form submission
-                id_preview = id_list[0] if id_list else "NO-ID"
-                starting_id = None  # We're using id_list instead
-                
-            else:
-                # Bulk item - no unique IDs needed
-                id_preview = f"{cat_choice.upper()}-BULK"
-                id_list = []
-                st.info("📦 **Bulk item** - No unique IDs needed")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("### Step 4️⃣: ✅ Ready to Add")
+            st.success("📦 **Bulk item** - Will be added to existing stock or create new entry automatically. No ID conflicts possible!")
         
         # Add to Cart Button
         add_item = st.form_submit_button(
             "🛒 Add to Receiving Cart", 
             use_container_width=True, 
-            type="secondary"
+            type="primary"
         )
 
     # ── Process Add to Cart ─────────────────────────────────────────────────────
@@ -3704,31 +3695,29 @@ with tab4:
         elif not material:
             st.error("⚠️ Material details are required!")
         elif is_serialized and not id_list:
-            st.error("⚠️ Please enter Item ID(s) for serialized items!")
+            st.error("⚠️ Please enter Item ID(s) for Coils/Rolls!")
         elif is_serialized and len(id_list) != item_count:
             st.error(f"⚠️ ID count mismatch: You entered {len(id_list)} IDs but specified {item_count} items.")
         else:
-            # Final validation - check for clashes
-            has_clashes = False
+            # Validation for serialized items only
+            has_errors = False
             
-            if is_serialized and safe_df is not None and not safe_df.empty:
-                existing_ids = safe_df['Item_ID'].tolist()
-                clashing_ids = [id for id in id_list if id in existing_ids]
-                
-                if clashing_ids:
-                    st.error(f"❌ Cannot add - these IDs already exist: {clashing_ids}")
-                    st.warning("Please fix the IDs above and try again.")
-                    has_clashes = True
-            
-            # Check for duplicates within the list
-            if is_serialized and id_list:
+            if is_serialized:
+                # Check duplicates within list
                 duplicates_in_list = set([id for id in id_list if id_list.count(id) > 1])
                 if duplicates_in_list:
-                    st.error(f"❌ Cannot add - duplicate IDs in your list: {duplicates_in_list}")
-                    has_clashes = True
+                    st.error(f"❌ Duplicate IDs: {duplicates_in_list}")
+                    has_errors = True
+                
+                # Check against existing inventory
+                if safe_df is not None and not safe_df.empty:
+                    existing_ids = safe_df['Item_ID'].tolist()
+                    clashing_ids = [id for id in id_list if id in existing_ids]
+                    if clashing_ids:
+                        st.error(f"❌ IDs already exist: {clashing_ids[:5]}{'...' if len(clashing_ids) > 5 else ''}")
+                        has_errors = True
             
-            if not has_clashes:
-                # Add to cart
+            if not has_errors:
                 st.session_state.receiving_cart.append({
                     'category': cat_choice,
                     'material': material,
@@ -3738,13 +3727,15 @@ with tab4:
                     'unit_label': unit_label,
                     'location': gen_loc,
                     'is_serialized': is_serialized,
-                    'id_list': id_list if is_serialized else [],  # Store the full list
+                    'id_list': id_list if is_serialized else [],
                     'id_preview': id_list[0] if id_list else f"{cat_choice.upper()}-BULK",
                 })
                 
-                st.success(f"✅ Added: {item_count} × {material} ({total_added} {unit_label.lower()})")
-                if is_serialized and id_list:
+                if is_serialized:
+                    st.success(f"✅ Added: {item_count} × {material}")
                     st.info(f"🏷️ IDs: {', '.join(id_list[:3])}{'...' if len(id_list) > 3 else ''}")
+                else:
+                    st.success(f"✅ Added: {total_added:.0f} {unit_label.lower()} of {material}")
                 st.rerun()
     
     # ── Display Receiving Cart ──────────────────────────────────────────────────
@@ -3757,10 +3748,14 @@ with tab4:
             col_item, col_remove = st.columns([5, 1])
             
             with col_item:
-                st.write(f"**{idx+1}.** {item['item_count']} × {item['material']} = **{item['total_added']} {item['unit_label'].lower()}** → 📍 {item['location']}")
+                if item['is_serialized']:
+                    st.write(f"**{idx+1}.** {item['item_count']} × {item['material']} = **{item['total_added']:.1f} ft** → 📍 {item['location']}")
+                    st.caption(f"🏷️ IDs: {', '.join(item['id_list'][:3])}{'...' if len(item['id_list']) > 3 else ''}")
+                else:
+                    st.write(f"**{idx+1}.** {item['total_added']:.0f} {item['unit_label'].lower()} of {item['material']} → 📍 {item['location']}")
             
             with col_remove:
-                if st.button("🗑️", key=f"remove_receiving_item_{idx}_{item['material'][:10]}"):
+                if st.button("🗑️", key=f"remove_receiving_{idx}"):
                     st.session_state.receiving_cart.pop(idx)
                     st.rerun()
         
@@ -3769,35 +3764,37 @@ with tab4:
         col_process, col_clear = st.columns(2)
 
         with col_process:
-            if st.button("✅ Process All Items to Inventory", type="primary", use_container_width=True, key="process_all_receiving"):
+            if st.button("✅ Process All Items to Inventory", type="primary", use_container_width=True):
                 if not st.session_state.current_po.strip() or not st.session_state.receiving_operator.strip():
                     st.error("⚠️ PO Number and Operator are required!")
                 else:
-                    # FINAL CHECK - verify no clashes before processing
+                    # Final validation for serialized items only
                     all_new_ids = []
                     for item in st.session_state.receiving_cart:
                         if item['is_serialized']:
                             all_new_ids.extend(item['id_list'])
                     
-                    # Check against database
                     has_clashes = False
                     if all_new_ids:
-                        response = supabase.table("inventory").select("Item_ID").in_("Item_ID", all_new_ids).execute()
-                        if response.data:
-                            existing_clashes = [row['Item_ID'] for row in response.data]
-                            st.error(f"❌ **Cannot process - these IDs already exist in database:**")
-                            for clash in existing_clashes:
-                                st.write(f"- `{clash}`")
-                            st.warning("Please remove the conflicting items from cart and re-add with different IDs.")
-                            has_clashes = True
+                        try:
+                            response = supabase.table("inventory").select("Item_ID").in_("Item_ID", all_new_ids).execute()
+                            if response.data:
+                                existing_clashes = [row['Item_ID'] for row in response.data]
+                                st.error(f"❌ **These IDs already exist:**")
+                                for clash in existing_clashes[:5]:
+                                    st.write(f"- `{clash}`")
+                                has_clashes = True
+                        except:
+                            pass
                     
                     if not has_clashes:
-                        with st.spinner("☁️ Processing all items to Cloud Database..."):
+                        with st.spinner("☁️ Processing to Cloud Database..."):
                             try:
                                 items_added = 0
                                 
                                 for item in st.session_state.receiving_cart:
                                     if item['is_serialized']:
+                                        # Coils/Rolls - create individual records
                                         new_rows = []
                                         for unique_id in item['id_list']:
                                             new_rows.append({
@@ -3815,19 +3812,25 @@ with tab4:
                                             items_added += len(new_rows)
                                     
                                     else:
-                                        # Bulk item - check if exists in current inventory
-                                        if not safe_df.empty:
-                                            mask = (safe_df['Category'] == item['category']) & (safe_df['Material'] == item['material'])
-                                            if mask.any():
-                                                current_qty = safe_df.loc[mask, 'Footage'].values[0]
+                                        # Bulk item - add to existing or create new
+                                        # Check if this exact material exists
+                                        try:
+                                            existing_response = supabase.table("inventory").select("*").eq("Category", item['category']).eq("Material", item['material']).execute()
+                                            
+                                            if existing_response.data:
+                                                # Add to existing
+                                                existing_item = existing_response.data[0]
+                                                current_qty = float(existing_item['Footage'])
                                                 new_qty = current_qty + item['total_added']
-                                                bulk_id = safe_df.loc[mask, 'Item_ID'].values[0]
-                                                update_stock(bulk_id, new_qty, st.session_state.receiving_operator, 
-                                                           f"Received {item['total_added']} {item['unit_label'].lower()} (PO: {st.session_state.current_po})")
+                                                
+                                                supabase.table("inventory").update({
+                                                    "Footage": new_qty
+                                                }).eq("Item_ID", existing_item['Item_ID']).execute()
+                                                
                                                 items_added += 1
                                             else:
                                                 # Create new bulk item
-                                                unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                                unique_id = f"{item['category'].upper().replace(' ', '-')}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                                                 new_data = {
                                                     "Item_ID": unique_id,
                                                     "Material": item['material'],
@@ -3839,9 +3842,9 @@ with tab4:
                                                 }
                                                 supabase.table("inventory").insert(new_data).execute()
                                                 items_added += 1
-                                        else:
-                                            # No inventory yet - create first bulk item
-                                            unique_id = f"{item['category'].upper()}-BULK-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                        except Exception as e:
+                                            # If check fails, just create new
+                                            unique_id = f"{item['category'].upper().replace(' ', '-')}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                                             new_data = {
                                                 "Item_ID": unique_id,
                                                 "Material": item['material'],
@@ -3854,42 +3857,190 @@ with tab4:
                                             supabase.table("inventory").insert(new_data).execute()
                                             items_added += 1
                                     
-                                    # Audit log for each cart item
+                                    # Audit log
                                     log_entry = {
-                                        "Item_ID": item['id_preview'],
+                                        "Item_ID": item['id_preview'] if item['is_serialized'] else item['category'],
                                         "Action": "Received",
                                         "User": st.session_state.receiving_operator,
                                         "Timestamp": datetime.now().isoformat(),
-                                        "Details": f"PO: {st.session_state.current_po} | {item['item_count']} × {item['material']} ({item['total_added']} {item['unit_label'].lower()})"
+                                        "Details": f"PO: {st.session_state.current_po} | {item['material']} | Qty: {item['total_added']:.0f} {item['unit_label'].lower()} | Location: {item['location']}"
                                     }
                                     supabase.table("audit_log").insert(log_entry).execute()
                                 
                                 st.cache_data.clear()
+                                st.session_state.force_refresh = True
                                 
-                                st.success(f"✅ Successfully received {items_added} item(s) for PO: {st.session_state.current_po}!")
+                                st.success(f"✅ Successfully processed {items_added} item(s) for PO: {st.session_state.current_po}!")
                                 st.balloons()
                                 
-                                # Clear cart
                                 st.session_state.receiving_cart = []
                                 st.rerun()
                             
                             except Exception as e:
-                                st.error(f"❌ Failed to process items: {e}")
+                                st.error(f"❌ Failed to process: {e}")
         
         with col_clear:
-            if st.button("🗑️ Clear Cart", use_container_width=True, key="clear_receiving_cart"):
+            if st.button("🗑️ Clear Cart", use_container_width=True):
                 st.session_state.receiving_cart = []
                 st.rerun()
     
     elif not st.session_state.receiving_cart:
         st.info("👆 Add items to start building your receiving batch")
     
-    # ── Receipt Report Section ─────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════════
+    # REVERSE RECEIVED ORDER SECTION
+    # ══════════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h2 style="color: #dc2626; margin: 0;">🔄 Reverse Received Order</h2>
+            <p style="color: #64748b; margin-top: 8px;">Undo items received under a specific Purchase Order</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    with st.expander("🔄 Reverse a Received PO", expanded=False):
+        st.warning("⚠️ **Use with caution!** This will remove items from inventory.")
+        
+        # Input PO number to reverse
+        reverse_po = st.text_input(
+            "📄 Enter PO Number to Reverse",
+            placeholder="e.g. PO-2026-001",
+            key="reverse_po_input"
+        )
+        
+        if reverse_po.strip():
+            # Fetch items with this PO
+            try:
+                response = supabase.table("inventory").select("*").eq("Purchase_Order_Num", reverse_po.strip()).execute()
+                
+                if not response.data:
+                    st.info(f"📭 No items found for PO: {reverse_po}")
+                else:
+                    po_items = response.data
+                    po_df = pd.DataFrame(po_items)
+                    
+                    st.markdown(f"### 📋 Items under PO: {reverse_po}")
+                    st.info(f"Found **{len(po_items)}** item(s)")
+                    
+                    # Summary by category
+                    summary = po_df.groupby('Category').agg({
+                        'Footage': 'sum',
+                        'Item_ID': 'count'
+                    }).reset_index()
+                    summary.columns = ['Category', 'Total Footage/Qty', 'Item Count']
+                    
+                    st.dataframe(summary, use_container_width=True, hide_index=True)
+                    
+                    # Show details
+                    with st.expander("📋 View All Items"):
+                        st.dataframe(
+                            po_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location']],
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    
+                    st.markdown("---")
+                    
+                    # Reversal options
+                    reversal_type = st.radio(
+                        "What do you want to reverse?",
+                        ["All items under this PO", "Select specific items"],
+                        key="reversal_type"
+                    )
+                    
+                    items_to_remove = []
+                    
+                    if reversal_type == "All items under this PO":
+                        items_to_remove = [item['Item_ID'] for item in po_items]
+                        st.warning(f"⚠️ This will remove **{len(items_to_remove)}** item(s) from inventory")
+                    
+                    else:
+                        # Multi-select specific items
+                        item_options = [f"{item['Item_ID']} - {item['Material'][:30]}... ({item['Footage']})" for item in po_items]
+                        selected_items = st.multiselect(
+                            "Select items to remove",
+                            item_options,
+                            key="select_items_to_remove"
+                        )
+                        
+                        items_to_remove = [opt.split(" - ")[0] for opt in selected_items]
+                        
+                        if items_to_remove:
+                            st.warning(f"⚠️ This will remove **{len(items_to_remove)}** item(s)")
+                    
+                    if items_to_remove:
+                        reversal_reason = st.text_input(
+                            "Reason for Reversal *",
+                            placeholder="e.g. Wrong PO, duplicate entry, returned to supplier",
+                            key="reversal_reason_input"
+                        )
+                        
+                        confirm_reversal = st.checkbox(
+                            f"I confirm I want to remove {len(items_to_remove)} item(s) from inventory",
+                            key="confirm_po_reversal"
+                        )
+                        
+                        if st.button("🗑️ Reverse Selected Items", type="primary", use_container_width=True):
+                            if not reversal_reason.strip():
+                                st.error("⚠️ Please provide a reason for the reversal")
+                            elif not confirm_reversal:
+                                st.error("⚠️ Please confirm the reversal")
+                            else:
+                                with st.spinner("Reversing..."):
+                                    try:
+                                        removed_count = 0
+                                        
+                                        for item_id in items_to_remove:
+                                            # Get item details for logging
+                                            item_data = next((item for item in po_items if item['Item_ID'] == item_id), None)
+                                            
+                                            if item_data:
+                                                # Delete from inventory
+                                                supabase.table("inventory").delete().eq("Item_ID", item_id).execute()
+                                                removed_count += 1
+                                                
+                                                # Log the reversal
+                                                log_entry = {
+                                                    "Item_ID": item_id,
+                                                    "Action": "Receiving Reversed",
+                                                    "User": st.session_state.get('username', 'Admin'),
+                                                    "Timestamp": datetime.now().isoformat(),
+                                                    "Details": f"Reversed PO: {reverse_po} | {item_data['Material'][:30]} | {item_data['Footage']} | Reason: {reversal_reason}"
+                                                }
+                                                supabase.table("audit_log").insert(log_entry).execute()
+                                        
+                                        # Log overall reversal
+                                        summary_log = {
+                                            "Item_ID": reverse_po,
+                                            "Action": "PO Reversal",
+                                            "User": st.session_state.get('username', 'Admin'),
+                                            "Timestamp": datetime.now().isoformat(),
+                                            "Details": f"Reversed {removed_count} items from PO {reverse_po}. Reason: {reversal_reason}"
+                                        }
+                                        supabase.table("audit_log").insert(summary_log).execute()
+                                        
+                                        st.success(f"✅ Reversed {removed_count} item(s) from PO: {reverse_po}")
+                                        st.balloons()
+                                        
+                                        st.cache_data.clear()
+                                        st.session_state.force_refresh = True
+                                        time.sleep(1)
+                                        st.rerun()
+                                        
+                                    except Exception as e:
+                                        st.error(f"❌ Error: {e}")
+            
+            except Exception as e:
+                st.error(f"Error fetching PO items: {e}")
+    
+    # ══════════════════════════════════════════════════════════════════════════════
+    # RECEIPT REPORT SECTION
+    # ══════════════════════════════════════════════════════════════════════════════
     st.markdown("---")
     st.markdown("""
         <div style="text-align: center; padding: 20px 0;">
             <h2 style="color: #1e40af; margin: 0;">📄 Receipt Report Generator</h2>
-            <p style="color: #64748b; margin-top: 8px;">Generate professional PDF reports for items received under specific Purchase Orders</p>
+            <p style="color: #64748b; margin-top: 8px;">Generate PDF reports for items received under specific Purchase Orders</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -3934,7 +4085,6 @@ with tab4:
                 else:
                     report_df = pd.DataFrame(response.data)
                     
-                    # Generate PDF
                     pdf_buffer = generate_receipt_pdf(
                         po_num=report_po_num,
                         df=report_df,
@@ -3943,7 +4093,6 @@ with tab4:
                     
                     file_name = f"Receipt_{report_po_num.replace(' ', '_')}.pdf"
                     
-                    # Download button
                     st.download_button(
                         label="📥 Download PDF Report",
                         data=pdf_buffer.getvalue(),
@@ -3953,9 +4102,8 @@ with tab4:
                         type="secondary"
                     )
                     
-                    # Email functionality
                     if export_mode == "Download & Email":
-                        with st.spinner("📧 Sending email to admin..."):
+                        with st.spinner("📧 Sending email..."):
                             pdf_buffer.seek(0)
                             
                             email_success = send_receipt_email(
@@ -3966,15 +4114,15 @@ with tab4:
                             )
                             
                             if email_success:
-                                st.success(f"✅ PDF report emailed to admin!")
+                                st.success(f"✅ PDF emailed to admin!")
                             else:
                                 st.warning("⚠️ PDF generated but email failed.")
                     else:
-                        st.success("✅ PDF report generated successfully!")
+                        st.success("✅ PDF generated!")
                         
             except Exception as e:
-                st.error(f"❌ Error generating report: {e}")
-
+                st.error(f"❌ Error: {e}")
+                
 with tab5:
     st.markdown("""
         <div style="text-align: center; padding: 20px 0;">
