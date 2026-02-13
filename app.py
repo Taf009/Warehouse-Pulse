@@ -1672,7 +1672,26 @@ with tab1:
 
 # ── TAB 2: Production Log ────────────────────────────────────────────────────────
 with tab2:
-    st.subheader("📋 Production Log - Multi-Size Orders")
+    st.subheader("📋 Production Log - Multi-Size Orders with Coil Pooling")
+
+    # ══════════════════════════════════════════════════════════════════════════════
+    # MST TIMESTAMP HELPER
+    # ══════════════════════════════════════════════════════════════════════════════
+    def get_mst_timestamp():
+        """Get current timestamp in Mountain Standard Time"""
+        from datetime import timezone, timedelta
+        utc_now = datetime.now(timezone.utc)
+        mst_offset = timedelta(hours=-7)  # MST is UTC-7
+        mst_now = utc_now + mst_offset
+        return mst_now.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    def get_mst_display():
+        """Get formatted display timestamp in MST"""
+        from datetime import timezone, timedelta
+        utc_now = datetime.now(timezone.utc)
+        mst_offset = timedelta(hours=-7)
+        mst_now = utc_now + mst_offset
+        return mst_now.strftime('%B %d, %Y at %I:%M %p MST')
 
     # Guard rails
     if df.empty:
@@ -1682,13 +1701,12 @@ with tab2:
     category_col = next((c for c in df.columns if c.lower() == 'category'), None)
     if not category_col:
         st.error("Column 'Category' not found in inventory data.")
-       # st.stop()
 
     # Initialize session state - start with one default line each
     if "coil_lines" not in st.session_state:
-        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": [], "use_custom": False, "custom_inches": 12.0}]
+        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "pool": [], "use_custom": False, "custom_inches": 12.0}]
     if "roll_lines" not in st.session_state:
-        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "items": [], "use_custom": False, "custom_inches": 12.0}]
+        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "pool": [], "use_custom": False, "custom_inches": 12.0}]
 
     # Material type toggle
     st.markdown("### 🔧 Material Type Filter")
@@ -1711,32 +1729,152 @@ with tab2:
 
     if available_coils.empty and available_rolls.empty:
         st.info("No available stock matching the selected texture.")
-       # st.stop()
 
-    coil_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_coils.iterrows()]
-    roll_options = [f"{r['Item_ID']} - {r['Material']} ({r['Footage']:.1f} ft)" for _, r in available_rolls.iterrows()]
+    # Create option lists with footage info
+    coil_options = [f"{r['Item_ID']} | {r['Material'][:30]}... | {r['Footage']:.1f} ft" for _, r in available_coils.iterrows()]
+    roll_options = [f"{r['Item_ID']} | {r['Material'][:30]}... | {r['Footage']:.1f} ft" for _, r in available_rolls.iterrows()]
 
-    # ── COILS SECTION ───────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════════
+    # POOL HELPER FUNCTIONS
+    # ══════════════════════════════════════════════════════════════════════════════
+    
+    def calculate_pool_capacity(pool_ids, available_df):
+        """Calculate total available footage in a pool"""
+        total = 0
+        for item_id in pool_ids:
+            match = available_df[available_df['Item_ID'] == item_id]
+            if not match.empty:
+                total += float(match.iloc[0]['Footage'])
+        return total
+    
+    def get_pool_details(pool_ids, available_df):
+        """Get detailed info for each item in pool"""
+        details = []
+        for item_id in pool_ids:
+            match = available_df[available_df['Item_ID'] == item_id]
+            if not match.empty:
+                row = match.iloc[0]
+                details.append({
+                    'id': item_id,
+                    'material': row['Material'],
+                    'footage': float(row['Footage']),
+                    'location': row.get('Location', 'N/A')
+                })
+        return details
+
+    def process_pool_deduction(pool_ids, total_needed, production_footage, waste_footage, available_df, 
+                                supabase_client, operator, order_number, client_name, line_description, size_label, pieces):
+        """
+        Process sequential deduction from a pool of coils/rolls.
+        Returns: (success: bool, deduction_log: list, error_message: str)
+        """
+        # Get current footage for each item in pool (fresh from DB)
+        pool_items = []
+        for item_id in pool_ids:
+            try:
+                response = supabase_client.table("inventory").select("*").eq("Item_ID", item_id).execute()
+                if response.data:
+                    item_data = response.data[0]
+                    pool_items.append({
+                        'id': item_id,
+                        'footage': float(item_data['Footage']),
+                        'material': item_data['Material']
+                    })
+            except Exception as e:
+                return False, [], f"Error fetching {item_id}: {e}"
+        
+        # Calculate total available
+        total_available = sum(item['footage'] for item in pool_items)
+        
+        if total_available < total_needed:
+            return False, [], f"Insufficient pool capacity: need {total_needed:.2f} ft, pool has {total_available:.2f} ft"
+        
+        # Sequential deduction
+        remaining_needed = total_needed
+        deduction_log = []
+        
+        for item in pool_items:
+            if remaining_needed <= 0:
+                break
+            
+            available = item['footage']
+            deduct_amount = min(available, remaining_needed)
+            new_footage = available - deduct_amount
+            
+            # Calculate proportion for this deduction (for splitting production vs waste)
+            proportion = deduct_amount / total_needed if total_needed > 0 else 0
+            item_production = production_footage * proportion
+            item_waste = waste_footage * proportion
+            
+            # Determine new status
+            new_status = "Depleted" if new_footage <= 0 else "Active"
+            
+            # Update database
+            try:
+                update_data = {"Footage": new_footage}
+                if new_footage <= 0:
+                    update_data["Status"] = "Depleted"
+                
+                supabase_client.table("inventory").update(update_data).eq("Item_ID", item['id']).execute()
+                
+                # Log this deduction
+                deduction_log.append({
+                    'source_id': item['id'],
+                    'material': item['material'],
+                    'size': size_label,
+                    'pieces': pieces,
+                    'footage_used': deduct_amount,
+                    'production_footage': item_production,
+                    'waste': item_waste,
+                    'previous_footage': available,
+                    'remaining_footage': new_footage,
+                    'status': new_status
+                })
+                
+                # Audit log entry with MST timestamp
+                log_entry = {
+                    "Item_ID": item['id'],
+                    "Action": f"Production: {pieces} pcs of {size_label}",
+                    "User": operator,
+                    "Timestamp": get_mst_timestamp(),
+                    "Details": f"Production: {pieces} pcs of {size_label} ({item_production:.2f} ft production + {item_waste:.2f} ft waste = {deduct_amount:.2f} ft used) for {client_name} (Order: {order_number}) | Pool deduction | Previous: {available:.2f} ft → Remaining: {new_footage:.2f} ft | Status: {new_status}"
+                }
+                supabase_client.table("audit_log").insert(log_entry).execute()
+                
+                remaining_needed -= deduct_amount
+                
+            except Exception as e:
+                return False, deduction_log, f"Error updating {item['id']}: {e}"
+        
+        return True, deduction_log, ""
+
+    # ══════════════════════════════════════════════════════════════════════════════
+    # COILS SECTION WITH POOL
+    # ══════════════════════════════════════════════════════════════════════════════
     st.markdown("### 🌀 Coils Production")
+    
+    # Extra allowance - DEFAULT IS 0
     coil_extra = st.number_input(
         "Extra Inch Allowance per piece (Coils)",
-        min_value=0.0, value=0.5, step=0.1,
-        key="coil_extra_allowance"
+        min_value=0.0, 
+        value=0.0,  # DEFAULT TO 0
+        step=0.1,
+        key="coil_extra_allowance",
+        help="Additional inches added to each piece for trim/overlap"
     )
 
     # Add "Custom" to size options
     COIL_SIZE_OPTIONS = list(SIZE_DISPLAY.keys()) + ["Custom (Inches)", "Custom (Feet)"]
 
-    last_coil_selected = None
-    
     for i in range(len(st.session_state.coil_lines)):
-        line = st.session_state.coil_lines[i]  # Reference to the actual dict
+        line = st.session_state.coil_lines[i]
         
         with st.container(border=True):
+            st.markdown(f"**📦 Coil Production Line {i + 1}**")
+            
             col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1, 1, 0.4])
             
             with col1:
-                # Get current index for the selectbox
                 current_size = line.get("display_size", "#2")
                 if current_size in COIL_SIZE_OPTIONS:
                     default_index = COIL_SIZE_OPTIONS.index(current_size)
@@ -1749,7 +1887,6 @@ with tab2:
                     index=default_index,
                     key=f"c_size_{i}"
                 )
-                # IMPORTANT: Save back to session state
                 st.session_state.coil_lines[i]["display_size"] = size_selection
             
             with col2:
@@ -1761,7 +1898,6 @@ with tab2:
                         step=0.25,
                         key=f"c_custom_in_{i}"
                     )
-                    # IMPORTANT: Save back to session state
                     st.session_state.coil_lines[i]["custom_inches"] = custom_val
                     st.session_state.coil_lines[i]["use_custom"] = True
                     st.session_state.coil_lines[i]["custom_unit"] = "inches"
@@ -1774,14 +1910,11 @@ with tab2:
                         step=0.5,
                         key=f"c_custom_ft_{i}"
                     )
-                    # IMPORTANT: Save back to session state
                     st.session_state.coil_lines[i]["custom_feet"] = custom_val
                     st.session_state.coil_lines[i]["custom_inches"] = custom_val * 12
                     st.session_state.coil_lines[i]["use_custom"] = True
                     st.session_state.coil_lines[i]["custom_unit"] = "feet"
-                    
                 else:
-                    # Standard size - save the standard inches value
                     st.session_state.coil_lines[i]["use_custom"] = False
                     st.session_state.coil_lines[i]["custom_inches"] = SIZE_DISPLAY.get(size_selection, 12.0)
             
@@ -1793,7 +1926,6 @@ with tab2:
                     step=1,
                     key=f"c_pcs_{i}"
                 )
-                # IMPORTANT: Save back to session state
                 st.session_state.coil_lines[i]["pieces"] = pieces_val
             
             with col4:
@@ -1804,41 +1936,129 @@ with tab2:
                     step=0.5,
                     key=f"c_waste_{i}"
                 )
-                # IMPORTANT: Save back to session state
                 st.session_state.coil_lines[i]["waste"] = waste_val
-                
-                # Show calculated footage
-                if pieces_val > 0:
-                    if size_selection in ["Custom (Inches)", "Custom (Feet)"]:
-                        calc_inches = (st.session_state.coil_lines[i]["custom_inches"] + coil_extra) * pieces_val
-                    else:
-                        std_inches = SIZE_DISPLAY.get(size_selection, 12.0)
-                        calc_inches = (std_inches + coil_extra) * pieces_val
-                    
-                    calc_footage = calc_inches / 12.0 + waste_val
-                    st.metric("Total FT", f"{calc_footage:.2f}")
             
             with col5:
-                if st.button("🗑", key=f"del_coil_{i}", help="Remove this line"):
+                if st.button("🗑", key=f"del_coil_{i}", help="Remove line"):
                     st.session_state.coil_lines.pop(i)
                     st.rerun()
             
-            # Source selection
-            current_defaults = [opt for opt in line.get("items", []) if opt in coil_options]
-            if not current_defaults and last_coil_selected and last_coil_selected in coil_options:
-                current_defaults = [last_coil_selected]
-
-            selected_items = st.multiselect(
-                "🎯 Select source coil(s)",
-                options=coil_options,
-                default=current_defaults,
-                key=f"c_source_{i}"
-            )
-            # IMPORTANT: Save back to session state
-            st.session_state.coil_lines[i]["items"] = selected_items
-
-            if selected_items:
-                last_coil_selected = selected_items[0]
+            # Calculate required footage for this line
+            if pieces_val > 0:
+                if size_selection in ["Custom (Inches)", "Custom (Feet)"]:
+                    calc_inches = (st.session_state.coil_lines[i]["custom_inches"] + coil_extra) * pieces_val
+                else:
+                    std_inches = SIZE_DISPLAY.get(size_selection, 12.0)
+                    calc_inches = (std_inches + coil_extra) * pieces_val
+                
+                production_footage = calc_inches / 12.0
+                total_footage_needed = production_footage + waste_val
+                
+                # Show calculated footage
+                st.caption(f"📊 **Production:** {production_footage:.2f} ft + **Waste:** {waste_val:.1f} ft = **Total:** {total_footage_needed:.2f} ft")
+            else:
+                production_footage = 0
+                total_footage_needed = 0
+            
+            # ── COIL POOL SELECTOR ──────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("**🏊 Coil Pool** - Select source coils in order of deduction")
+            
+            # Initialize pool if not exists
+            if "pool" not in st.session_state.coil_lines[i]:
+                st.session_state.coil_lines[i]["pool"] = []
+            
+            current_pool = st.session_state.coil_lines[i]["pool"]
+            
+            # Pool management columns
+            pool_col1, pool_col2 = st.columns([3, 2])
+            
+            with pool_col1:
+                # Filter out already selected coils
+                available_for_pool = [opt for opt in coil_options if opt.split(" | ")[0] not in current_pool]
+                
+                add_to_pool = st.selectbox(
+                    "➕ Add coil to pool",
+                    ["-- Select to add --"] + available_for_pool,
+                    key=f"add_pool_coil_{i}"
+                )
+                
+                if add_to_pool != "-- Select to add --":
+                    if st.button("➕ Add to Pool", key=f"btn_add_pool_{i}", type="secondary"):
+                        coil_id = add_to_pool.split(" | ")[0]
+                        st.session_state.coil_lines[i]["pool"].append(coil_id)
+                        st.rerun()
+            
+            with pool_col2:
+                # Pool capacity display
+                pool_capacity = calculate_pool_capacity(current_pool, available_coils)
+                
+                if total_footage_needed > 0:
+                    if pool_capacity >= total_footage_needed:
+                        st.success(f"✅ Pool: {pool_capacity:,.1f} ft available")
+                        st.caption(f"Need: {total_footage_needed:,.1f} ft")
+                    else:
+                        shortage = total_footage_needed - pool_capacity
+                        st.error(f"❌ Pool: {pool_capacity:,.1f} ft (short {shortage:,.1f} ft)")
+                else:
+                    st.info(f"🏊 Pool: {pool_capacity:,.1f} ft available")
+            
+            # Display current pool with reordering
+            if current_pool:
+                st.markdown("**📋 Current Pool (deduction order):**")
+                
+                pool_details = get_pool_details(current_pool, available_coils)
+                
+                for idx, item in enumerate(pool_details):
+                    pcol1, pcol2, pcol3, pcol4 = st.columns([0.3, 2.5, 1, 0.5])
+                    
+                    with pcol1:
+                        st.markdown(f"**{idx + 1}.**")
+                    
+                    with pcol2:
+                        st.markdown(f"`{item['id']}` - **{item['footage']:,.1f} ft**")
+                        st.caption(f"{item['material'][:40]}...")
+                    
+                    with pcol3:
+                        # Move up/down buttons
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            if idx > 0:
+                                if st.button("⬆️", key=f"up_{i}_{idx}", help="Move up"):
+                                    pool = st.session_state.coil_lines[i]["pool"]
+                                    pool[idx], pool[idx-1] = pool[idx-1], pool[idx]
+                                    st.rerun()
+                        with btn_col2:
+                            if idx < len(current_pool) - 1:
+                                if st.button("⬇️", key=f"down_{i}_{idx}", help="Move down"):
+                                    pool = st.session_state.coil_lines[i]["pool"]
+                                    pool[idx], pool[idx+1] = pool[idx+1], pool[idx]
+                                    st.rerun()
+                    
+                    with pcol4:
+                        if st.button("❌", key=f"remove_pool_{i}_{idx}", help="Remove"):
+                            st.session_state.coil_lines[i]["pool"].pop(idx)
+                            st.rerun()
+                
+                # Show deduction preview
+                if total_footage_needed > 0 and pool_capacity >= total_footage_needed:
+                    with st.expander("👁️ Preview Deduction Sequence"):
+                        remaining = total_footage_needed
+                        st.markdown("**How footage will be deducted:**")
+                        
+                        for item in pool_details:
+                            if remaining <= 0:
+                                st.markdown(f"- `{item['id']}`: ✅ No deduction needed (stays at {item['footage']:,.1f} ft)")
+                                continue
+                            
+                            deduct = min(item['footage'], remaining)
+                            new_footage = item['footage'] - deduct
+                            status = "🔴 **DEPLETED**" if new_footage <= 0 else f"🟢 {new_footage:,.1f} ft remaining"
+                            
+                            st.markdown(f"- `{item['id']}`: **-{deduct:,.1f} ft** → {status}")
+                            remaining -= deduct
+            else:
+                st.info("👆 Add coils to the pool above")
             
             # Show summary for custom sizes
             if size_selection in ["Custom (Inches)", "Custom (Feet)"] and pieces_val > 0:
@@ -1852,7 +2072,7 @@ with tab2:
             "display_size": "#2", 
             "pieces": 0, 
             "waste": 0.0,
-            "items": [], 
+            "pool": [], 
             "use_custom": False, 
             "custom_inches": 12.0, 
             "custom_feet": 1.0,
@@ -1862,35 +2082,55 @@ with tab2:
 
     st.divider()
 
-    # ── ROLLS SECTION ───────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════════
+    # ROLLS SECTION WITH POOL
+    # ══════════════════════════════════════════════════════════════════════════════
     st.markdown("### 🗞️ Rolls Production")
+    
+    # Extra allowance - DEFAULT IS 0
     roll_extra = st.number_input(
         "Extra Inch Allowance per piece (Rolls)",
-        min_value=0.0, value=0.5, step=0.1,
-        key="roll_extra_allowance"
+        min_value=0.0, 
+        value=0.0,  # DEFAULT TO 0
+        step=0.1,
+        key="roll_extra_allowance",
+        help="Additional inches added to each piece for trim/overlap"
     )
 
-    last_roll_selected = None
-    for i, line in enumerate(st.session_state.roll_lines):
+    for i in range(len(st.session_state.roll_lines)):
+        line = st.session_state.roll_lines[i]
+        
         with st.container(border=True):
+            st.markdown(f"**📦 Roll Production Line {i + 1}**")
+            
             r1, r2, r3, r4 = st.columns([3, 1.2, 1.2, 0.4])
+            
             with r1:
+                current_roll_size = line.get("display_size", "#2")
+                if current_roll_size in list(SIZE_DISPLAY.keys()):
+                    roll_default_idx = list(SIZE_DISPLAY.keys()).index(current_roll_size)
+                else:
+                    roll_default_idx = 0
+                
                 line["display_size"] = st.selectbox(
                     "Size", list(SIZE_DISPLAY.keys()),
+                    index=roll_default_idx,
                     key=f"r_size_{i}"
                 )
             with r2:
                 line["pieces"] = st.number_input(
                     "Pieces", min_value=0, step=1,
+                    value=int(line.get("pieces", 0)),
                     key=f"r_pcs_{i}"
                 )
             with r3:
                 line["waste"] = st.number_input(
                     "Waste (ft)", min_value=0.0, step=0.5,
+                    value=float(line.get("waste", 0.0)),
                     key=f"r_waste_{i}"
                 )
             with r4:
-                if st.button("🗑", key=f"del_roll_{i}", help="Remove this line"):
+                if st.button("🗑", key=f"del_roll_{i}", help="Remove line"):
                     st.session_state.roll_lines.pop(i)
                     st.rerun()
 
@@ -1900,44 +2140,137 @@ with tab2:
                 key=f"r_custom_chk_{i}"
             )
 
-            current_custom = line.get("custom_inches")
-            safe_custom_value = 12.0 if current_custom is None else max(0.1, float(current_custom))
-
             if line["use_custom"]:
+                current_custom = line.get("custom_inches", 12.0)
                 line["custom_inches"] = st.number_input(
                     "Custom length per piece (inches)",
                     min_value=0.1,
-                    value=safe_custom_value,
+                    value=float(current_custom) if current_custom else 12.0,
                     step=0.25,
                     key=f"r_custom_in_{i}"
                 )
             else:
                 line["custom_inches"] = 0.0
+            
+            # Calculate required footage
+            if line["pieces"] > 0:
+                if line["use_custom"]:
+                    calc_inches = (line["custom_inches"] + roll_extra) * line["pieces"]
+                else:
+                    std_inches = SIZE_DISPLAY.get(line["display_size"], 12.0)
+                    calc_inches = (std_inches + roll_extra) * line["pieces"]
+                
+                roll_production_footage = calc_inches / 12.0
+                roll_total_needed = roll_production_footage + line["waste"]
+                
+                st.caption(f"📊 **Production:** {roll_production_footage:.2f} ft + **Waste:** {line['waste']:.1f} ft = **Total:** {roll_total_needed:.2f} ft")
+            else:
+                roll_production_footage = 0
+                roll_total_needed = 0
 
-            current_defaults = [opt for opt in line["items"] if opt in roll_options]
-            if not current_defaults and last_roll_selected and last_roll_selected in roll_options:
-                current_defaults = [last_roll_selected]
+            # ── ROLL POOL SELECTOR ──────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("**🏊 Roll Pool** - Select source rolls in order of deduction")
+            
+            if "pool" not in line:
+                line["pool"] = []
+            
+            current_roll_pool = line["pool"]
+            
+            rpool_col1, rpool_col2 = st.columns([3, 2])
+            
+            with rpool_col1:
+                available_for_roll_pool = [opt for opt in roll_options if opt.split(" | ")[0] not in current_roll_pool]
+                
+                add_to_roll_pool = st.selectbox(
+                    "➕ Add roll to pool",
+                    ["-- Select to add --"] + available_for_roll_pool,
+                    key=f"add_pool_roll_{i}"
+                )
+                
+                if add_to_roll_pool != "-- Select to add --":
+                    if st.button("➕ Add to Pool", key=f"btn_add_roll_pool_{i}", type="secondary"):
+                        roll_id = add_to_roll_pool.split(" | ")[0]
+                        line["pool"].append(roll_id)
+                        st.rerun()
+            
+            with rpool_col2:
+                roll_pool_capacity = calculate_pool_capacity(current_roll_pool, available_rolls)
+                
+                if roll_total_needed > 0:
+                    if roll_pool_capacity >= roll_total_needed:
+                        st.success(f"✅ Pool: {roll_pool_capacity:,.1f} ft")
+                        st.caption(f"Need: {roll_total_needed:,.1f} ft")
+                    else:
+                        shortage = roll_total_needed - roll_pool_capacity
+                        st.error(f"❌ Short {shortage:,.1f} ft")
+                else:
+                    st.info(f"🏊 Pool: {roll_pool_capacity:,.1f} ft")
+            
+            # Display current roll pool
+            if current_roll_pool:
+                st.markdown("**📋 Current Pool (deduction order):**")
+                
+                roll_pool_details = get_pool_details(current_roll_pool, available_rolls)
+                
+                for idx, item in enumerate(roll_pool_details):
+                    rpcol1, rpcol2, rpcol3, rpcol4 = st.columns([0.3, 2.5, 1, 0.5])
+                    
+                    with rpcol1:
+                        st.markdown(f"**{idx + 1}.**")
+                    
+                    with rpcol2:
+                        st.markdown(f"`{item['id']}` - **{item['footage']:,.1f} ft**")
+                        st.caption(f"{item['material'][:40]}...")
+                    
+                    with rpcol3:
+                        btn_c1, btn_c2 = st.columns(2)
+                        with btn_c1:
+                            if idx > 0 and st.button("⬆️", key=f"rup_{i}_{idx}"):
+                                line["pool"][idx], line["pool"][idx-1] = line["pool"][idx-1], line["pool"][idx]
+                                st.rerun()
+                        with btn_c2:
+                            if idx < len(current_roll_pool) - 1 and st.button("⬇️", key=f"rdown_{i}_{idx}"):
+                                line["pool"][idx], line["pool"][idx+1] = line["pool"][idx+1], line["pool"][idx]
+                                st.rerun()
+                    
+                    with rpcol4:
+                        if st.button("❌", key=f"rrem_{i}_{idx}"):
+                            line["pool"].pop(idx)
+                            st.rerun()
+                
+                # Preview
+                if roll_total_needed > 0 and roll_pool_capacity >= roll_total_needed:
+                    with st.expander("👁️ Preview Deduction Sequence"):
+                        remaining = roll_total_needed
+                        for item in roll_pool_details:
+                            if remaining <= 0:
+                                st.markdown(f"- `{item['id']}`: ✅ No deduction (stays at {item['footage']:,.1f} ft)")
+                                continue
+                            deduct = min(item['footage'], remaining)
+                            new_footage = item['footage'] - deduct
+                            status = "🔴 **DEPLETED**" if new_footage <= 0 else f"🟢 {new_footage:,.1f} ft remaining"
+                            st.markdown(f"- `{item['id']}`: **-{deduct:,.1f} ft** → {status}")
+                            remaining -= deduct
+            else:
+                st.info("👆 Add rolls to the pool above")
 
-            line["items"] = st.multiselect(
-                "Select source roll(s)",
-                options=roll_options,
-                default=current_defaults,
-                key=f"r_source_{i}"
-            )
-
-            if line["items"]:
-                last_roll_selected = line["items"][0]
-
-    if st.button("➕ Add another roll size", use_container_width=True):
+    if st.button("➕ Add another roll size", use_container_width=True, key="add_roll_line"):
         st.session_state.roll_lines.append({
-            "display_size": "#2", "pieces": 0, "waste": 0.0,
-            "items": [], "use_custom": False, "custom_inches": 12.0
+            "display_size": "#2", 
+            "pieces": 0, 
+            "waste": 0.0,
+            "pool": [], 
+            "use_custom": False, 
+            "custom_inches": 12.0
         })
         st.rerun()
 
     st.divider()
 
-    # ── SUBMISSION FORM ─────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════════
+    # SUBMISSION FORM
+    # ══════════════════════════════════════════════════════════════════════════════
     with st.form("production_order_form", clear_on_submit=True):
         st.markdown("#### 📑 Order Information")
         col1, col2, col3 = st.columns(3)
@@ -1966,77 +2299,246 @@ with tab2:
         if not all([client_name.strip(), order_number.strip(), operator_name.strip()]):
             st.error("Client Name, Order Number, and Operator Name are required.")
         else:
-            feedback = []
-            deduction_details = []
-            success = True
-
-            # Process Coils
-            for line in st.session_state.coil_lines:
-                ok, ft = process_production_line(
-                    line, coil_extra, "Coil",
-                    order_number, client_name, operator_name,
-                    feedback, deduction_details
-                )
-                if not ok:
-                    success = False
-                    break
-
-            # Process Rolls
-            if success:
-                for line in st.session_state.roll_lines:
-                    ok, ft = process_production_line(
-                        line, roll_extra, "Roll",
-                        order_number, client_name, operator_name,
-                        feedback, deduction_details
-                    )
-                    if not ok:
-                        success = False
-                        break
-
+            # ══════════════════════════════════════════════════════════════════════
+            # VALIDATION - Check all pools have sufficient capacity
+            # ══════════════════════════════════════════════════════════════════════
+            validation_errors = []
             
-            
-            if success:
-                st.success(f"Order **{order_number}** completed successfully! 🎉")
-                for msg in feedback:
-                    st.info(msg)
-
-                # Generate PDF
-                pdf_buffer = generate_production_pdf(
-                    order_number=order_number,
-                    client_name=client_name,
-                    operator_name=operator_name,
-                    deduction_details=deduction_details,
-                    box_usage=box_usage
-                )
-
-                # Send email
-                if send_production_pdf(pdf_buffer, order_number, client_name):
-                    st.balloons()
-                    st.success("PDF generated and emailed to admin! Form cleared.")
-                else:
-                    st.warning("PDF generated, but email failed. Form cleared anyway.")
-
-                # Clear dynamic lines only (form fields auto-clear via clear_on_submit)
-                st.session_state.coil_lines = []
-                st.session_state.roll_lines = []
-
-                # FORCE COMPLETE REFRESH
-                st.cache_data.clear()
-                if 'df' in st.session_state:
-                    del st.session_state['df']
-                if 'df_audit' in st.session_state:
-                    del st.session_state['df_audit']
-                st.session_state.force_refresh = True
+            # Check coil lines
+            for i, line in enumerate(st.session_state.coil_lines):
+                if line["pieces"] <= 0:
+                    continue
                 
-                time.sleep(1)
-                st.rerun()
-
+                if not line.get("pool"):
+                    validation_errors.append(f"Coil Line {i+1}: No coils in pool")
+                    continue
+                
+                # Calculate required footage
+                if line.get("use_custom") or line["display_size"] in ["Custom (Inches)", "Custom (Feet)"]:
+                    calc_inches = (line.get("custom_inches", 12.0) + coil_extra) * line["pieces"]
+                else:
+                    std_inches = SIZE_DISPLAY.get(line["display_size"], 12.0)
+                    calc_inches = (std_inches + coil_extra) * line["pieces"]
+                
+                production_footage = calc_inches / 12.0
+                total_needed = production_footage + line["waste"]
+                
+                pool_capacity = calculate_pool_capacity(line["pool"], available_coils)
+                
+                if pool_capacity < total_needed:
+                    validation_errors.append(f"Coil Line {i+1}: Pool has {pool_capacity:.1f} ft, needs {total_needed:.1f} ft")
+            
+            # Check roll lines
+            for i, line in enumerate(st.session_state.roll_lines):
+                if line["pieces"] <= 0:
+                    continue
+                
+                if not line.get("pool"):
+                    validation_errors.append(f"Roll Line {i+1}: No rolls in pool")
+                    continue
+                
+                if line.get("use_custom"):
+                    calc_inches = (line.get("custom_inches", 12.0) + roll_extra) * line["pieces"]
+                else:
+                    std_inches = SIZE_DISPLAY.get(line["display_size"], 12.0)
+                    calc_inches = (std_inches + roll_extra) * line["pieces"]
+                
+                production_footage = calc_inches / 12.0
+                total_needed = production_footage + line["waste"]
+                
+                pool_capacity = calculate_pool_capacity(line["pool"], available_rolls)
+                
+                if pool_capacity < total_needed:
+                    validation_errors.append(f"Roll Line {i+1}: Pool has {pool_capacity:.1f} ft, needs {total_needed:.1f} ft")
+            
+            if validation_errors:
+                st.error("❌ **Validation Errors:**")
+                for err in validation_errors:
+                    st.error(f"• {err}")
             else:
-                st.error("Order failed — no changes were saved.")
-                for msg in feedback:
-                    if msg.startswith("✗"):
-                        st.error(msg)
-# ══════════════════════════════════════════════════════════════════════════════
+                # ══════════════════════════════════════════════════════════════════
+                # PROCESS ALL LINES
+                # ══════════════════════════════════════════════════════════════════
+                with st.spinner("Processing production order..."):
+                    all_deductions = []
+                    pool_mapping = {}
+                    success = True
+                    feedback = []
+                    
+                    # Process Coil Lines
+                    for i, line in enumerate(st.session_state.coil_lines):
+                        if line["pieces"] <= 0:
+                            continue
+                        
+                        size_label = line["display_size"]
+                        if line.get("use_custom") or line["display_size"] in ["Custom (Inches)", "Custom (Feet)"]:
+                            if line.get("custom_unit") == "feet":
+                                size_label = f"Custom {line.get('custom_feet', 1.0)} ft"
+                            else:
+                                size_label = f"Custom {line.get('custom_inches', 12.0)} in"
+                        
+                        # Calculate footage
+                        if line.get("use_custom") or line["display_size"] in ["Custom (Inches)", "Custom (Feet)"]:
+                            calc_inches = (line.get("custom_inches", 12.0) + coil_extra) * line["pieces"]
+                        else:
+                            std_inches = SIZE_DISPLAY.get(line["display_size"], 12.0)
+                            calc_inches = (std_inches + coil_extra) * line["pieces"]
+                        
+                        production_footage = calc_inches / 12.0
+                        waste_footage = line["waste"]
+                        total_needed = production_footage + waste_footage
+                        
+                        line_desc = f"Coil Production: {line['pieces']} pcs of {size_label}"
+                        
+                        ok, deduction_log, error = process_pool_deduction(
+                            pool_ids=line["pool"],
+                            total_needed=total_needed,
+                            production_footage=production_footage,
+                            waste_footage=waste_footage,
+                            available_df=available_coils,
+                            supabase_client=supabase,
+                            operator=operator_name,
+                            order_number=order_number,
+                            client_name=client_name,
+                            line_description=line_desc,
+                            size_label=size_label,
+                            pieces=line["pieces"]
+                        )
+                        
+                        if not ok:
+                            st.error(f"❌ Coil Line {i+1}: {error}")
+                            success = False
+                            break
+                        
+                        # Store for PDF
+                        for ded in deduction_log:
+                            ded['material_type'] = 'Coil'
+                            all_deductions.append(ded)
+                        
+                        pool_mapping[f"coil_line_{i+1}"] = {
+                            'size': size_label,
+                            'pieces': line['pieces'],
+                            'total_footage': total_needed,
+                            'production_footage': production_footage,
+                            'waste': waste_footage,
+                            'sources': deduction_log
+                        }
+                        
+                        # Build traceability string
+                        source_breakdown = " | ".join([f"{d['footage_used']:.1f}ft from {d['source_id']}" for d in deduction_log])
+                        feedback.append(f"✓ Coil {size_label}: {line['pieces']} pcs ({total_needed:.2f} ft) ← {source_breakdown}")
+                    
+                    # Process Roll Lines
+                    if success:
+                        for i, line in enumerate(st.session_state.roll_lines):
+                            if line["pieces"] <= 0:
+                                continue
+                            
+                            size_label = line["display_size"]
+                            if line.get("use_custom"):
+                                size_label = f"Custom {line.get('custom_inches', 12.0)} in"
+                            
+                            if line.get("use_custom"):
+                                calc_inches = (line.get("custom_inches", 12.0) + roll_extra) * line["pieces"]
+                            else:
+                                std_inches = SIZE_DISPLAY.get(line["display_size"], 12.0)
+                                calc_inches = (std_inches + roll_extra) * line["pieces"]
+                            
+                            production_footage = calc_inches / 12.0
+                            waste_footage = line["waste"]
+                            total_needed = production_footage + waste_footage
+                            
+                            line_desc = f"Roll Production: {line['pieces']} pcs of {size_label}"
+                            
+                            ok, deduction_log, error = process_pool_deduction(
+                                pool_ids=line["pool"],
+                                total_needed=total_needed,
+                                production_footage=production_footage,
+                                waste_footage=waste_footage,
+                                available_df=available_rolls,
+                                supabase_client=supabase,
+                                operator=operator_name,
+                                order_number=order_number,
+                                client_name=client_name,
+                                line_description=line_desc,
+                                size_label=size_label,
+                                pieces=line["pieces"]
+                            )
+                            
+                            if not ok:
+                                st.error(f"❌ Roll Line {i+1}: {error}")
+                                success = False
+                                break
+                            
+                            for ded in deduction_log:
+                                ded['material_type'] = 'Roll'
+                                all_deductions.append(ded)
+                            
+                            pool_mapping[f"roll_line_{i+1}"] = {
+                                'size': size_label,
+                                'pieces': line['pieces'],
+                                'total_footage': total_needed,
+                                'production_footage': production_footage,
+                                'waste': waste_footage,
+                                'sources': deduction_log
+                            }
+                            
+                            source_breakdown = " | ".join([f"{d['footage_used']:.1f}ft from {d['source_id']}" for d in deduction_log])
+                            feedback.append(f"✓ Roll {size_label}: {line['pieces']} pcs ({total_needed:.2f} ft) ← {source_breakdown}")
+                    
+                    if success:
+                        st.success(f"Order **{order_number}** completed successfully! 🎉")
+                        
+                        for msg in feedback:
+                            st.info(msg)
+                        
+                        # Show pool deduction summary
+                        st.markdown("### 📊 Pool Deduction Summary")
+                        
+                        for line_key, line_data in pool_mapping.items():
+                            with st.expander(f"📦 {line_key.replace('_', ' ').title()}: {line_data['size']} ({line_data['pieces']} pcs)"):
+                                st.markdown(f"**Total:** {line_data['total_footage']:.2f} ft (Production: {line_data['production_footage']:.2f} + Waste: {line_data['waste']:.2f})")
+                                st.markdown("**Source Breakdown:**")
+                                for src in line_data['sources']:
+                                    status_icon = "🔴" if src['status'] == 'Depleted' else "🟢"
+                                    st.markdown(f"- `{src['source_id']}`: **{src['footage_used']:.2f} ft** | {src['previous_footage']:.1f} → {src['remaining_footage']:.1f} ft {status_icon}")
+                        
+                        # Generate PDF
+                        pdf_buffer = generate_production_pdf(
+                            order_number=order_number,
+                            client_name=client_name,
+                            operator_name=operator_name,
+                            deduction_details=all_deductions,
+                            box_usage=box_usage,
+                            coil_extra=coil_extra,
+                            roll_extra=roll_extra
+                        )
+
+                        # Send email
+                        if send_production_pdf(pdf_buffer, order_number, client_name):
+                            st.balloons()
+                            st.success("PDF generated and emailed to admin!")
+                        else:
+                            st.warning("PDF generated, but email failed.")
+
+                        # Clear lines
+                        st.session_state.coil_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "pool": [], "use_custom": False, "custom_inches": 12.0}]
+                        st.session_state.roll_lines = [{"display_size": "#2", "pieces": 0, "waste": 0.0, "pool": [], "use_custom": False, "custom_inches": 12.0}]
+
+                        # Force refresh
+                        st.cache_data.clear()
+                        if 'df' in st.session_state:
+                            del st.session_state['df']
+                        if 'df_audit' in st.session_state:
+                            del st.session_state['df_audit']
+                        st.session_state.force_refresh = True
+                        
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Order failed — check errors above.")
+
+    # ══════════════════════════════════════════════════════════════════════════════
     # PRODUCTION ORDER REVERSAL SECTION
     # ══════════════════════════════════════════════════════════════════════════════
     st.markdown("---")
@@ -2052,7 +2554,7 @@ with tab2:
         
         try:
             # Fetch recent production orders from audit log
-            response = supabase.table("audit_log").select("*").ilike("Action", "%Production:%").order("Timestamp", desc=True).limit(50).execute()
+            response = supabase.table("audit_log").select("*").ilike("Action", "%Production%").order("Timestamp", desc=True).limit(100).execute()
             
             if not response.data:
                 st.info("📭 No recent production orders found")
@@ -2065,7 +2567,7 @@ with tab2:
                 
                 for log in response.data:
                     details = log.get('Details', '')
-                    # Extract order number from details like "Production: 10 pcs of #19 (52.50 ft used) for ClientName (Order: ORD-001)"
+                    # Extract order number from details
                     order_match = re.search(r'\(Order:\s*([^)]+)\)', details)
                     if order_match:
                         order_num = order_match.group(1).strip()
@@ -2077,25 +2579,23 @@ with tab2:
                     # Create selection list
                     order_options = []
                     for order_num, logs in orders.items():
-                        # Get the most recent timestamp and client
                         latest_log = max(logs, key=lambda x: x.get('Timestamp', ''))
                         details = latest_log.get('Details', '')
                         
                         # Extract client name
                         client_match = re.search(r'for\s+([^(]+)\s*\(Order:', details)
-                        client_name = client_match.group(1).strip() if client_match else "Unknown"
+                        client_name_extracted = client_match.group(1).strip() if client_match else "Unknown"
                         
                         timestamp = latest_log.get('Timestamp', '')[:16]
                         
                         order_options.append({
-                            'display': f"{order_num} - {client_name} ({timestamp})",
+                            'display': f"{order_num} - {client_name_extracted} ({timestamp})",
                             'order_num': order_num,
                             'logs': logs,
-                            'client': client_name,
+                            'client': client_name_extracted,
                             'timestamp': timestamp
                         })
                     
-                    # Sort by timestamp (newest first)
                     order_options.sort(key=lambda x: x['timestamp'], reverse=True)
                     
                     selected_order = st.selectbox(
@@ -2105,7 +2605,6 @@ with tab2:
                     )
                     
                     if selected_order != "-- Select an order --":
-                        # Find the selected order
                         selected = next((o for o in order_options if o['display'] == selected_order), None)
                         
                         if selected:
@@ -2116,33 +2615,41 @@ with tab2:
                             
                             st.markdown("**Items to Restore:**")
                             
-                            # Parse each log entry to get deduction details
                             items_to_restore = []
                             
                             for log in selected['logs']:
                                 details = log.get('Details', '')
                                 item_id = log.get('Item_ID', '')
                                 
-                                # Parse details like "Production: 10 pcs of #19 (52.50 ft used) for ClientName (Order: ORD-001)"
-                                # Or "Updated Item COIL-001 to 2947.50 ft via Production: 10 pcs..."
+                                # Parse footage - handle both old and new format
+                                # New format: "Production: X pcs of SIZE (Y ft production + Z ft waste = W ft used)"
+                                # Old format: "Production: X pcs of SIZE (W ft used)"
                                 
-                                footage_match = re.search(r'(\d+\.?\d*)\s*ft\s*used', details)
+                                footage_match = re.search(r'(\d+\.?\d*)\s*ft\s*(?:used|production)', details)
                                 pieces_match = re.search(r'Production:\s*(\d+)\s*pcs\s*of\s*([^(]+)', details)
                                 
-                                if footage_match:
+                                # Try to get total used (for pool deductions)
+                                total_match = re.search(r'=\s*(\d+\.?\d*)\s*ft\s*used', details)
+                                
+                                if total_match:
+                                    footage_used = float(total_match.group(1))
+                                elif footage_match:
                                     footage_used = float(footage_match.group(1))
-                                    pieces = int(pieces_match.group(1)) if pieces_match else 0
-                                    size = pieces_match.group(2).strip() if pieces_match else "Unknown"
-                                    
-                                    items_to_restore.append({
-                                        'item_id': item_id,
-                                        'footage_to_restore': footage_used,
-                                        'pieces': pieces,
-                                        'size': size,
-                                        'original_log': log
-                                    })
-                                    
-                                    st.write(f"• **{item_id}**: +{footage_used:.2f} ft ({pieces} pcs of {size})")
+                                else:
+                                    continue
+                                
+                                pieces = int(pieces_match.group(1)) if pieces_match else 0
+                                size = pieces_match.group(2).strip() if pieces_match else "Unknown"
+                                
+                                items_to_restore.append({
+                                    'item_id': item_id,
+                                    'footage_to_restore': footage_used,
+                                    'pieces': pieces,
+                                    'size': size,
+                                    'original_log': log
+                                })
+                                
+                                st.write(f"• **{item_id}**: +{footage_used:.2f} ft ({pieces} pcs of {size})")
                             
                             if items_to_restore:
                                 total_to_restore = sum(item['footage_to_restore'] for item in items_to_restore)
@@ -2150,7 +2657,6 @@ with tab2:
                                 
                                 st.markdown("---")
                                 
-                                # Reversal form
                                 reversal_reason = st.text_input(
                                     "Reason for Reversal *",
                                     placeholder="e.g. Wrong material used, customer cancelled, data entry error",
@@ -2173,38 +2679,39 @@ with tab2:
                                                 success_count = 0
                                                 
                                                 for item in items_to_restore:
-                                                    # Get current footage
-                                                    inv_response = supabase.table("inventory").select("Footage").eq("Item_ID", item['item_id']).execute()
+                                                    inv_response = supabase.table("inventory").select("Footage, Status").eq("Item_ID", item['item_id']).execute()
                                                     
                                                     if inv_response.data:
                                                         current_footage = float(inv_response.data[0]['Footage'])
                                                         new_footage = current_footage + item['footage_to_restore']
                                                         
-                                                        # Update inventory
-                                                        supabase.table("inventory").update({
-                                                            "Footage": new_footage
-                                                        }).eq("Item_ID", item['item_id']).execute()
+                                                        # Update inventory - also restore status if it was depleted
+                                                        update_data = {"Footage": new_footage}
+                                                        if inv_response.data[0].get('Status') == 'Depleted':
+                                                            update_data["Status"] = "Active"
                                                         
-                                                        # Log the reversal
+                                                        supabase.table("inventory").update(update_data).eq("Item_ID", item['item_id']).execute()
+                                                        
+                                                        # Log the reversal with MST timestamp
                                                         log_entry = {
                                                             "Item_ID": item['item_id'],
                                                             "Action": "Production Reversal",
                                                             "User": st.session_state.get('username', 'Admin'),
-                                                            "Timestamp": datetime.now().isoformat(),
+                                                            "Timestamp": get_mst_timestamp(),
                                                             "Details": f"Reversed order {selected['order_num']}: Restored {item['footage_to_restore']:.2f} ft ({item['pieces']} pcs of {item['size']}). Reason: {reversal_reason}. Previous: {current_footage:.2f} ft → New: {new_footage:.2f} ft"
                                                         }
                                                         supabase.table("audit_log").insert(log_entry).execute()
                                                         
                                                         success_count += 1
                                                     else:
-                                                        st.warning(f"⚠️ Item {item['item_id']} not found in inventory - skipped")
+                                                        st.warning(f"⚠️ Item {item['item_id']} not found - skipped")
                                                 
                                                 # Log the overall reversal
                                                 summary_log = {
                                                     "Item_ID": selected['order_num'],
                                                     "Action": "Order Reversed",
                                                     "User": st.session_state.get('username', 'Admin'),
-                                                    "Timestamp": datetime.now().isoformat(),
+                                                    "Timestamp": get_mst_timestamp(),
                                                     "Details": f"Reversed production order {selected['order_num']} for {selected['client']}. Restored {total_to_restore:.2f} ft across {success_count} items. Reason: {reversal_reason}"
                                                 }
                                                 supabase.table("audit_log").insert(summary_log).execute()
@@ -2213,7 +2720,6 @@ with tab2:
                                                 st.success(f"📦 Restored {total_to_restore:.2f} ft to {success_count} item(s)")
                                                 st.balloons()
                                                 
-                                                # Clear cache and refresh
                                                 st.cache_data.clear()
                                                 st.session_state.force_refresh = True
                                                 time.sleep(1)
@@ -2226,7 +2732,7 @@ with tab2:
         
         except Exception as e:
             st.error(f"Error loading production orders: {e}")
-
+            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates sync across all devices in real-time.")
