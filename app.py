@@ -3429,7 +3429,7 @@ with tab4:
             elif cat_choice == "Elbows":
                 col1, col2 = st.columns(2)
                 with col1:
-                    angle = st.radio("📐 Angle", ["45°", "90°", "Other"], horizontal=True, key="elbow_angle")
+                    angle = st.radio("📐 Angle", ["90°", "45°", "Other"], horizontal=True, key="elbow_angle")
                     if angle == "Other":
                         angle = st.text_input("Custom Angle", placeholder="e.g. 22.5°", key="elbow_custom_angle")
                     size_num = st.number_input("🔢 Size Number", min_value=1, max_value=60, value=1, key="elbow_size")
