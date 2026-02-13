@@ -2059,6 +2059,15 @@ with tab2:
                             remaining -= deduct
             else:
                 st.info("👆 Add coils to the pool above")
+                
+            # Option to copy this pool to all other coil lines
+            if current_pool and len(st.session_state.coil_lines) > 1:
+                if st.button("📋 Copy this pool to all coil lines", key=f"copy_pool_coil_{i}", type="secondary"):
+                    for j, other_line in enumerate(st.session_state.coil_lines):
+                        if j != i:  # Don't copy to itself
+                            st.session_state.coil_lines[j]["pool"] = current_pool.copy()
+                    st.success(f"✅ Pool copied to {len(st.session_state.coil_lines) - 1} other line(s)")
+                    st.rerun()
             
             # Show summary for custom sizes
             if size_selection in ["Custom (Inches)", "Custom (Feet)"] and pieces_val > 0:
@@ -2067,19 +2076,24 @@ with tab2:
                 else:
                     st.caption(f"📋 {pieces_val} pieces × {st.session_state.coil_lines[i].get('custom_inches', 0)} in + {coil_extra}\" allowance + {waste_val} ft waste")
 
-    if st.button("➕ Add another coil size", use_container_width=True, key="add_coil_line"):
-        st.session_state.coil_lines.append({
+    # Add another roll line - auto-populate pool from previous line
+    if st.button("➕ Add another roll size", use_container_width=True, key="add_roll_line"):
+        # Get pool from the last line (if exists) to auto-populate
+        if st.session_state.roll_lines:
+            last_pool = st.session_state.roll_lines[-1].get("pool", []).copy()
+        else:
+            last_pool = []
+        
+        st.session_state.roll_lines.append({
             "display_size": "#2", 
             "pieces": 0, 
             "waste": 0.0,
-            "pool": [], 
+            "pool": last_pool,  # Auto-populate from previous line
             "use_custom": False, 
-            "custom_inches": 12.0, 
-            "custom_feet": 1.0,
-            "custom_unit": "inches"
+            "custom_inches": 12.0
         })
         st.rerun()
-
+        
     st.divider()
 
     # ══════════════════════════════════════════════════════════════════════════════
@@ -2254,18 +2268,25 @@ with tab2:
                             remaining -= deduct
             else:
                 st.info("👆 Add rolls to the pool above")
-
+                
+    #Add another roll line - auto-populate pool from previous line
     if st.button("➕ Add another roll size", use_container_width=True, key="add_roll_line"):
+        # Get pool from the last line (if exists) to auto-populate
+        if st.session_state.roll_lines:
+            last_pool = st.session_state.roll_lines[-1].get("pool", []).copy()
+        else:
+            last_pool = []
+        
         st.session_state.roll_lines.append({
             "display_size": "#2", 
             "pieces": 0, 
             "waste": 0.0,
-            "pool": [], 
+            "pool": last_pool,  # Auto-populate from previous line
             "use_custom": False, 
             "custom_inches": 12.0
         })
         st.rerun()
-
+        
     st.divider()
 
     # ══════════════════════════════════════════════════════════════════════════════
