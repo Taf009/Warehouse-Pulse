@@ -3768,14 +3768,14 @@ with tab4:
                 if not st.session_state.current_po.strip() or not st.session_state.receiving_operator.strip():
                     st.error("⚠️ PO Number and Operator are required!")
                 else:
-                    # Final validation for serialized items only
+                    # Final validation for SERIALIZED items ONLY
                     all_new_ids = []
                     for item in st.session_state.receiving_cart:
-                        if item['is_serialized']:
+                        if item['is_serialized']:  # Only check serialized items
                             all_new_ids.extend(item['id_list'])
                     
                     has_clashes = False
-                    if all_new_ids:
+                    if all_new_ids:  # Only check if there are serialized items
                         try:
                             response = supabase.table("inventory").select("Item_ID").in_("Item_ID", all_new_ids).execute()
                             if response.data:
@@ -3794,7 +3794,9 @@ with tab4:
                                 
                                 for item in st.session_state.receiving_cart:
                                     if item['is_serialized']:
-                                        # Coils/Rolls - create individual records
+                                        # ═══════════════════════════════════════════════════
+                                        # SERIALIZED ITEMS (Coils/Rolls) - Create individual records
+                                        # ═══════════════════════════════════════════════════
                                         new_rows = []
                                         for unique_id in item['id_list']:
                                             new_rows.append({
@@ -3812,25 +3814,41 @@ with tab4:
                                             items_added += len(new_rows)
                                     
                                     else:
-                                        # Bulk item - add to existing or create new
-                                        # Check if this exact material exists
+                                        # ═══════════════════════════════════════════════════
+                                        # BULK ITEMS - Add to existing OR create new
+                                        # NO ID CLASH CHECKING - just upsert by material
+                                        # ═══════════════════════════════════════════════════
                                         try:
+                                            # Check if this exact category + material combo exists
                                             existing_response = supabase.table("inventory").select("*").eq("Category", item['category']).eq("Material", item['material']).execute()
                                             
-                                            if existing_response.data:
-                                                # Add to existing
+                                            if existing_response.data and len(existing_response.data) > 0:
+                                                # EXISTS - Add quantity to existing record
                                                 existing_item = existing_response.data[0]
-                                                current_qty = float(existing_item['Footage'])
+                                                current_qty = float(existing_item.get('Footage', 0))
                                                 new_qty = current_qty + item['total_added']
                                                 
                                                 supabase.table("inventory").update({
-                                                    "Footage": new_qty
+                                                    "Footage": new_qty,
+                                                    "Location": item['location']  # Update location too
                                                 }).eq("Item_ID", existing_item['Item_ID']).execute()
+                                                
+                                                # Log the addition
+                                                log_entry = {
+                                                    "Item_ID": existing_item['Item_ID'],
+                                                    "Action": "Stock Added",
+                                                    "User": st.session_state.receiving_operator,
+                                                    "Timestamp": datetime.now().isoformat(),
+                                                    "Details": f"PO: {st.session_state.current_po} | Added {item['total_added']:.0f} {item['unit_label'].lower()} to existing stock. Previous: {current_qty:.0f}, New: {new_qty:.0f}"
+                                                }
+                                                supabase.table("audit_log").insert(log_entry).execute()
                                                 
                                                 items_added += 1
                                             else:
-                                                # Create new bulk item
-                                                unique_id = f"{item['category'].upper().replace(' ', '-')}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                                # DOES NOT EXIST - Create new bulk entry with UUID
+                                                import uuid
+                                                unique_id = f"{item['category'].upper().replace(' ', '-')}-{uuid.uuid4().hex[:8].upper()}"
+                                                
                                                 new_data = {
                                                     "Item_ID": unique_id,
                                                     "Material": item['material'],
@@ -3841,10 +3859,24 @@ with tab4:
                                                     "Purchase_Order_Num": st.session_state.current_po.strip()
                                                 }
                                                 supabase.table("inventory").insert(new_data).execute()
+                                                
+                                                # Log new item
+                                                log_entry = {
+                                                    "Item_ID": unique_id,
+                                                    "Action": "Received (New Item)",
+                                                    "User": st.session_state.receiving_operator,
+                                                    "Timestamp": datetime.now().isoformat(),
+                                                    "Details": f"PO: {st.session_state.current_po} | {item['material']} | {item['total_added']:.0f} {item['unit_label'].lower()} | Location: {item['location']}"
+                                                }
+                                                supabase.table("audit_log").insert(log_entry).execute()
+                                                
                                                 items_added += 1
-                                        except Exception as e:
-                                            # If check fails, just create new
-                                            unique_id = f"{item['category'].upper().replace(' ', '-')}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                                
+                                        except Exception as bulk_error:
+                                            # If anything fails, create with UUID (guaranteed unique)
+                                            import uuid
+                                            unique_id = f"{item['category'].upper().replace(' ', '-')}-{uuid.uuid4().hex[:8].upper()}"
+                                            
                                             new_data = {
                                                 "Item_ID": unique_id,
                                                 "Material": item['material'],
@@ -3855,17 +3887,17 @@ with tab4:
                                                 "Purchase_Order_Num": st.session_state.current_po.strip()
                                             }
                                             supabase.table("inventory").insert(new_data).execute()
+                                            
+                                            log_entry = {
+                                                "Item_ID": unique_id,
+                                                "Action": "Received",
+                                                "User": st.session_state.receiving_operator,
+                                                "Timestamp": datetime.now().isoformat(),
+                                                "Details": f"PO: {st.session_state.current_po} | {item['material']} | {item['total_added']:.0f} {item['unit_label'].lower()}"
+                                            }
+                                            supabase.table("audit_log").insert(log_entry).execute()
+                                            
                                             items_added += 1
-                                    
-                                    # Audit log
-                                    log_entry = {
-                                        "Item_ID": item['id_preview'] if item['is_serialized'] else item['category'],
-                                        "Action": "Received",
-                                        "User": st.session_state.receiving_operator,
-                                        "Timestamp": datetime.now().isoformat(),
-                                        "Details": f"PO: {st.session_state.current_po} | {item['material']} | Qty: {item['total_added']:.0f} {item['unit_label'].lower()} | Location: {item['location']}"
-                                    }
-                                    supabase.table("audit_log").insert(log_entry).execute()
                                 
                                 st.cache_data.clear()
                                 st.session_state.force_refresh = True
@@ -3874,11 +3906,13 @@ with tab4:
                                 st.balloons()
                                 
                                 st.session_state.receiving_cart = []
+                                time.sleep(1)
                                 st.rerun()
                             
                             except Exception as e:
                                 st.error(f"❌ Failed to process: {e}")
-        
+                                import traceback
+                                st.code(traceback.format_exc())
         with col_clear:
             if st.button("🗑️ Clear Cart", use_container_width=True):
                 st.session_state.receiving_cart = []
