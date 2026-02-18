@@ -11,6 +11,43 @@ from supabase import create_client, Client
 from collections import defaultdict
 import time
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PERSISTENT SESSION CONFIGURATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Set page config first (must be the first Streamlit command)
+st.set_page_config(
+    page_title="MJP Pulse - Warehouse Management",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Initialize session state for persistence
+if 'initialized' not in st.session_state:
+    st.session_state.initialized = True
+
+# Check for stored credentials in query params or cookies
+def init_persistent_session():
+    """Initialize persistent session from stored credentials"""
+    # Check if already logged in
+    if st.session_state.get('logged_in', False):
+        return True
+    
+    # Try to restore from query params (for bookmark/refresh persistence)
+    query_params = st.query_params
+    if 'user' in query_params:
+        stored_user = query_params.get('user', '')
+        if stored_user:
+            st.session_state.logged_in = True
+            st.session_state.username = stored_user
+            return True
+    
+    return False
+
+# Call at app start
+init_persistent_session()
+
 # --- PAGE CONFIG (MUST BE FIRST) ---
 st.set_page_config(
     page_title="MJP Pulse Inventory",
@@ -1742,7 +1779,7 @@ with tab2:
             return df_subset[df_subset['Material'].str.contains("Stucco", case=False, na=False)]
         return df_subset
 
-    # Get available coils and rolls
+    # Get available coils and rolls - ONLY ITEMS WITH FOOTAGE > 0
     if category_col and not df.empty:
         available_coils = filter_materials(df[(df[category_col] == "Coils") & (df['Footage'] > 0)])
         available_rolls = filter_materials(df[(df[category_col] == "Rolls") & (df['Footage'] > 0)])
@@ -1769,25 +1806,39 @@ with tab2:
         for item_id in pool_ids:
             match = available_df[available_df['Item_ID'] == item_id]
             if not match.empty:
-                total += float(match.iloc[0]['Footage'])
+                footage = float(match.iloc[0]['Footage'])
+                if footage > 0:  # Only count items with footage
+                    total += footage
         return total
     
     def get_pool_details(pool_ids, available_df):
-        """Get detailed info for each item in pool"""
+        """Get detailed info for each item in pool - EXCLUDES DEPLETED ITEMS"""
         if available_df.empty:
             return []
         details = []
         for item_id in pool_ids:
             match = available_df[available_df['Item_ID'] == item_id]
             if not match.empty:
-                row = match.iloc[0]
-                details.append({
-                    'id': item_id,
-                    'material': row['Material'],
-                    'footage': float(row['Footage']),
-                    'location': row.get('Location', 'N/A')
-                })
+                footage = float(match.iloc[0]['Footage'])
+                if footage > 0:  # Only include items with footage > 0
+                    details.append({
+                        'id': item_id,
+                        'material': match.iloc[0]['Material'],
+                        'footage': footage,
+                        'location': match.iloc[0].get('Location', 'N/A')
+                    })
         return details
+    
+    def clean_pool(pool_ids, available_df):
+        """Remove depleted items from pool"""
+        if available_df.empty:
+            return []
+        valid_ids = []
+        for item_id in pool_ids:
+            match = available_df[available_df['Item_ID'] == item_id]
+            if not match.empty and float(match.iloc[0]['Footage']) > 0:
+                valid_ids.append(item_id)
+        return valid_ids
 
     def process_pool_deduction(pool_ids, total_needed, production_footage, waste_footage, available_df, 
                                 supabase_client, operator, order_number, client_name, line_description, size_label, pieces):
@@ -1795,6 +1846,8 @@ with tab2:
         Process sequential deduction from a pool of coils/rolls.
         Returns: (success: bool, deduction_log: list, error_message: str)
         """
+        import uuid
+        
         if not pool_ids:
             return False, [], "No items in pool"
         
@@ -1805,16 +1858,19 @@ with tab2:
                 response = supabase_client.table("inventory").select("*").eq("Item_ID", item_id).execute()
                 if response.data:
                     item_data = response.data[0]
-                    pool_items.append({
-                        'id': item_id,
-                        'footage': float(item_data['Footage']),
-                        'material': item_data['Material']
-                    })
+                    footage = float(item_data['Footage'])
+                    # Skip items with 0 footage (auto-remove depleted from pool)
+                    if footage > 0:
+                        pool_items.append({
+                            'id': item_id,
+                            'footage': footage,
+                            'material': item_data['Material']
+                        })
             except Exception as e:
                 return False, [], f"Error fetching {item_id}: {e}"
         
         if not pool_items:
-            return False, [], "No valid items found in pool"
+            return False, [], "No valid items with footage > 0 in pool. All items may be depleted."
         
         # Calculate total available
         total_available = sum(item['footage'] for item in pool_items)
@@ -1864,13 +1920,15 @@ with tab2:
                     'status': new_status
                 })
                 
-                # Audit log entry with MST timestamp
+                # Audit log entry with UNIQUE ID to prevent duplicate key error
+                unique_log_id = f"{item['id']}-{uuid.uuid4().hex[:8]}"
+                
                 log_entry = {
-                    "Item_ID": item['id'],
+                    "Item_ID": unique_log_id,
                     "Action": f"Production: {pieces} pcs of {size_label}",
                     "User": operator,
                     "Timestamp": get_mst_timestamp(),
-                    "Details": f"Production: {pieces} pcs of {size_label} ({item_production:.2f} ft production + {item_waste:.2f} ft waste = {deduct_amount:.2f} ft used) for {client_name} (Order: {order_number}) | Pool deduction | Previous: {available:.2f} ft → Remaining: {new_footage:.2f} ft | Status: {new_status}"
+                    "Details": f"Source: {item['id']} | Production: {pieces} pcs of {size_label} ({item_production:.2f} ft production + {item_waste:.2f} ft waste = {deduct_amount:.2f} ft used) for {client_name} (Order: {order_number}) | Pool deduction | Previous: {available:.2f} ft → Remaining: {new_footage:.2f} ft | Status: {new_status}"
                 }
                 supabase_client.table("audit_log").insert(log_entry).execute()
                 
@@ -1900,9 +1958,15 @@ with tab2:
     for i in range(len(st.session_state.coil_lines)):
         line = st.session_state.coil_lines[i]
         
-        # Ensure pool exists
+        # Ensure pool exists and clean it of depleted items
         if "pool" not in line:
             line["pool"] = []
+        else:
+            # Auto-clean depleted items from pool
+            cleaned_pool = clean_pool(line["pool"], available_coils)
+            if len(cleaned_pool) != len(line["pool"]):
+                st.session_state.coil_lines[i]["pool"] = cleaned_pool
+                line["pool"] = cleaned_pool
         
         with st.container(border=True):
             st.markdown(f"**📦 Coil Production Line {i + 1}**")
@@ -2040,72 +2104,75 @@ with tab2:
             
             # Display current pool
             if current_pool:
-                st.markdown("**📋 Current Pool (deduction order):**")
-                
                 pool_details = get_pool_details(current_pool, available_coils)
                 
-                for idx, item in enumerate(pool_details):
-                    pcol1, pcol2, pcol3, pcol4 = st.columns([0.3, 2.5, 1, 0.5])
+                if pool_details:
+                    st.markdown("**📋 Current Pool (deduction order):**")
                     
-                    with pcol1:
-                        st.markdown(f"**{idx + 1}.**")
-                    
-                    with pcol2:
-                        st.markdown(f"`{item['id']}` - **{item['footage']:,.1f} ft**")
-                        st.caption(f"{item['material'][:40]}...")
-                    
-                    with pcol3:
-                        btn_col1, btn_col2 = st.columns(2)
-                        with btn_col1:
-                            if idx > 0:
-                                if st.button("⬆️", key=f"up_{i}_{idx}", help="Move up"):
-                                    pool = st.session_state.coil_lines[i]["pool"]
-                                    pool[idx], pool[idx-1] = pool[idx-1], pool[idx]
-                                    st.rerun()
-                        with btn_col2:
-                            if idx < len(current_pool) - 1:
-                                if st.button("⬇️", key=f"down_{i}_{idx}", help="Move down"):
-                                    pool = st.session_state.coil_lines[i]["pool"]
-                                    pool[idx], pool[idx+1] = pool[idx+1], pool[idx]
-                                    st.rerun()
-                    
-                    with pcol4:
-                        if st.button("❌", key=f"remove_pool_{i}_{idx}", help="Remove"):
-                            st.session_state.coil_lines[i]["pool"].pop(idx)
-                            st.rerun()
-                
-                # Pool quick actions
-                pool_action_col1, pool_action_col2 = st.columns(2)
-                with pool_action_col1:
-                    if st.button("🗑️ Clear Pool", key=f"clear_pool_coil_{i}"):
-                        st.session_state.coil_lines[i]["pool"] = []
-                        st.rerun()
-                with pool_action_col2:
-                    if len(st.session_state.coil_lines) > 1:
-                        if st.button("📋 Copy to All Lines", key=f"copy_pool_coil_{i}"):
-                            for j in range(len(st.session_state.coil_lines)):
-                                if j != i:
-                                    st.session_state.coil_lines[j]["pool"] = current_pool.copy()
-                            st.success(f"✅ Copied to {len(st.session_state.coil_lines) - 1} line(s)")
-                            st.rerun()
-                
-                # Deduction preview
-                if total_footage_needed > 0 and pool_capacity >= total_footage_needed:
-                    with st.expander("👁️ Preview Deduction Sequence"):
-                        remaining = total_footage_needed
-                        st.markdown("**How footage will be deducted:**")
+                    for idx, item in enumerate(pool_details):
+                        pcol1, pcol2, pcol3, pcol4 = st.columns([0.3, 2.5, 1, 0.5])
                         
-                        for item in pool_details:
-                            if remaining <= 0:
-                                st.markdown(f"- `{item['id']}`: ✅ No deduction (stays at {item['footage']:,.1f} ft)")
-                                continue
+                        with pcol1:
+                            st.markdown(f"**{idx + 1}.**")
+                        
+                        with pcol2:
+                            st.markdown(f"`{item['id']}` - **{item['footage']:,.1f} ft**")
+                            st.caption(f"{item['material'][:40]}...")
+                        
+                        with pcol3:
+                            btn_col1, btn_col2 = st.columns(2)
+                            with btn_col1:
+                                if idx > 0:
+                                    if st.button("⬆️", key=f"up_{i}_{idx}", help="Move up"):
+                                        pool = st.session_state.coil_lines[i]["pool"]
+                                        pool[idx], pool[idx-1] = pool[idx-1], pool[idx]
+                                        st.rerun()
+                            with btn_col2:
+                                if idx < len(pool_details) - 1:
+                                    if st.button("⬇️", key=f"down_{i}_{idx}", help="Move down"):
+                                        pool = st.session_state.coil_lines[i]["pool"]
+                                        pool[idx], pool[idx+1] = pool[idx+1], pool[idx]
+                                        st.rerun()
+                        
+                        with pcol4:
+                            if st.button("❌", key=f"remove_pool_{i}_{idx}", help="Remove"):
+                                st.session_state.coil_lines[i]["pool"].pop(idx)
+                                st.rerun()
+                    
+                    # Pool quick actions
+                    pool_action_col1, pool_action_col2 = st.columns(2)
+                    with pool_action_col1:
+                        if st.button("🗑️ Clear Pool", key=f"clear_pool_coil_{i}"):
+                            st.session_state.coil_lines[i]["pool"] = []
+                            st.rerun()
+                    with pool_action_col2:
+                        if len(st.session_state.coil_lines) > 1:
+                            if st.button("📋 Copy to All Lines", key=f"copy_pool_coil_{i}"):
+                                for j in range(len(st.session_state.coil_lines)):
+                                    if j != i:
+                                        st.session_state.coil_lines[j]["pool"] = current_pool.copy()
+                                st.success(f"✅ Copied to {len(st.session_state.coil_lines) - 1} line(s)")
+                                st.rerun()
+                    
+                    # Deduction preview
+                    if total_footage_needed > 0 and pool_capacity >= total_footage_needed:
+                        with st.expander("👁️ Preview Deduction Sequence"):
+                            remaining = total_footage_needed
+                            st.markdown("**How footage will be deducted:**")
                             
-                            deduct = min(item['footage'], remaining)
-                            new_footage = item['footage'] - deduct
-                            status = "🔴 **DEPLETED**" if new_footage <= 0 else f"🟢 {new_footage:,.1f} ft remaining"
-                            
-                            st.markdown(f"- `{item['id']}`: **-{deduct:,.1f} ft** → {status}")
-                            remaining -= deduct
+                            for item in pool_details:
+                                if remaining <= 0:
+                                    st.markdown(f"- `{item['id']}`: ✅ No deduction (stays at {item['footage']:,.1f} ft)")
+                                    continue
+                                
+                                deduct = min(item['footage'], remaining)
+                                new_footage = item['footage'] - deduct
+                                status = "🔴 **DEPLETED**" if new_footage <= 0 else f"🟢 {new_footage:,.1f} ft remaining"
+                                
+                                st.markdown(f"- `{item['id']}`: **-{deduct:,.1f} ft** → {status}")
+                                remaining -= deduct
+                else:
+                    st.info("👆 Add coils to the pool above (depleted items were auto-removed)")
             else:
                 st.info("👆 Add coils to the pool above")
 
@@ -2116,7 +2183,7 @@ with tab2:
         if st.button("➕ Add another coil size", use_container_width=True, key="add_coil_line"):
             last_pool = []
             if st.session_state.coil_lines:
-                last_pool = st.session_state.coil_lines[-1].get("pool", []).copy()
+                last_pool = clean_pool(st.session_state.coil_lines[-1].get("pool", []).copy(), available_coils)
             
             st.session_state.coil_lines.append({
                 "display_size": "#2", 
@@ -2133,7 +2200,7 @@ with tab2:
     with add_coil_col2:
         if len(st.session_state.coil_lines) > 1:
             if st.button("🔄 Sync Pools", key="sync_coil_pools", help="Copy Line 1 pool to all"):
-                first_pool = st.session_state.coil_lines[0].get("pool", []).copy()
+                first_pool = clean_pool(st.session_state.coil_lines[0].get("pool", []).copy(), available_coils)
                 for line in st.session_state.coil_lines[1:]:
                     line["pool"] = first_pool.copy()
                 st.success("✅ All coil lines synced")
@@ -2158,9 +2225,14 @@ with tab2:
     for i in range(len(st.session_state.roll_lines)):
         line = st.session_state.roll_lines[i]
         
-        # Ensure pool exists
+        # Ensure pool exists and clean it of depleted items
         if "pool" not in line:
             line["pool"] = []
+        else:
+            cleaned_pool = clean_pool(line["pool"], available_rolls)
+            if len(cleaned_pool) != len(line["pool"]):
+                st.session_state.roll_lines[i]["pool"] = cleaned_pool
+                line["pool"] = cleaned_pool
         
         with st.container(border=True):
             st.markdown(f"**📦 Roll Production Line {i + 1}**")
@@ -2288,68 +2360,71 @@ with tab2:
             
             # Display current roll pool
             if current_roll_pool:
-                st.markdown("**📋 Current Pool (deduction order):**")
-                
                 roll_pool_details = get_pool_details(current_roll_pool, available_rolls)
                 
-                for idx, item in enumerate(roll_pool_details):
-                    rpcol1, rpcol2, rpcol3, rpcol4 = st.columns([0.3, 2.5, 1, 0.5])
+                if roll_pool_details:
+                    st.markdown("**📋 Current Pool (deduction order):**")
                     
-                    with rpcol1:
-                        st.markdown(f"**{idx + 1}.**")
+                    for idx, item in enumerate(roll_pool_details):
+                        rpcol1, rpcol2, rpcol3, rpcol4 = st.columns([0.3, 2.5, 1, 0.5])
+                        
+                        with rpcol1:
+                            st.markdown(f"**{idx + 1}.**")
+                        
+                        with rpcol2:
+                            st.markdown(f"`{item['id']}` - **{item['footage']:,.1f} ft**")
+                            st.caption(f"{item['material'][:40]}...")
+                        
+                        with rpcol3:
+                            btn_c1, btn_c2 = st.columns(2)
+                            with btn_c1:
+                                if idx > 0:
+                                    if st.button("⬆️", key=f"rup_{i}_{idx}", help="Move up"):
+                                        pool = st.session_state.roll_lines[i]["pool"]
+                                        pool[idx], pool[idx-1] = pool[idx-1], pool[idx]
+                                        st.rerun()
+                            with btn_c2:
+                                if idx < len(roll_pool_details) - 1:
+                                    if st.button("⬇️", key=f"rdown_{i}_{idx}", help="Move down"):
+                                        pool = st.session_state.roll_lines[i]["pool"]
+                                        pool[idx], pool[idx+1] = pool[idx+1], pool[idx]
+                                        st.rerun()
+                        
+                        with rpcol4:
+                            if st.button("❌", key=f"rrem_{i}_{idx}", help="Remove"):
+                                st.session_state.roll_lines[i]["pool"].pop(idx)
+                                st.rerun()
                     
-                    with rpcol2:
-                        st.markdown(f"`{item['id']}` - **{item['footage']:,.1f} ft**")
-                        st.caption(f"{item['material'][:40]}...")
-                    
-                    with rpcol3:
-                        btn_c1, btn_c2 = st.columns(2)
-                        with btn_c1:
-                            if idx > 0:
-                                if st.button("⬆️", key=f"rup_{i}_{idx}", help="Move up"):
-                                    pool = st.session_state.roll_lines[i]["pool"]
-                                    pool[idx], pool[idx-1] = pool[idx-1], pool[idx]
-                                    st.rerun()
-                        with btn_c2:
-                            if idx < len(current_roll_pool) - 1:
-                                if st.button("⬇️", key=f"rdown_{i}_{idx}", help="Move down"):
-                                    pool = st.session_state.roll_lines[i]["pool"]
-                                    pool[idx], pool[idx+1] = pool[idx+1], pool[idx]
-                                    st.rerun()
-                    
-                    with rpcol4:
-                        if st.button("❌", key=f"rrem_{i}_{idx}", help="Remove"):
-                            st.session_state.roll_lines[i]["pool"].pop(idx)
+                    # Pool quick actions
+                    rpool_action_col1, rpool_action_col2 = st.columns(2)
+                    with rpool_action_col1:
+                        if st.button("🗑️ Clear Pool", key=f"clear_pool_roll_{i}"):
+                            st.session_state.roll_lines[i]["pool"] = []
                             st.rerun()
-                
-                # Pool quick actions
-                rpool_action_col1, rpool_action_col2 = st.columns(2)
-                with rpool_action_col1:
-                    if st.button("🗑️ Clear Pool", key=f"clear_pool_roll_{i}"):
-                        st.session_state.roll_lines[i]["pool"] = []
-                        st.rerun()
-                with rpool_action_col2:
-                    if len(st.session_state.roll_lines) > 1:
-                        if st.button("📋 Copy to All Lines", key=f"copy_pool_roll_{i}"):
-                            for j in range(len(st.session_state.roll_lines)):
-                                if j != i:
-                                    st.session_state.roll_lines[j]["pool"] = current_roll_pool.copy()
-                            st.success(f"✅ Copied to {len(st.session_state.roll_lines) - 1} line(s)")
-                            st.rerun()
-                
-                # Preview
-                if roll_total_needed > 0 and roll_pool_capacity >= roll_total_needed:
-                    with st.expander("👁️ Preview Deduction Sequence"):
-                        remaining = roll_total_needed
-                        for item in roll_pool_details:
-                            if remaining <= 0:
-                                st.markdown(f"- `{item['id']}`: ✅ No deduction (stays at {item['footage']:,.1f} ft)")
-                                continue
-                            deduct = min(item['footage'], remaining)
-                            new_footage = item['footage'] - deduct
-                            status = "🔴 **DEPLETED**" if new_footage <= 0 else f"🟢 {new_footage:,.1f} ft remaining"
-                            st.markdown(f"- `{item['id']}`: **-{deduct:,.1f} ft** → {status}")
-                            remaining -= deduct
+                    with rpool_action_col2:
+                        if len(st.session_state.roll_lines) > 1:
+                            if st.button("📋 Copy to All Lines", key=f"copy_pool_roll_{i}"):
+                                for j in range(len(st.session_state.roll_lines)):
+                                    if j != i:
+                                        st.session_state.roll_lines[j]["pool"] = current_roll_pool.copy()
+                                st.success(f"✅ Copied to {len(st.session_state.roll_lines) - 1} line(s)")
+                                st.rerun()
+                    
+                    # Preview
+                    if roll_total_needed > 0 and roll_pool_capacity >= roll_total_needed:
+                        with st.expander("👁️ Preview Deduction Sequence"):
+                            remaining = roll_total_needed
+                            for item in roll_pool_details:
+                                if remaining <= 0:
+                                    st.markdown(f"- `{item['id']}`: ✅ No deduction (stays at {item['footage']:,.1f} ft)")
+                                    continue
+                                deduct = min(item['footage'], remaining)
+                                new_footage = item['footage'] - deduct
+                                status = "🔴 **DEPLETED**" if new_footage <= 0 else f"🟢 {new_footage:,.1f} ft remaining"
+                                st.markdown(f"- `{item['id']}`: **-{deduct:,.1f} ft** → {status}")
+                                remaining -= deduct
+                else:
+                    st.info("👆 Add rolls to the pool above (depleted items were auto-removed)")
             else:
                 st.info("👆 Add rolls to the pool above")
 
@@ -2360,7 +2435,7 @@ with tab2:
         if st.button("➕ Add another roll size", use_container_width=True, key="add_roll_line"):
             last_pool = []
             if st.session_state.roll_lines:
-                last_pool = st.session_state.roll_lines[-1].get("pool", []).copy()
+                last_pool = clean_pool(st.session_state.roll_lines[-1].get("pool", []).copy(), available_rolls)
             
             st.session_state.roll_lines.append({
                 "display_size": "#2", 
@@ -2375,7 +2450,7 @@ with tab2:
     with add_roll_col2:
         if len(st.session_state.roll_lines) > 1:
             if st.button("🔄 Sync Pools", key="sync_roll_pools", help="Copy Line 1 pool to all"):
-                first_pool = st.session_state.roll_lines[0].get("pool", []).copy()
+                first_pool = clean_pool(st.session_state.roll_lines[0].get("pool", []).copy(), available_rolls)
                 for line in st.session_state.roll_lines[1:]:
                     line["pool"] = first_pool.copy()
                 st.success("✅ All roll lines synced")
@@ -2427,11 +2502,14 @@ with tab2:
                 
                 has_production_lines = True
                 
-                if not line.get("pool"):
-                    validation_errors.append(f"Coil Line {i+1}: No coils in pool")
+                # Clean pool before validation
+                cleaned_pool = clean_pool(line.get("pool", []), available_coils)
+                st.session_state.coil_lines[i]["pool"] = cleaned_pool
+                
+                if not cleaned_pool:
+                    validation_errors.append(f"Coil Line {i+1}: No coils with footage > 0 in pool")
                     continue
                 
-                # Calculate required footage
                 if line.get("use_custom") or line.get("display_size") in ["Custom (Inches)", "Custom (Feet)"]:
                     calc_inches = (line.get("custom_inches", 12.0) + coil_extra) * line["pieces"]
                 else:
@@ -2441,7 +2519,7 @@ with tab2:
                 production_footage = calc_inches / 12.0
                 total_needed = production_footage + line.get("waste", 0)
                 
-                pool_capacity = calculate_pool_capacity(line["pool"], available_coils)
+                pool_capacity = calculate_pool_capacity(cleaned_pool, available_coils)
                 
                 if pool_capacity < total_needed:
                     validation_errors.append(f"Coil Line {i+1}: Pool has {pool_capacity:.1f} ft, needs {total_needed:.1f} ft")
@@ -2453,8 +2531,12 @@ with tab2:
                 
                 has_production_lines = True
                 
-                if not line.get("pool"):
-                    validation_errors.append(f"Roll Line {i+1}: No rolls in pool")
+                # Clean pool before validation
+                cleaned_pool = clean_pool(line.get("pool", []), available_rolls)
+                st.session_state.roll_lines[i]["pool"] = cleaned_pool
+                
+                if not cleaned_pool:
+                    validation_errors.append(f"Roll Line {i+1}: No rolls with footage > 0 in pool")
                     continue
                 
                 if line.get("use_custom") and line.get("custom_inches", 0) > 0:
@@ -2466,7 +2548,7 @@ with tab2:
                 production_footage = calc_inches / 12.0
                 total_needed = production_footage + line.get("waste", 0)
                 
-                pool_capacity = calculate_pool_capacity(line["pool"], available_rolls)
+                pool_capacity = calculate_pool_capacity(cleaned_pool, available_rolls)
                 
                 if pool_capacity < total_needed:
                     validation_errors.append(f"Roll Line {i+1}: Pool has {pool_capacity:.1f} ft, needs {total_needed:.1f} ft")
@@ -2499,7 +2581,6 @@ with tab2:
                             else:
                                 size_label = f"Custom {line.get('custom_inches', 12.0)} in"
                         
-                        # Calculate footage
                         if line.get("use_custom") or line.get("display_size") in ["Custom (Inches)", "Custom (Feet)"]:
                             calc_inches = (line.get("custom_inches", 12.0) + coil_extra) * line["pieces"]
                         else:
@@ -2750,7 +2831,15 @@ with tab2:
                             
                             for log in selected['logs']:
                                 details = log.get('Details', '')
-                                item_id = log.get('Item_ID', '')
+                                item_id_raw = log.get('Item_ID', '')
+                                
+                                # Extract the actual source ID from the new format
+                                source_match = re.search(r'Source:\s*([^\s|]+)', details)
+                                if source_match:
+                                    actual_item_id = source_match.group(1).strip()
+                                else:
+                                    # Fallback - remove UUID suffix if present
+                                    actual_item_id = item_id_raw.rsplit('-', 1)[0] if '-' in item_id_raw and len(item_id_raw.split('-')[-1]) == 8 else item_id_raw
                                 
                                 # Handle both formats
                                 total_match = re.search(r'=\s*(\d+\.?\d*)\s*ft\s*used', details)
@@ -2768,14 +2857,14 @@ with tab2:
                                 size = pieces_match.group(2).strip() if pieces_match else "Unknown"
                                 
                                 items_to_restore.append({
-                                    'item_id': item_id,
+                                    'item_id': actual_item_id,
                                     'footage_to_restore': footage_used,
                                     'pieces': pieces,
                                     'size': size,
                                     'original_log': log
                                 })
                                 
-                                st.write(f"• **{item_id}**: +{footage_used:.2f} ft ({pieces} pcs of {size})")
+                                st.write(f"• **{actual_item_id}**: +{footage_used:.2f} ft ({pieces} pcs of {size})")
                             
                             if items_to_restore:
                                 total_to_restore = sum(item['footage_to_restore'] for item in items_to_restore)
@@ -2802,6 +2891,7 @@ with tab2:
                                     else:
                                         with st.spinner("Reversing production order..."):
                                             try:
+                                                import uuid
                                                 success_count = 0
                                                 
                                                 for item in items_to_restore:
@@ -2817,12 +2907,15 @@ with tab2:
                                                         
                                                         supabase.table("inventory").update(update_data).eq("Item_ID", item['item_id']).execute()
                                                         
+                                                        # Use unique ID for reversal log too
+                                                        unique_log_id = f"{item['item_id']}-REV-{uuid.uuid4().hex[:6]}"
+                                                        
                                                         log_entry = {
-                                                            "Item_ID": item['item_id'],
+                                                            "Item_ID": unique_log_id,
                                                             "Action": "Production Reversal",
                                                             "User": st.session_state.get('username', 'Admin'),
                                                             "Timestamp": get_mst_timestamp(),
-                                                            "Details": f"Reversed order {selected['order_num']}: Restored {item['footage_to_restore']:.2f} ft ({item['pieces']} pcs of {item['size']}). Reason: {reversal_reason}. Previous: {current_footage:.2f} ft → New: {new_footage:.2f} ft"
+                                                            "Details": f"Source: {item['item_id']} | Reversed order {selected['order_num']}: Restored {item['footage_to_restore']:.2f} ft ({item['pieces']} pcs of {item['size']}). Reason: {reversal_reason}. Previous: {current_footage:.2f} ft → New: {new_footage:.2f} ft"
                                                         }
                                                         supabase.table("audit_log").insert(log_entry).execute()
                                                         
@@ -2830,8 +2923,9 @@ with tab2:
                                                     else:
                                                         st.warning(f"⚠️ Item {item['item_id']} not found - skipped")
                                                 
+                                                # Summary log with unique ID
                                                 summary_log = {
-                                                    "Item_ID": selected['order_num'],
+                                                    "Item_ID": f"{selected['order_num']}-REV-{uuid.uuid4().hex[:6]}",
                                                     "Action": "Order Reversed",
                                                     "User": st.session_state.get('username', 'Admin'),
                                                     "Timestamp": get_mst_timestamp(),
@@ -2855,6 +2949,7 @@ with tab2:
         
         except Exception as e:
             st.error(f"Error loading production orders: {e}")
+            
 with tab3:
     st.subheader("🛒 Stock Picking & Sales")
     st.caption("Perform instant stock removals. Updates sync across all devices in real-time.")
