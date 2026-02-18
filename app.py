@@ -11,43 +11,6 @@ from supabase import create_client, Client
 from collections import defaultdict
 import time
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PERSISTENT SESSION CONFIGURATION
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Set page config first (must be the first Streamlit command)
-st.set_page_config(
-    page_title="MJP Pulse - Warehouse Management",
-    page_icon="📦",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Initialize session state for persistence
-if 'initialized' not in st.session_state:
-    st.session_state.initialized = True
-
-# Check for stored credentials in query params or cookies
-def init_persistent_session():
-    """Initialize persistent session from stored credentials"""
-    # Check if already logged in
-    if st.session_state.get('logged_in', False):
-        return True
-    
-    # Try to restore from query params (for bookmark/refresh persistence)
-    query_params = st.query_params
-    if 'user' in query_params:
-        stored_user = query_params.get('user', '')
-        if stored_user:
-            st.session_state.logged_in = True
-            st.session_state.username = stored_user
-            return True
-    
-    return False
-
-# Call at app start
-init_persistent_session()
-
 # --- PAGE CONFIG (MUST BE FIRST) ---
 st.set_page_config(
     page_title="MJP Pulse Inventory",
