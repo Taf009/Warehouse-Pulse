@@ -1351,6 +1351,7 @@ with tab1:
             selected_metal = None
             selected_gauge = None
             selected_texture = None
+            selected_angle = None  # NEW: For Elbows
             
             if selected_view in ["Coils", "Rolls"]:
                 st.markdown("---")
@@ -1416,6 +1417,29 @@ with tab1:
                     texture_options,
                     key="dashboard_texture_filter"
                 )
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # ELBOWS ANGLE FILTER
+            # ══════════════════════════════════════════════════════════════════════
+            elif selected_view == "Elbows":
+                st.markdown("---")
+                st.markdown("**🔍 Elbows Filters**")
+                
+                # Angle filter
+                selected_angle = st.selectbox(
+                    "📐 Angle",
+                    ["All Angles", "90°", "45°", "Other"],
+                    key="dashboard_elbow_angle_filter"
+                )
+                
+                # Show angle counts
+                elbows_df = df[df['Category'] == 'Elbows']
+                if not elbows_df.empty:
+                    count_90 = len(elbows_df[elbows_df['Material'].str.contains("90", case=False, na=False)])
+                    count_45 = len(elbows_df[elbows_df['Material'].str.contains("45", case=False, na=False)])
+                    count_other = len(elbows_df) - count_90 - count_45
+                    
+                    st.caption(f"📊 90°: {count_90} | 45°: {count_45} | Other: {count_other}")
 
         # Filter data based on selections
         if selected_view == "All Materials":
@@ -1481,6 +1505,36 @@ with tab1:
                     st.subheader(f"📊 {selected_view} - {' | '.join(filter_parts)}")
                 else:
                     st.subheader(f"📊 {selected_view} Inventory Pulse")
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # APPLY ELBOWS ANGLE FILTER
+            # ══════════════════════════════════════════════════════════════════════
+            elif selected_view == "Elbows":
+                # Extract angle from Material
+                def extract_angle(material):
+                    material_str = str(material)
+                    if '90°' in material_str or '90 ' in material_str or '90deg' in material_str.lower():
+                        return '90°'
+                    elif '45°' in material_str or '45 ' in material_str or '45deg' in material_str.lower():
+                        return '45°'
+                    else:
+                        return 'Other'
+                
+                display_df['Angle'] = display_df['Material'].apply(extract_angle)
+                
+                # Apply angle filter
+                if selected_angle and selected_angle != "All Angles":
+                    if selected_angle == "90°":
+                        display_df = display_df[display_df['Angle'] == '90°']
+                    elif selected_angle == "45°":
+                        display_df = display_df[display_df['Angle'] == '45°']
+                    elif selected_angle == "Other":
+                        display_df = display_df[display_df['Angle'] == 'Other']
+                    
+                    st.subheader(f"📊 Elbows - {selected_angle}")
+                else:
+                    st.subheader(f"📊 Elbows Inventory Pulse")
+            
             else:
                 st.subheader(f"📊 {selected_view} Inventory Pulse")
 
@@ -1533,6 +1587,32 @@ with tab1:
                     st.metric("Locations", locations)
                 
                 st.divider()
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # QUICK STATS FOR ELBOWS (when filtered)
+            # ══════════════════════════════════════════════════════════════════════
+            if selected_view == "Elbows" and not display_df.empty:
+                st.markdown("### 📈 Elbows Quick Stats")
+                
+                eq1, eq2, eq3, eq4 = st.columns(4)
+                
+                with eq1:
+                    total_pcs = int(display_df['Footage'].sum())
+                    st.metric("Total Pieces", f"{total_pcs:,}")
+                
+                with eq2:
+                    count_90 = len(display_df[display_df['Material'].str.contains("90", case=False, na=False)])
+                    st.metric("90° Elbows", count_90)
+                
+                with eq3:
+                    count_45 = len(display_df[display_df['Material'].str.contains("45", case=False, na=False)])
+                    st.metric("45° Elbows", count_45)
+                
+                with eq4:
+                    unique_sizes = display_df['Material'].nunique()
+                    st.metric("Unique Sizes", unique_sizes)
+                
+                st.divider()
 
             # THE PULSE GRID - Shows each material type separately
             cols = st.columns(2)
@@ -1558,8 +1638,18 @@ with tab1:
                     if gauge_str and texture_str and metal_str:
                         short_name = f"{gauge_str} {texture_str} {metal_str}"
                     else:
-                        # Use first 40 chars of material name if can't parse
-                        short_name = mat[:40] + ("..." if len(mat) > 40 else "")
+                        # For Elbows, extract angle and size
+                        if cat_type == "Elbows":
+                            angle_match = re.search(r'(45°|90°|\d+°)', mat)
+                            size_match = re.search(r'#(\d+)', mat)
+                            angle_str = angle_match.group(1) if angle_match else ""
+                            size_str = f"#{size_match.group(1)}" if size_match else ""
+                            short_name = f"{angle_str} Elbow {size_str}".strip()
+                            if not short_name or short_name == "Elbow":
+                                short_name = mat[:40] + ("..." if len(mat) > 40 else "")
+                        else:
+                            # Use first 40 chars of material name if can't parse
+                            short_name = mat[:40] + ("..." if len(mat) > 40 else "")
                     
                     # --- SET DEFAULTS ---
                     display_value = f"{ft:,.1f}"
@@ -1661,6 +1751,13 @@ with tab1:
                         use_container_width=True, 
                         hide_index=True
                     )
+                # Show angle column for Elbows
+                elif selected_view == "Elbows" and 'Angle' in display_df.columns:
+                    st.dataframe(
+                        display_df[['Item_ID', 'Material', 'Angle', 'Footage', 'Location']].sort_values('Material'), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
                 else:
                     st.dataframe(
                         display_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location']].sort_values('Material'), 
@@ -1669,7 +1766,7 @@ with tab1:
                     )
     else:
         st.info("No data available. Add inventory in the Receive tab.")
-
+        
 # ── TAB 2: Production Log ────────────────────────────────────────────────────────
 with tab2:
     st.subheader("📋 Production Log - Multi-Size Orders with Coil Pooling")
