@@ -1333,6 +1333,119 @@ with tab1:
         available_categories = sorted(df['Category'].unique().tolist())
         view_options = ["All Materials"] + available_categories
 
+        # ══════════════════════════════════════════════════════════════════════════════
+        # EXTRACTION HELPER FUNCTIONS
+        # ══════════════════════════════════════════════════════════════════════════════
+        
+        def extract_metal(material):
+            material_lower = str(material).lower()
+            if 'stainless' in material_lower:
+                return 'Stainless Steel'
+            elif 'aluminum' in material_lower:
+                return 'Aluminum'
+            elif 'galvanized' in material_lower:
+                return 'Galvanized'
+            else:
+                return 'Other'
+        
+        def extract_gauge(material):
+            import re
+            match = re.search(r'\.(\d{2,3})', str(material))
+            if match:
+                return f".{match.group(1)}"
+            return 'Unknown'
+        
+        def extract_texture(material):
+            material_lower = str(material).lower()
+            if 'smooth' in material_lower:
+                return 'Smooth'
+            elif 'stucco' in material_lower:
+                return 'Stucco'
+            else:
+                return 'Other'
+        
+        def extract_angle(material):
+            material_str = str(material)
+            if '90°' in material_str or '90 ' in material_str or '90deg' in material_str.lower():
+                return '90°'
+            elif '45°' in material_str or '45 ' in material_str or '45deg' in material_str.lower():
+                return '45°'
+            else:
+                return 'Other'
+        
+        def extract_size_number(material):
+            import re
+            match = re.search(r'#(\d+)', str(material))
+            if match:
+                return f"#{match.group(1)}"
+            # Also try "Size X" pattern
+            match2 = re.search(r'Size\s*(\d+)', str(material), re.IGNORECASE)
+            if match2:
+                return f"#{match2.group(1)}"
+            return 'Unknown'
+        
+        def extract_pipe_size(material):
+            import re
+            match = re.search(r'(\d+(?:\.\d+)?)\s*(?:in|inch|")', str(material), re.IGNORECASE)
+            if match:
+                return f"{match.group(1)} in"
+            # Try "Pipe Size: X" pattern
+            match2 = re.search(r'Pipe Size:\s*(\d+(?:\.\d+)?)', str(material), re.IGNORECASE)
+            if match2:
+                return f"{match2.group(1)} in"
+            return 'Unknown'
+        
+        def extract_thickness(material):
+            import re
+            match = re.search(r'Thickness:\s*(\d+(?:\.\d+)?\s*in)', str(material), re.IGNORECASE)
+            if match:
+                return match.group(1)
+            # Alternative pattern
+            match2 = re.search(r'(\d+(?:\.\d+)?)\s*in\s*Thickness', str(material), re.IGNORECASE)
+            if match2:
+                return f"{match2.group(1)} in"
+            return 'Unknown'
+        
+        def extract_wing_seal_type(material):
+            material_lower = str(material).lower()
+            if 'open' in material_lower:
+                return 'Open'
+            elif 'closed' in material_lower:
+                return 'Closed'
+            return 'Other'
+        
+        def extract_wing_seal_size(material):
+            if '3/4' in str(material):
+                return '3/4 in'
+            elif '1/2' in str(material):
+                return '1/2 in'
+            return 'Other'
+        
+        def extract_banding_type(material):
+            material_lower = str(material).lower()
+            if 'oscillated' in material_lower and 'non' not in material_lower:
+                return 'Oscillated'
+            elif 'non-oscillated' in material_lower or 'non oscillated' in material_lower:
+                return 'Non-Oscillated'
+            return 'Other'
+        
+        def extract_wire_gauge(material):
+            import re
+            match = re.search(r'(\d{2})\s*Gauge', str(material), re.IGNORECASE)
+            if match:
+                return f"{match.group(1)} Gauge"
+            return 'Unknown'
+        
+        def extract_insulation_form(material):
+            material_lower = str(material).lower()
+            if 'roll' in material_lower:
+                return 'Rolls'
+            elif 'batt' in material_lower:
+                return 'Batts'
+            elif 'pipe wrap' in material_lower:
+                return 'Pipe Wrap'
+            return 'Other'
+
         # Sidebar filter
         with st.sidebar:
             st.subheader("Dashboard Filters")
@@ -1347,83 +1460,56 @@ with tab1:
                 key="dashboard_category_filter"
             )
             
-            # Sub-filters for Coils and Rolls
+            # Initialize filter variables
             selected_metal = None
             selected_gauge = None
             selected_texture = None
-            selected_angle = None  # NEW: For Elbows
+            selected_angle = None
+            selected_size = None
+            selected_pipe_size = None
+            selected_thickness = None
+            selected_seal_type = None
+            selected_seal_size = None
+            selected_banding_type = None
+            selected_wire_gauge = None
+            selected_insulation_form = None
             
+            # ══════════════════════════════════════════════════════════════════════
+            # COILS & ROLLS FILTERS
+            # ══════════════════════════════════════════════════════════════════════
             if selected_view in ["Coils", "Rolls"]:
                 st.markdown("---")
                 st.markdown(f"**🔍 {selected_view} Filters**")
                 
-                # Get unique values from the selected category
                 category_df = df[df['Category'] == selected_view].copy()
-                
-                # Extract metal types from Material column
-                def extract_metal(material):
-                    material_lower = str(material).lower()
-                    if 'stainless' in material_lower:
-                        return 'Stainless Steel'
-                    elif 'aluminum' in material_lower:
-                        return 'Aluminum'
-                    elif 'galvanized' in material_lower:
-                        return 'Galvanized'
-                    else:
-                        return 'Other'
-                
-                # Extract gauge from Material column
-                def extract_gauge(material):
-                    import re
-                    match = re.search(r'\.(\d{3})', str(material))
-                    if match:
-                        return f".{match.group(1)}"
-                    return 'Unknown'
-                
-                # Extract texture from Material column
-                def extract_texture(material):
-                    material_lower = str(material).lower()
-                    if 'smooth' in material_lower:
-                        return 'Smooth'
-                    elif 'stucco' in material_lower:
-                        return 'Stucco'
-                    else:
-                        return 'Other'
                 
                 category_df['Metal_Type'] = category_df['Material'].apply(extract_metal)
                 category_df['Gauge'] = category_df['Material'].apply(extract_gauge)
                 category_df['Texture'] = category_df['Material'].apply(extract_texture)
                 
                 # Metal filter
-                metal_options = ["All"] + sorted(category_df['Metal_Type'].unique().tolist())
-                selected_metal = st.selectbox(
-                    "🔩 Metal Type",
-                    metal_options,
-                    key="dashboard_metal_filter"
-                )
+                metal_options = ["All"] + sorted([x for x in category_df['Metal_Type'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in category_df['Metal_Type'].values else [])
+                selected_metal = st.selectbox("🔩 Metal Type", metal_options, key="dashboard_metal_filter")
                 
                 # Gauge filter
-                gauge_options = ["All"] + sorted(category_df['Gauge'].unique().tolist())
-                selected_gauge = st.selectbox(
-                    "📏 Gauge",
-                    gauge_options,
-                    key="dashboard_gauge_filter"
-                )
+                gauge_options = ["All"] + sorted([x for x in category_df['Gauge'].unique().tolist() if x != 'Unknown']) + (['Unknown'] if 'Unknown' in category_df['Gauge'].values else [])
+                selected_gauge = st.selectbox("📏 Gauge", gauge_options, key="dashboard_gauge_filter")
                 
                 # Texture filter
-                texture_options = ["All"] + sorted(category_df['Texture'].unique().tolist())
-                selected_texture = st.selectbox(
-                    "🎨 Texture",
-                    texture_options,
-                    key="dashboard_texture_filter"
-                )
+                texture_options = ["All"] + sorted([x for x in category_df['Texture'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in category_df['Texture'].values else [])
+                selected_texture = st.selectbox("🎨 Texture", texture_options, key="dashboard_texture_filter")
             
             # ══════════════════════════════════════════════════════════════════════
-            # ELBOWS ANGLE FILTER
+            # ELBOWS FILTERS
             # ══════════════════════════════════════════════════════════════════════
             elif selected_view == "Elbows":
                 st.markdown("---")
                 st.markdown("**🔍 Elbows Filters**")
+                
+                elbows_df = df[df['Category'] == 'Elbows'].copy()
+                elbows_df['Angle'] = elbows_df['Material'].apply(extract_angle)
+                elbows_df['Size'] = elbows_df['Material'].apply(extract_size_number)
+                elbows_df['Metal_Type'] = elbows_df['Material'].apply(extract_metal)
                 
                 # Angle filter
                 selected_angle = st.selectbox(
@@ -1432,124 +1518,320 @@ with tab1:
                     key="dashboard_elbow_angle_filter"
                 )
                 
-                # Show angle counts
-                elbows_df = df[df['Category'] == 'Elbows']
-                if not elbows_df.empty:
-                    count_90 = len(elbows_df[elbows_df['Material'].str.contains("90", case=False, na=False)])
-                    count_45 = len(elbows_df[elbows_df['Material'].str.contains("45", case=False, na=False)])
-                    count_other = len(elbows_df) - count_90 - count_45
-                    
-                    st.caption(f"📊 90°: {count_90} | 45°: {count_45} | Other: {count_other}")
+                # Size filter
+                size_options = ["All Sizes"] + sorted([x for x in elbows_df['Size'].unique().tolist() if x != 'Unknown'], key=lambda x: int(x.replace('#', '')) if x.replace('#', '').isdigit() else 999)
+                if 'Unknown' in elbows_df['Size'].values:
+                    size_options.append('Unknown')
+                selected_size = st.selectbox("📏 Size", size_options, key="dashboard_elbow_size_filter")
+                
+                # Metal filter
+                metal_options = ["All"] + sorted([x for x in elbows_df['Metal_Type'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in elbows_df['Metal_Type'].values else [])
+                selected_metal = st.selectbox("🔩 Metal Type", metal_options, key="dashboard_elbow_metal_filter")
+                
+                # Show counts
+                count_90 = len(elbows_df[elbows_df['Angle'] == '90°'])
+                count_45 = len(elbows_df[elbows_df['Angle'] == '45°'])
+                st.caption(f"📊 90°: {count_90} | 45°: {count_45}")
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # FAB STRAPS FILTERS
+            # ══════════════════════════════════════════════════════════════════════
+            elif selected_view == "Fab Straps":
+                st.markdown("---")
+                st.markdown("**🔍 Fab Straps Filters**")
+                
+                straps_df = df[df['Category'] == 'Fab Straps'].copy()
+                straps_df['Gauge'] = straps_df['Material'].apply(extract_gauge)
+                straps_df['Size'] = straps_df['Material'].apply(extract_size_number)
+                straps_df['Metal_Type'] = straps_df['Material'].apply(extract_metal)
+                
+                # Gauge filter
+                gauge_options = ["All"] + sorted([x for x in straps_df['Gauge'].unique().tolist() if x != 'Unknown'])
+                if 'Unknown' in straps_df['Gauge'].values:
+                    gauge_options.append('Unknown')
+                selected_gauge = st.selectbox("📏 Gauge", gauge_options, key="dashboard_strap_gauge_filter")
+                
+                # Size filter
+                size_options = ["All Sizes"] + sorted([x for x in straps_df['Size'].unique().tolist() if x != 'Unknown'], key=lambda x: int(x.replace('#', '')) if x.replace('#', '').isdigit() else 999)
+                if 'Unknown' in straps_df['Size'].values:
+                    size_options.append('Unknown')
+                selected_size = st.selectbox("🔢 Size", size_options, key="dashboard_strap_size_filter")
+                
+                # Metal filter
+                metal_options = ["All"] + sorted([x for x in straps_df['Metal_Type'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in straps_df['Metal_Type'].values else [])
+                selected_metal = st.selectbox("🔩 Metal Type", metal_options, key="dashboard_strap_metal_filter")
+                
+                # Show counts
+                count_015 = len(straps_df[straps_df['Gauge'] == '.015'])
+                count_020 = len(straps_df[straps_df['Gauge'] == '.020'])
+                st.caption(f"📊 .015: {count_015} | .020: {count_020}")
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # MINERAL WOOL FILTERS
+            # ══════════════════════════════════════════════════════════════════════
+            elif selected_view == "Mineral Wool":
+                st.markdown("---")
+                st.markdown("**🔍 Mineral Wool Filters**")
+                
+                mw_df = df[df['Category'] == 'Mineral Wool'].copy()
+                mw_df['Pipe_Size'] = mw_df['Material'].apply(extract_pipe_size)
+                mw_df['Thickness'] = mw_df['Material'].apply(extract_thickness)
+                
+                # Pipe size filter
+                pipe_options = ["All"] + sorted([x for x in mw_df['Pipe_Size'].unique().tolist() if x != 'Unknown'])
+                if 'Unknown' in mw_df['Pipe_Size'].values:
+                    pipe_options.append('Unknown')
+                selected_pipe_size = st.selectbox("🔧 Pipe Size", pipe_options, key="dashboard_mw_pipe_filter")
+                
+                # Thickness filter
+                thick_options = ["All"] + sorted([x for x in mw_df['Thickness'].unique().tolist() if x != 'Unknown'])
+                if 'Unknown' in mw_df['Thickness'].values:
+                    thick_options.append('Unknown')
+                selected_thickness = st.selectbox("📏 Thickness", thick_options, key="dashboard_mw_thick_filter")
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # WING SEALS FILTERS
+            # ══════════════════════════════════════════════════════════════════════
+            elif selected_view == "Wing Seals":
+                st.markdown("---")
+                st.markdown("**🔍 Wing Seals Filters**")
+                
+                ws_df = df[df['Category'] == 'Wing Seals'].copy()
+                ws_df['Seal_Type'] = ws_df['Material'].apply(extract_wing_seal_type)
+                ws_df['Seal_Size'] = ws_df['Material'].apply(extract_wing_seal_size)
+                ws_df['Gauge'] = ws_df['Material'].apply(extract_gauge)
+                
+                # Type filter
+                type_options = ["All"] + sorted([x for x in ws_df['Seal_Type'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in ws_df['Seal_Type'].values else [])
+                selected_seal_type = st.selectbox("🔐 Type", type_options, key="dashboard_ws_type_filter")
+                
+                # Size filter
+                size_options = ["All"] + sorted([x for x in ws_df['Seal_Size'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in ws_df['Seal_Size'].values else [])
+                selected_seal_size = st.selectbox("📏 Size", size_options, key="dashboard_ws_size_filter")
+                
+                # Gauge filter
+                gauge_options = ["All"] + sorted([x for x in ws_df['Gauge'].unique().tolist() if x != 'Unknown'])
+                if 'Unknown' in ws_df['Gauge'].values:
+                    gauge_options.append('Unknown')
+                selected_gauge = st.selectbox("📐 Gauge", gauge_options, key="dashboard_ws_gauge_filter")
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # WIRE FILTERS
+            # ══════════════════════════════════════════════════════════════════════
+            elif selected_view == "Wire":
+                st.markdown("---")
+                st.markdown("**🔍 Wire Filters**")
+                
+                wire_df = df[df['Category'] == 'Wire'].copy()
+                wire_df['Wire_Gauge'] = wire_df['Material'].apply(extract_wire_gauge)
+                
+                # Gauge filter
+                gauge_options = ["All"] + sorted([x for x in wire_df['Wire_Gauge'].unique().tolist() if x != 'Unknown'])
+                if 'Unknown' in wire_df['Wire_Gauge'].values:
+                    gauge_options.append('Unknown')
+                selected_wire_gauge = st.selectbox("📏 Gauge", gauge_options, key="dashboard_wire_gauge_filter")
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # BANDING FILTERS
+            # ══════════════════════════════════════════════════════════════════════
+            elif selected_view == "Banding":
+                st.markdown("---")
+                st.markdown("**🔍 Banding Filters**")
+                
+                band_df = df[df['Category'] == 'Banding'].copy()
+                band_df['Banding_Type'] = band_df['Material'].apply(extract_banding_type)
+                band_df['Gauge'] = band_df['Material'].apply(extract_gauge)
+                band_df['Size'] = band_df['Material'].apply(extract_wing_seal_size)  # Same pattern for 3/4, 1/2
+                
+                # Type filter
+                type_options = ["All"] + sorted([x for x in band_df['Banding_Type'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in band_df['Banding_Type'].values else [])
+                selected_banding_type = st.selectbox("🌀 Type", type_options, key="dashboard_band_type_filter")
+                
+                # Gauge filter
+                gauge_options = ["All"] + sorted([x for x in band_df['Gauge'].unique().tolist() if x != 'Unknown'])
+                if 'Unknown' in band_df['Gauge'].values:
+                    gauge_options.append('Unknown')
+                selected_gauge = st.selectbox("📏 Gauge", gauge_options, key="dashboard_band_gauge_filter")
+                
+                # Size filter
+                size_options = ["All"] + sorted([x for x in band_df['Size'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in band_df['Size'].values else [])
+                selected_size = st.selectbox("📐 Size", size_options, key="dashboard_band_size_filter")
+            
+            # ══════════════════════════════════════════════════════════════════════
+            # FIBERGLASS INSULATION FILTERS
+            # ══════════════════════════════════════════════════════════════════════
+            elif selected_view == "Fiberglass Insulation":
+                st.markdown("---")
+                st.markdown("**🔍 Fiberglass Filters**")
+                
+                fg_df = df[df['Category'] == 'Fiberglass Insulation'].copy()
+                fg_df['Form'] = fg_df['Material'].apply(extract_insulation_form)
+                fg_df['Thickness'] = fg_df['Material'].apply(extract_thickness)
+                
+                # Form filter
+                form_options = ["All"] + sorted([x for x in fg_df['Form'].unique().tolist() if x != 'Other']) + (['Other'] if 'Other' in fg_df['Form'].values else [])
+                selected_insulation_form = st.selectbox("📦 Form", form_options, key="dashboard_fg_form_filter")
+                
+                # Thickness filter
+                thick_options = ["All"] + sorted([x for x in fg_df['Thickness'].unique().tolist() if x != 'Unknown'])
+                if 'Unknown' in fg_df['Thickness'].values:
+                    thick_options.append('Unknown')
+                selected_thickness = st.selectbox("📏 Thickness", thick_options, key="dashboard_fg_thick_filter")
 
-        # Filter data based on selections
+        # ══════════════════════════════════════════════════════════════════════════════
+        # APPLY FILTERS TO DATA
+        # ══════════════════════════════════════════════════════════════════════════════
+        
         if selected_view == "All Materials":
             display_df = df.copy()
             st.subheader("📊 Global Material Pulse")
         else:
             display_df = df[df['Category'] == selected_view].copy()
+            filter_parts = []
             
-            # Apply sub-filters for Coils/Rolls
+            # ── COILS/ROLLS FILTERS ─────────────────────────────────────────────
             if selected_view in ["Coils", "Rolls"]:
-                # Define extract functions again for this scope
-                def extract_metal(material):
-                    material_lower = str(material).lower()
-                    if 'stainless' in material_lower:
-                        return 'Stainless Steel'
-                    elif 'aluminum' in material_lower:
-                        return 'Aluminum'
-                    elif 'galvanized' in material_lower:
-                        return 'Galvanized'
-                    else:
-                        return 'Other'
-                
-                def extract_gauge(material):
-                    import re
-                    match = re.search(r'\.(\d{3})', str(material))
-                    if match:
-                        return f".{match.group(1)}"
-                    return 'Unknown'
-                
-                def extract_texture(material):
-                    material_lower = str(material).lower()
-                    if 'smooth' in material_lower:
-                        return 'Smooth'
-                    elif 'stucco' in material_lower:
-                        return 'Stucco'
-                    else:
-                        return 'Other'
-                
-                # Add extracted columns
                 display_df['Metal_Type'] = display_df['Material'].apply(extract_metal)
                 display_df['Gauge'] = display_df['Material'].apply(extract_gauge)
                 display_df['Texture'] = display_df['Material'].apply(extract_texture)
                 
                 if selected_metal and selected_metal != "All":
                     display_df = display_df[display_df['Metal_Type'] == selected_metal]
+                    filter_parts.append(selected_metal)
                 
                 if selected_gauge and selected_gauge != "All":
                     display_df = display_df[display_df['Gauge'] == selected_gauge]
+                    filter_parts.append(selected_gauge)
                 
                 if selected_texture and selected_texture != "All":
                     display_df = display_df[display_df['Texture'] == selected_texture]
-                
-                # Build subtitle
-                filter_parts = []
-                if selected_metal and selected_metal != "All":
-                    filter_parts.append(selected_metal)
-                if selected_gauge and selected_gauge != "All":
-                    filter_parts.append(selected_gauge)
-                if selected_texture and selected_texture != "All":
                     filter_parts.append(selected_texture)
-                
-                if filter_parts:
-                    st.subheader(f"📊 {selected_view} - {' | '.join(filter_parts)}")
-                else:
-                    st.subheader(f"📊 {selected_view} Inventory Pulse")
             
-            # ══════════════════════════════════════════════════════════════════════
-            # APPLY ELBOWS ANGLE FILTER
-            # ══════════════════════════════════════════════════════════════════════
+            # ── ELBOWS FILTERS ──────────────────────────────────────────────────
             elif selected_view == "Elbows":
-                # Extract angle from Material
-                def extract_angle(material):
-                    material_str = str(material)
-                    if '90°' in material_str or '90 ' in material_str or '90deg' in material_str.lower():
-                        return '90°'
-                    elif '45°' in material_str or '45 ' in material_str or '45deg' in material_str.lower():
-                        return '45°'
-                    else:
-                        return 'Other'
-                
                 display_df['Angle'] = display_df['Material'].apply(extract_angle)
+                display_df['Size'] = display_df['Material'].apply(extract_size_number)
+                display_df['Metal_Type'] = display_df['Material'].apply(extract_metal)
                 
-                # Apply angle filter
                 if selected_angle and selected_angle != "All Angles":
-                    if selected_angle == "90°":
-                        display_df = display_df[display_df['Angle'] == '90°']
-                    elif selected_angle == "45°":
-                        display_df = display_df[display_df['Angle'] == '45°']
-                    elif selected_angle == "Other":
-                        display_df = display_df[display_df['Angle'] == 'Other']
-                    
-                    st.subheader(f"📊 Elbows - {selected_angle}")
-                else:
-                    st.subheader(f"📊 Elbows Inventory Pulse")
+                    display_df = display_df[display_df['Angle'] == selected_angle]
+                    filter_parts.append(selected_angle)
+                
+                if selected_size and selected_size != "All Sizes":
+                    display_df = display_df[display_df['Size'] == selected_size]
+                    filter_parts.append(selected_size)
+                
+                if selected_metal and selected_metal != "All":
+                    display_df = display_df[display_df['Metal_Type'] == selected_metal]
+                    filter_parts.append(selected_metal)
             
+            # ── FAB STRAPS FILTERS ──────────────────────────────────────────────
+            elif selected_view == "Fab Straps":
+                display_df['Gauge'] = display_df['Material'].apply(extract_gauge)
+                display_df['Size'] = display_df['Material'].apply(extract_size_number)
+                display_df['Metal_Type'] = display_df['Material'].apply(extract_metal)
+                
+                if selected_gauge and selected_gauge != "All":
+                    display_df = display_df[display_df['Gauge'] == selected_gauge]
+                    filter_parts.append(selected_gauge)
+                
+                if selected_size and selected_size != "All Sizes":
+                    display_df = display_df[display_df['Size'] == selected_size]
+                    filter_parts.append(selected_size)
+                
+                if selected_metal and selected_metal != "All":
+                    display_df = display_df[display_df['Metal_Type'] == selected_metal]
+                    filter_parts.append(selected_metal)
+            
+            # ── MINERAL WOOL FILTERS ────────────────────────────────────────────
+            elif selected_view == "Mineral Wool":
+                display_df['Pipe_Size'] = display_df['Material'].apply(extract_pipe_size)
+                display_df['Thickness'] = display_df['Material'].apply(extract_thickness)
+                
+                if selected_pipe_size and selected_pipe_size != "All":
+                    display_df = display_df[display_df['Pipe_Size'] == selected_pipe_size]
+                    filter_parts.append(selected_pipe_size)
+                
+                if selected_thickness and selected_thickness != "All":
+                    display_df = display_df[display_df['Thickness'] == selected_thickness]
+                    filter_parts.append(selected_thickness)
+            
+            # ── WING SEALS FILTERS ──────────────────────────────────────────────
+            elif selected_view == "Wing Seals":
+                display_df['Seal_Type'] = display_df['Material'].apply(extract_wing_seal_type)
+                display_df['Seal_Size'] = display_df['Material'].apply(extract_wing_seal_size)
+                display_df['Gauge'] = display_df['Material'].apply(extract_gauge)
+                
+                if selected_seal_type and selected_seal_type != "All":
+                    display_df = display_df[display_df['Seal_Type'] == selected_seal_type]
+                    filter_parts.append(selected_seal_type)
+                
+                if selected_seal_size and selected_seal_size != "All":
+                    display_df = display_df[display_df['Seal_Size'] == selected_seal_size]
+                    filter_parts.append(selected_seal_size)
+                
+                if selected_gauge and selected_gauge != "All":
+                    display_df = display_df[display_df['Gauge'] == selected_gauge]
+                    filter_parts.append(selected_gauge)
+            
+            # ── WIRE FILTERS ────────────────────────────────────────────────────
+            elif selected_view == "Wire":
+                display_df['Wire_Gauge'] = display_df['Material'].apply(extract_wire_gauge)
+                
+                if selected_wire_gauge and selected_wire_gauge != "All":
+                    display_df = display_df[display_df['Wire_Gauge'] == selected_wire_gauge]
+                    filter_parts.append(selected_wire_gauge)
+            
+            # ── BANDING FILTERS ─────────────────────────────────────────────────
+            elif selected_view == "Banding":
+                display_df['Banding_Type'] = display_df['Material'].apply(extract_banding_type)
+                display_df['Gauge'] = display_df['Material'].apply(extract_gauge)
+                display_df['Size'] = display_df['Material'].apply(extract_wing_seal_size)
+                
+                if selected_banding_type and selected_banding_type != "All":
+                    display_df = display_df[display_df['Banding_Type'] == selected_banding_type]
+                    filter_parts.append(selected_banding_type)
+                
+                if selected_gauge and selected_gauge != "All":
+                    display_df = display_df[display_df['Gauge'] == selected_gauge]
+                    filter_parts.append(selected_gauge)
+                
+                if selected_size and selected_size != "All":
+                    display_df = display_df[display_df['Size'] == selected_size]
+                    filter_parts.append(selected_size)
+            
+            # ── FIBERGLASS INSULATION FILTERS ───────────────────────────────────
+            elif selected_view == "Fiberglass Insulation":
+                display_df['Form'] = display_df['Material'].apply(extract_insulation_form)
+                display_df['Thickness'] = display_df['Material'].apply(extract_thickness)
+                
+                if selected_insulation_form and selected_insulation_form != "All":
+                    display_df = display_df[display_df['Form'] == selected_insulation_form]
+                    filter_parts.append(selected_insulation_form)
+                
+                if selected_thickness and selected_thickness != "All":
+                    display_df = display_df[display_df['Thickness'] == selected_thickness]
+                    filter_parts.append(selected_thickness)
+            
+            # Build subtitle
+            if filter_parts:
+                st.subheader(f"📊 {selected_view} - {' | '.join(filter_parts)}")
             else:
                 st.subheader(f"📊 {selected_view} Inventory Pulse")
 
-        # Check if we have data after filtering
+        # ══════════════════════════════════════════════════════════════════════════════
+        # DISPLAY DATA
+        # ══════════════════════════════════════════════════════════════════════════════
+        
         if display_df.empty:
             st.warning("No items match the selected filters.")
         else:
-            # DATA AGGREGATION - Group by Material to show each specific type
+            # DATA AGGREGATION
             summary_df = display_df.groupby(['Material', 'Category']).agg({
                 'Footage': 'sum',
                 'Item_ID': 'count'
             }).reset_index()
             summary_df.columns = ['Material', 'Type', 'Total_Footage', 'Unit_Count']
-            
-            # Sort by footage descending so highest stock appears first
             summary_df = summary_df.sort_values('Total_Footage', ascending=False)
 
             # TOP-LEVEL METRICS
@@ -1564,57 +1846,73 @@ with tab1:
 
             st.divider()
 
-            # QUICK STATS FOR COILS/ROLLS (when filtered)
+            # ══════════════════════════════════════════════════════════════════════
+            # CATEGORY-SPECIFIC QUICK STATS
+            # ══════════════════════════════════════════════════════════════════════
+            
             if selected_view in ["Coils", "Rolls"] and not display_df.empty:
                 st.markdown("### 📈 Quick Stats")
-                
                 qs1, qs2, qs3, qs4 = st.columns(4)
-                
                 with qs1:
-                    avg_footage = display_df['Footage'].mean()
-                    st.metric("Avg Footage/Item", f"{avg_footage:,.1f} ft")
-                
+                    st.metric("Avg Footage/Item", f"{display_df['Footage'].mean():,.1f} ft")
                 with qs2:
-                    min_footage = display_df['Footage'].min()
-                    st.metric("Lowest Stock", f"{min_footage:,.1f} ft")
-                
+                    st.metric("Lowest Stock", f"{display_df['Footage'].min():,.1f} ft")
                 with qs3:
-                    max_footage = display_df['Footage'].max()
-                    st.metric("Highest Stock", f"{max_footage:,.1f} ft")
-                
+                    st.metric("Highest Stock", f"{display_df['Footage'].max():,.1f} ft")
                 with qs4:
-                    locations = display_df['Location'].nunique()
-                    st.metric("Locations", locations)
-                
+                    st.metric("Locations", display_df['Location'].nunique())
                 st.divider()
             
-            # ══════════════════════════════════════════════════════════════════════
-            # QUICK STATS FOR ELBOWS (when filtered)
-            # ══════════════════════════════════════════════════════════════════════
-            if selected_view == "Elbows" and not display_df.empty:
+            elif selected_view == "Elbows" and not display_df.empty:
                 st.markdown("### 📈 Elbows Quick Stats")
-                
                 eq1, eq2, eq3, eq4 = st.columns(4)
-                
                 with eq1:
-                    total_pcs = int(display_df['Footage'].sum())
-                    st.metric("Total Pieces", f"{total_pcs:,}")
-                
+                    st.metric("Total Pieces", f"{int(display_df['Footage'].sum()):,}")
                 with eq2:
-                    count_90 = len(display_df[display_df['Material'].str.contains("90", case=False, na=False)])
-                    st.metric("90° Elbows", count_90)
-                
+                    if 'Angle' in display_df.columns:
+                        st.metric("90° Items", len(display_df[display_df['Angle'] == '90°']))
+                    else:
+                        st.metric("90° Items", len(display_df[display_df['Material'].str.contains('90', na=False)]))
                 with eq3:
-                    count_45 = len(display_df[display_df['Material'].str.contains("45", case=False, na=False)])
-                    st.metric("45° Elbows", count_45)
-                
+                    if 'Angle' in display_df.columns:
+                        st.metric("45° Items", len(display_df[display_df['Angle'] == '45°']))
+                    else:
+                        st.metric("45° Items", len(display_df[display_df['Material'].str.contains('45', na=False)]))
                 with eq4:
-                    unique_sizes = display_df['Material'].nunique()
-                    st.metric("Unique Sizes", unique_sizes)
-                
+                    st.metric("Unique Sizes", display_df['Material'].nunique())
+                st.divider()
+            
+            elif selected_view == "Fab Straps" and not display_df.empty:
+                st.markdown("### 📈 Fab Straps Quick Stats")
+                fs1, fs2, fs3, fs4 = st.columns(4)
+                with fs1:
+                    st.metric("Total Bundles", f"{int(display_df['Footage'].sum()):,}")
+                with fs2:
+                    if 'Gauge' in display_df.columns:
+                        st.metric(".015 Gauge", len(display_df[display_df['Gauge'] == '.015']))
+                with fs3:
+                    if 'Gauge' in display_df.columns:
+                        st.metric(".020 Gauge", len(display_df[display_df['Gauge'] == '.020']))
+                with fs4:
+                    st.metric("Unique Sizes", display_df['Material'].nunique())
+                st.divider()
+            
+            elif selected_view == "Wing Seals" and not display_df.empty:
+                st.markdown("### 📈 Wing Seals Quick Stats")
+                ws1, ws2, ws3, ws4 = st.columns(4)
+                with ws1:
+                    st.metric("Total Pieces", f"{int(display_df['Footage'].sum()):,}")
+                with ws2:
+                    if 'Seal_Type' in display_df.columns:
+                        st.metric("Open Type", len(display_df[display_df['Seal_Type'] == 'Open']))
+                with ws3:
+                    if 'Seal_Type' in display_df.columns:
+                        st.metric("Closed Type", len(display_df[display_df['Seal_Type'] == 'Closed']))
+                with ws4:
+                    st.metric("Unique Types", display_df['Material'].nunique())
                 st.divider()
 
-            # THE PULSE GRID - Shows each material type separately
+            # THE PULSE GRID
             cols = st.columns(2)
             for idx, row in summary_df.iterrows():
                 with cols[idx % 2]:
@@ -1626,30 +1924,49 @@ with tab1:
                     # --- CREATE SHORT NAME FOR DISPLAY ---
                     import re
                     
-                    # Extract key info for short name
-                    gauge_match = re.search(r'\.(\d{3})', mat)
+                    gauge_match = re.search(r'\.(\d{2,3})', mat)
                     gauge_str = f".{gauge_match.group(1)}" if gauge_match else ""
                     
                     mat_lower = mat.lower()
                     texture_str = "Smooth" if "smooth" in mat_lower else ("Stucco" if "stucco" in mat_lower else "")
                     metal_str = "Aluminum" if "aluminum" in mat_lower else ("Stainless Steel" if "stainless" in mat_lower else "")
                     
-                    # Build short name (e.g., ".016 Smooth Aluminum")
+                    # Build short name based on category
                     if gauge_str and texture_str and metal_str:
                         short_name = f"{gauge_str} {texture_str} {metal_str}"
-                    else:
-                        # For Elbows, extract angle and size
-                        if cat_type == "Elbows":
-                            angle_match = re.search(r'(45°|90°|\d+°)', mat)
-                            size_match = re.search(r'#(\d+)', mat)
-                            angle_str = angle_match.group(1) if angle_match else ""
-                            size_str = f"#{size_match.group(1)}" if size_match else ""
-                            short_name = f"{angle_str} Elbow {size_str}".strip()
-                            if not short_name or short_name == "Elbow":
-                                short_name = mat[:40] + ("..." if len(mat) > 40 else "")
-                        else:
-                            # Use first 40 chars of material name if can't parse
+                    elif cat_type == "Elbows":
+                        angle_match = re.search(r'(45°|90°|\d+°)', mat)
+                        size_match = re.search(r'#(\d+)', mat)
+                        angle_str = angle_match.group(1) if angle_match else ""
+                        size_str = f"#{size_match.group(1)}" if size_match else ""
+                        metal_short = "AL" if "aluminum" in mat_lower else ("SST" if "stainless" in mat_lower else ("GAL" if "galvanized" in mat_lower else ""))
+                        short_name = f"{angle_str} {size_str} {metal_short}".strip()
+                        if not short_name or short_name == "":
                             short_name = mat[:40] + ("..." if len(mat) > 40 else "")
+                    elif cat_type == "Fab Straps":
+                        size_match = re.search(r'#(\d+)', mat)
+                        size_str = f"#{size_match.group(1)}" if size_match else ""
+                        metal_short = "AL" if "aluminum" in mat_lower else ("SST" if "stainless" in mat_lower else "")
+                        short_name = f"{gauge_str} {size_str} {metal_short}".strip()
+                        if not short_name:
+                            short_name = mat[:40] + ("..." if len(mat) > 40 else "")
+                    elif cat_type == "Wing Seals":
+                        seal_type = "Open" if "open" in mat_lower else ("Closed" if "closed" in mat_lower else "")
+                        size_str = "3/4in" if "3/4" in mat else ("1/2in" if "1/2" in mat else "")
+                        short_name = f"{seal_type} {size_str} {gauge_str}".strip()
+                        if not short_name:
+                            short_name = mat[:40] + ("..." if len(mat) > 40 else "")
+                    elif cat_type == "Wire":
+                        wire_gauge = re.search(r'(\d{2})\s*Gauge', mat, re.IGNORECASE)
+                        short_name = f"{wire_gauge.group(1)} Gauge Wire" if wire_gauge else mat[:40]
+                    elif cat_type == "Banding":
+                        band_type = "Oscillated" if "oscillated" in mat_lower and "non" not in mat_lower else ("Non-Osc" if "non" in mat_lower else "")
+                        size_str = "3/4in" if "3/4" in mat else ("1/2in" if "1/2" in mat else "")
+                        short_name = f"{band_type} {size_str} {gauge_str}".strip()
+                        if not short_name:
+                            short_name = mat[:40] + ("..." if len(mat) > 40 else "")
+                    else:
+                        short_name = mat[:40] + ("..." if len(mat) > 40 else "")
                     
                     # --- SET DEFAULTS ---
                     display_value = f"{ft:,.1f}"
@@ -1658,7 +1975,6 @@ with tab1:
 
                     # --- LOGIC BRANCHES ---
                     if cat_type == "Rolls":
-                        # Show actual roll count with average size
                         if units > 0:
                             avg_per_roll = ft / units
                             display_value = f"{int(units)}"
@@ -1670,7 +1986,6 @@ with tab1:
                             sub_label_text = "No stock"
                     
                     elif cat_type == "Coils":
-                        # Show total footage and coil count
                         display_value = f"{ft:,.1f}"
                         unit_text = "FT"
                         sub_label_text = f"{int(units)} Coil{'s' if units != 1 else ''} in stock"
@@ -1711,7 +2026,6 @@ with tab1:
                         sub_label_text = f"Total: {ft:,.1f} sq ft"
                     
                     else:
-                        # Generic fallback
                         display_value = f"{ft:,.1f}"
                         unit_text = "Units"
                         sub_label_text = f"{int(units)} item{'s' if units != 1 else ''}"
@@ -1744,26 +2058,36 @@ with tab1:
             
             # INDIVIDUAL ITEM TABLE
             with st.expander(f"🔍 View Individual Items ({len(display_df)} items)"):
-                # Show additional columns for Coils/Rolls
+                # Determine which columns to show based on category
+                base_cols = ['Item_ID', 'Material', 'Footage', 'Location']
+                
                 if selected_view in ["Coils", "Rolls"] and 'Metal_Type' in display_df.columns:
-                    st.dataframe(
-                        display_df[['Item_ID', 'Material', 'Metal_Type', 'Gauge', 'Texture', 'Footage', 'Location']].sort_values('Material'), 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
-                # Show angle column for Elbows
+                    show_cols = ['Item_ID', 'Material', 'Metal_Type', 'Gauge', 'Texture', 'Footage', 'Location']
                 elif selected_view == "Elbows" and 'Angle' in display_df.columns:
-                    st.dataframe(
-                        display_df[['Item_ID', 'Material', 'Angle', 'Footage', 'Location']].sort_values('Material'), 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
+                    show_cols = ['Item_ID', 'Material', 'Angle', 'Size', 'Metal_Type', 'Footage', 'Location']
+                elif selected_view == "Fab Straps" and 'Gauge' in display_df.columns:
+                    show_cols = ['Item_ID', 'Material', 'Gauge', 'Size', 'Metal_Type', 'Footage', 'Location']
+                elif selected_view == "Mineral Wool" and 'Pipe_Size' in display_df.columns:
+                    show_cols = ['Item_ID', 'Material', 'Pipe_Size', 'Thickness', 'Footage', 'Location']
+                elif selected_view == "Wing Seals" and 'Seal_Type' in display_df.columns:
+                    show_cols = ['Item_ID', 'Material', 'Seal_Type', 'Seal_Size', 'Gauge', 'Footage', 'Location']
+                elif selected_view == "Wire" and 'Wire_Gauge' in display_df.columns:
+                    show_cols = ['Item_ID', 'Material', 'Wire_Gauge', 'Footage', 'Location']
+                elif selected_view == "Banding" and 'Banding_Type' in display_df.columns:
+                    show_cols = ['Item_ID', 'Material', 'Banding_Type', 'Gauge', 'Size', 'Footage', 'Location']
+                elif selected_view == "Fiberglass Insulation" and 'Form' in display_df.columns:
+                    show_cols = ['Item_ID', 'Material', 'Form', 'Thickness', 'Footage', 'Location']
                 else:
-                    st.dataframe(
-                        display_df[['Item_ID', 'Category', 'Material', 'Footage', 'Location']].sort_values('Material'), 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
+                    show_cols = ['Item_ID', 'Category', 'Material', 'Footage', 'Location']
+                
+                # Filter to only existing columns
+                show_cols = [c for c in show_cols if c in display_df.columns]
+                
+                st.dataframe(
+                    display_df[show_cols].sort_values('Material'), 
+                    use_container_width=True, 
+                    hide_index=True
+                )
     else:
         st.info("No data available. Add inventory in the Receive tab.")
         
